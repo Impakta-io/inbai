@@ -1,4 +1,4 @@
-Status: partial — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. Server logs are not implemented.
+Status: partial — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. `inbaid` writes one JSON line per request. Relay authentication failures are not a separate section.
 
 # Troubleshooting
 
@@ -20,7 +20,12 @@ Each line is `ok` or `fix`. The command exits 0 only when every line is `ok`.
 
 `doctor` checks Spamhaus ZEN and SpamCop. It does not send a message.
 
+## Request logs
+
+`inbaid` writes one JSON object per request to standard error. The fields are `time`, `requestId`, `method`, `path`, `status`, and `durationMs`. The path has no query string. Headers and bodies are not written, so a token in `Authorization` does not appear.
+
+The response header `X-Request-Id` is the same value. Send that header when you want to choose the ID. Use letters, digits, `.`, `_`, and `-`, up to 64 characters. Quote `requestId` when you report a failed call.
+
 ## Planned sections
 
 - Relay authentication failures.
-- Where `inbaid` writes logs, and which request ID to quote in an issue.

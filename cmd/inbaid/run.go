@@ -129,6 +129,7 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		RoleID:        cfg.InboxRoleID,
 		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
 		RetentionDays: cfg.RetentionDays,
+		Log:           stderr,
 	}).Handler()
 	go retainLoop(svc, cfg.RetentionDays, stderr)
 	writef(stdout, "listening on %s\n", *addr)

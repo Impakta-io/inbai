@@ -34,6 +34,7 @@ type Server struct {
 	RoleID        string
 	IngestSecret  string
 	RetentionDays int
+	Log           io.Writer
 }
 
 type callerKey struct{}
@@ -73,7 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}/attachments/{blobId}", s.attachment)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}/messages/{messageId}", s.deleteMessage)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages/{messageId}/reply", s.replyMessage)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.logged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth/token" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/metrics" || r.URL.Path == "/v1/hooks/ingest" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
 			public.ServeHTTP(w, r)
 			return
@@ -83,7 +84,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, caller)))
-	})
+	}))
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {

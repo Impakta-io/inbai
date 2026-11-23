@@ -78,6 +78,7 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		RoleID:        "external",
 		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
 		RetentionDays: config.DefaultRetentionDays,
+		Log:           stderr,
 	}).Handler()
 	go retainLoop(svc, config.DefaultRetentionDays, stderr)
 	writef(stdout, "listening on %s\n", addr)
