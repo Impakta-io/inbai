@@ -30,7 +30,7 @@ func TestCreateInboxIsNotSupported(t *testing.T) {
 	if _, err := backend.CreateInboxes(context.Background(), nil); err == nil {
 		t.Fatal("provisioned accounts")
 	}
-	if _, err := backend.List(context.Background(), "missing"); err == nil {
+	if _, _, err := backend.List(context.Background(), "missing", mailbackend.Page{}); err == nil {
 		t.Fatal("listed an unknown account")
 	}
 }
@@ -93,11 +93,11 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 	})
 	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}}
 	ctx := context.Background()
-	messages, err := backend.List(ctx, "ada")
+	messages, _, err := backend.List(ctx, "ada", mailbackend.Page{})
 	if err != nil || len(messages) != 1 || messages[0].ID != "8" || messages[0].Subject != "Hello" {
 		t.Fatalf("list %+v err %v", messages, err)
 	}
-	found, err := backend.Search(ctx, "ada", "Hello")
+	found, _, err := backend.Search(ctx, "ada", "Hello", mailbackend.Page{})
 	if err != nil || len(found) != 1 {
 		t.Fatalf("search %+v err %v", found, err)
 	}

@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -160,6 +161,38 @@ func TestMCPPost(t *testing.T) {
 	}
 }
 
+func TestListPagesWithACursor(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "a", Subject: "one"}, {ID: "b", Subject: "two"}}}
+	srv := httptest.NewServer((&Server{
+		Service: service.New(mail),
+		Token:   "operator-token",
+		Domain:  "example.com",
+	}).Handler())
+	defer srv.Close()
+	res := call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages?limit=1", "operator-token", "", "")
+	body := readBody(t, res)
+	var page struct {
+		Messages []mailbackend.Message `json:"messages"`
+		Next     string                `json:"next"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil || res.StatusCode != http.StatusOK || len(page.Messages) != 1 || page.Messages[0].ID != "a" || page.Next == "" {
+		t.Fatalf("first %d %s", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages?limit=1&cursor="+page.Next, "operator-token", "", "")
+	body = readBody(t, res)
+	page = struct {
+		Messages []mailbackend.Message `json:"messages"`
+		Next     string                `json:"next"`
+	}{}
+	if err := json.Unmarshal([]byte(body), &page); err != nil || len(page.Messages) != 1 || page.Messages[0].ID != "b" || page.Next != "" {
+		t.Fatalf("second %d %s", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages?cursor=not-a-cursor", "operator-token", "", "")
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad cursor %d", res.StatusCode)
+	}
+}
+
 func call(t *testing.T, base, method, path, token, body, idem string) *http.Response {
 	t.Helper()
 	var reader io.Reader
@@ -220,14 +253,14 @@ func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 	return nil
 }
 
-func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
+func (f *fakeMail) List(_ context.Context, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	f.listed = true
-	return f.messages, nil
+	return mailbackend.Slice(f.messages, func(m mailbackend.Message) string { return m.ID }, page)
 }
 
-func (f *fakeMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
+func (f *fakeMail) Search(_ context.Context, _, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	f.listed = true
-	return f.messages, nil
+	return mailbackend.Slice(f.messages, func(m mailbackend.Message) string { return m.ID }, page)
 }
 
 func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, error) {
@@ -254,9 +287,9 @@ func (f *fakeMail) MailChanges(_ context.Context, _, since string) (mailbackend.
 	return mailbackend.Delta{State: since}, nil
 }
 
-func (f *fakeMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+func (f *fakeMail) ListInboxes(context.Context, mailbackend.Page) ([]mailbackend.Account, string, error) {
 	f.listed = true
-	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, nil
+	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, "", nil
 }
 
 func (f *fakeMail) DeleteInbox(context.Context, string) error { return nil }

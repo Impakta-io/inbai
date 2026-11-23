@@ -177,40 +177,8 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 	return err
 }
 
-// ListMessages returns the messages currently in the account.
+// ListMessages returns the first page of messages in the account.
 func ListMessages(ctx context.Context, client *Client, accountID string) ([]Message, error) {
-	if client == nil {
-		return nil, fmt.Errorf("missing stalwart client")
-	}
-	raw, err := client.invoke(ctx, "q", "Email/query", map[string]any{
-		"accountId": accountID,
-		"limit":     50,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var query struct {
-		IDs []string `json:"ids"`
-	}
-	if err := json.Unmarshal(raw, &query); err != nil {
-		return nil, err
-	}
-	if len(query.IDs) == 0 {
-		return nil, nil
-	}
-	raw, err = client.invoke(ctx, "g", "Email/get", map[string]any{
-		"accountId":  accountID,
-		"ids":        query.IDs,
-		"properties": []string{"subject", "preview"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	var got struct {
-		List []Message `json:"list"`
-	}
-	if err := json.Unmarshal(raw, &got); err != nil {
-		return nil, err
-	}
-	return got.List, nil
+	found, _, err := queryMessages(ctx, client, accountID, nil, mailbackend.Page{}, false)
+	return found, err
 }

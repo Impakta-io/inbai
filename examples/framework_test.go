@@ -99,19 +99,19 @@ func (b *box) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]string,
 	return nil, nil
 }
 func (b *box) Deliver(context.Context, mailbackend.Outbound) error { return nil }
-func (b *box) List(context.Context, string) ([]mailbackend.Message, error) {
+func (b *box) List(_ context.Context, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	b.listed = true
-	return b.messages, nil
+	return mailbackend.Slice(b.messages, func(m mailbackend.Message) string { return m.ID }, page)
 }
-func (b *box) Search(context.Context, string, string) ([]mailbackend.Message, error) {
-	return b.List(context.Background(), "")
+func (b *box) Search(ctx context.Context, _, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return b.List(ctx, "", page)
 }
 func (b *box) Get(context.Context, string, string) (mailbackend.Message, error) {
 	return mailbackend.Message{}, nil
 }
 func (b *box) Delete(context.Context, string, string) error { return nil }
-func (b *box) ListInboxes(context.Context) ([]mailbackend.Account, error) {
-	return nil, nil
+func (b *box) ListInboxes(context.Context, mailbackend.Page) ([]mailbackend.Account, string, error) {
+	return nil, "", nil
 }
 func (b *box) DeleteInbox(context.Context, string) error                { return nil }
 func (b *box) Download(context.Context, string, string) ([]byte, error) { return nil, nil }

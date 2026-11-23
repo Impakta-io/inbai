@@ -18,13 +18,13 @@ func TestAgentCannotGrantItself(t *testing.T) {
 	if err := svc.Grant(Caller{Agent: "ada"}, "ada", "inbox-a", PermRead); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a"); !errors.Is(err, ErrForbidden) || mail.listed {
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{}); !errors.Is(err, ErrForbidden) || mail.listed {
 		t.Fatalf("list err %v listed %v", err, mail.listed)
 	}
 	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a"); err != nil || !mail.listed {
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{}); err != nil || !mail.listed {
 		t.Fatalf("granted list err %v listed %v", err, mail.listed)
 	}
 }
@@ -32,7 +32,7 @@ func TestAgentCannotGrantItself(t *testing.T) {
 func TestAgentWithoutAGrantCannotRead(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "secret"}}}
 	svc := New(mail)
-	_, err := svc.List(context.Background(), Caller{Agent: "eve"}, "inbox-a")
+	_, _, err := svc.List(context.Background(), Caller{Agent: "eve"}, "inbox-a", mailbackend.Page{})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("err = %v", err)
 	}
@@ -45,11 +45,11 @@ func TestReadGrantAllowsOnlyThatInbox(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello"}}}
 	svc := New(mail)
 	svc.Allow("ada", "inbox-a", PermRead)
-	got, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a")
+	got, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{})
 	if err != nil || len(got) != 1 {
 		t.Fatalf("list %+v %v", got, err)
 	}
-	if _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-b"); !errors.Is(err, ErrForbidden) {
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-b", mailbackend.Page{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("other inbox err = %v", err)
 	}
 	if err := svc.Deliver(context.Background(), Caller{Agent: "ada"}, mailbackend.Outbound{AccountID: "inbox-a"}, ""); !errors.Is(err, ErrForbidden) {
@@ -170,7 +170,7 @@ func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 	}}}
 	svc := New(mail)
 	svc.Allow("ada", "inbox-a", PermRead)
-	if _, err := svc.Search(context.Background(), Caller{Agent: "ada"}, "inbox-b", "hello"); !errors.Is(err, ErrForbidden) || mail.listed {
+	if _, _, err := svc.Search(context.Background(), Caller{Agent: "ada"}, "inbox-b", "hello", mailbackend.Page{}); !errors.Is(err, ErrForbidden) || mail.listed {
 		t.Fatalf("search err %v listed %v", err, mail.listed)
 	}
 	if err := svc.Delete(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m"); !errors.Is(err, ErrForbidden) || mail.deleted {
@@ -199,13 +199,13 @@ func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 func TestInboxDirectoryIsOperatorOnly(t *testing.T) {
 	mail := &fakeMail{}
 	svc := New(mail)
-	if _, err := svc.ListInboxes(context.Background(), Caller{Agent: "ada"}, "example.com"); !errors.Is(err, ErrForbidden) || mail.dir {
+	if _, _, err := svc.ListInboxes(context.Background(), Caller{Agent: "ada"}, "example.com", mailbackend.Page{}); !errors.Is(err, ErrForbidden) || mail.dir {
 		t.Fatalf("list err %v called %v", err, mail.dir)
 	}
 	if err := svc.DeleteInbox(context.Background(), Caller{Agent: "ada"}, "alice-id"); !errors.Is(err, ErrForbidden) || mail.dir {
 		t.Fatalf("delete err %v called %v", err, mail.dir)
 	}
-	got, err := svc.ListInboxes(context.Background(), Caller{Operator: true}, "example.com")
+	got, _, err := svc.ListInboxes(context.Background(), Caller{Operator: true}, "example.com", mailbackend.Page{})
 	if err != nil || len(got) != 1 || got[0].Address != "alice@example.com" || !mail.dir {
 		t.Fatalf("list %+v err %v", got, err)
 	}
@@ -273,14 +273,14 @@ func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 	return f.sendErr
 }
 
-func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
+func (f *fakeMail) List(_ context.Context, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	f.listed = true
-	return f.messages, nil
+	return mailbackend.Slice(f.messages, func(m mailbackend.Message) string { return m.ID }, page)
 }
 
-func (f *fakeMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
+func (f *fakeMail) Search(_ context.Context, _, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	f.listed = true
-	return f.messages, nil
+	return mailbackend.Slice(f.messages, func(m mailbackend.Message) string { return m.ID }, page)
 }
 
 func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, error) {
@@ -296,9 +296,9 @@ func (f *fakeMail) Delete(context.Context, string, string) error {
 	return nil
 }
 
-func (f *fakeMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+func (f *fakeMail) ListInboxes(_ context.Context, page mailbackend.Page) ([]mailbackend.Account, string, error) {
 	f.dir = true
-	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, nil
+	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, "", nil
 }
 
 func (f *fakeMail) DeleteInbox(context.Context, string) error {
@@ -309,4 +309,24 @@ func (f *fakeMail) DeleteInbox(context.Context, string) error {
 func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
 	f.got = true
 	return []byte("file-bytes"), nil
+}
+
+func TestListReturnsTheNextCursor(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "a", Subject: "one"}, {ID: "b", Subject: "two"}}}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	first, next, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{Limit: 1})
+	if err != nil || len(first) != 1 || first[0].ID != "a" || next != "a" {
+		t.Fatalf("first %+v next %s err %v", first, next, err)
+	}
+	second, next, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{After: next, Limit: 1})
+	if err != nil || len(second) != 1 || second[0].ID != "b" || next != "" {
+		t.Fatalf("second %+v next %s err %v", second, next, err)
+	}
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{After: "gone"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown cursor %v", err)
+	}
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{Limit: 1000}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("limit err %v", err)
+	}
 }

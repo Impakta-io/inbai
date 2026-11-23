@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -254,7 +256,12 @@ func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listInboxes(w http.ResponseWriter, r *http.Request) {
-	inboxes, err := s.Service.ListInboxes(r.Context(), s.requestCaller(r), s.Domain)
+	page, err := pageFrom(r)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	inboxes, next, err := s.Service.ListInboxes(r.Context(), s.requestCaller(r), s.Domain, page)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -262,7 +269,11 @@ func (s *Server) listInboxes(w http.ResponseWriter, r *http.Request) {
 	if inboxes == nil {
 		inboxes = []service.Inbox{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"inboxes": inboxes})
+	body := map[string]any{"inboxes": inboxes}
+	if token := encodeCursor(next); token != "" {
+		body["next"] = token
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) deleteInbox(w http.ResponseWriter, r *http.Request) {
@@ -292,12 +303,17 @@ func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("id")
 	caller := s.requestCaller(r)
+	page, err := pageFrom(r)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
 	var messages []mailbackend.Message
-	var err error
+	var next string
 	if query := r.URL.Query().Get("q"); query != "" {
-		messages, err = s.Service.Search(r.Context(), caller, accountID, query)
+		messages, next, err = s.Service.Search(r.Context(), caller, accountID, query, page)
 	} else {
-		messages, err = s.Service.List(r.Context(), caller, accountID)
+		messages, next, err = s.Service.List(r.Context(), caller, accountID, page)
 	}
 	if err != nil {
 		writeServiceError(w, err)
@@ -306,7 +322,39 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	if messages == nil {
 		messages = []mailbackend.Message{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
+	body := map[string]any{"messages": messages}
+	if token := encodeCursor(next); token != "" {
+		body["next"] = token
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func pageFrom(r *http.Request) (mailbackend.Page, error) {
+	page := mailbackend.Page{}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > mailbackend.MaxLimit {
+			return page, fmt.Errorf("%w: limit must be from 1 to %d", service.ErrInvalid, mailbackend.MaxLimit)
+		}
+		page.Limit = n
+	}
+	token := r.URL.Query().Get("cursor")
+	if token == "" {
+		return page, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) == 0 {
+		return page, fmt.Errorf("%w: cursor is not valid", service.ErrInvalid)
+	}
+	page.After = string(raw)
+	return page, nil
+}
+
+func encodeCursor(id string) string {
+	if id == "" {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(id))
 }
 
 func (s *Server) generateInboxes(w http.ResponseWriter, r *http.Request) {

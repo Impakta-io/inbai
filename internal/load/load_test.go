@@ -101,14 +101,14 @@ func (m *mailbox) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 	return nil
 }
 
-func (m *mailbox) List(_ context.Context, id string) ([]mailbackend.Message, error) {
+func (m *mailbox) List(_ context.Context, id string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]mailbackend.Message(nil), m.boxes[id]...), nil
+	return mailbackend.Slice(append([]mailbackend.Message(nil), m.boxes[id]...), func(msg mailbackend.Message) string { return msg.ID }, page)
 }
 
-func (m *mailbox) Search(ctx context.Context, id, _ string) ([]mailbackend.Message, error) {
-	return m.List(ctx, id)
+func (m *mailbox) Search(ctx context.Context, id, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return m.List(ctx, id, page)
 }
 
 func (m *mailbox) Get(_ context.Context, id, messageID string) (mailbackend.Message, error) {
@@ -124,7 +124,9 @@ func (m *mailbox) Get(_ context.Context, id, messageID string) (mailbackend.Mess
 
 func (m *mailbox) Delete(context.Context, string, string) error { return nil }
 
-func (m *mailbox) ListInboxes(context.Context) ([]mailbackend.Account, error) { return nil, nil }
+func (m *mailbox) ListInboxes(context.Context, mailbackend.Page) ([]mailbackend.Account, string, error) {
+	return nil, "", nil
+}
 
 func (m *mailbox) DeleteInbox(context.Context, string) error { return nil }
 

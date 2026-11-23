@@ -81,7 +81,7 @@ func (b *Backend) DeleteInbox(context.Context, string) error {
 }
 
 // ListInboxes returns the accounts named in the account file.
-func (b *Backend) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+func (b *Backend) ListInboxes(_ context.Context, page mailbackend.Page) ([]mailbackend.Account, string, error) {
 	out := make([]mailbackend.Account, 0, len(b.accounts))
 	for id, login := range b.accounts {
 		local := login.User
@@ -91,7 +91,7 @@ func (b *Backend) ListInboxes(context.Context) ([]mailbackend.Account, error) {
 		out = append(out, mailbackend.Account{ID: id, Local: local})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return mailbackend.Slice(out, func(account mailbackend.Account) string { return account.ID }, page)
 }
 
 // Download reports that IMAP messages are read with Get. There is no blob id.
@@ -147,13 +147,13 @@ func (b *Backend) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 }
 
 // List returns the inbox messages with their subjects.
-func (b *Backend) List(ctx context.Context, account string) ([]mailbackend.Message, error) {
-	return b.fetchSearch(ctx, account, "ALL")
+func (b *Backend) List(ctx context.Context, account string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return b.fetchSearch(ctx, account, "ALL", page)
 }
 
 // Search returns messages whose text matches the query.
-func (b *Backend) Search(ctx context.Context, account, query string) ([]mailbackend.Message, error) {
-	return b.fetchSearch(ctx, account, "TEXT "+quote(query))
+func (b *Backend) Search(ctx context.Context, account, query string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return b.fetchSearch(ctx, account, "TEXT "+quote(query), page)
 }
 
 // Get reads one message body. The id is the IMAP UID.
@@ -253,8 +253,9 @@ func (b *Backend) MailChanges(ctx context.Context, account, since string) (mailb
 	return delta, err
 }
 
-func (b *Backend) fetchSearch(ctx context.Context, account, criteria string) ([]mailbackend.Message, error) {
+func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	var messages []mailbackend.Message
+	var next string
 	err := b.with(ctx, account, func(s *session) error {
 		if _, err := s.command("SELECT", "INBOX"); err != nil {
 			return err
@@ -264,31 +265,37 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string) ([]
 			return err
 		}
 		uids := searchUIDs(items)
-		if len(uids) == 0 {
+		ids := make([]string, len(uids))
+		for i, uid := range uids {
+			ids[i] = strconv.Itoa(uid)
+		}
+		kept, cursor, err := mailbackend.Slice(ids, func(id string) string { return id }, page)
+		if err != nil {
+			return err
+		}
+		next = cursor
+		if len(kept) == 0 {
 			messages = []mailbackend.Message{}
 			return nil
 		}
-		set := make([]string, len(uids))
-		for i, uid := range uids {
-			set[i] = strconv.Itoa(uid)
-		}
-		items, err = s.command("UID", "FETCH", strings.Join(set, ","), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+		items, err = s.command("UID", "FETCH", strings.Join(kept, ","), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
 		if err != nil {
 			return err
 		}
 		got := fetched(items)
-		messages = make([]mailbackend.Message, 0, len(uids))
-		for _, uid := range uids {
+		messages = make([]mailbackend.Message, 0, len(kept))
+		for _, id := range kept {
+			uid, _ := strconv.Atoi(id)
 			item := got[uid]
 			var header []byte
 			if len(item.literals) > 0 {
 				header = item.literals[0]
 			}
-			messages = append(messages, mailbackend.Message{ID: strconv.Itoa(uid), Subject: subjectOf(header)})
+			messages = append(messages, mailbackend.Message{ID: id, Subject: subjectOf(header)})
 		}
 		return nil
 	})
-	return messages, err
+	return messages, next, err
 }
 
 func (b *Backend) with(ctx context.Context, account string, fn func(*session) error) error {

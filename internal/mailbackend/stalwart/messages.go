@@ -7,11 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 // SearchMessages returns messages whose text matches query.
 func SearchMessages(ctx context.Context, client *Client, accountID, query string) ([]Message, error) {
-	return messages(ctx, client, accountID, map[string]any{"text": query}, false)
+	found, _, err := queryMessages(ctx, client, accountID, map[string]any{"text": query}, mailbackend.Page{}, false)
+	return found, err
 }
 
 // GetMessage returns one message, including its plain-text body and threading headers.
@@ -56,26 +60,43 @@ func DeleteMessage(ctx context.Context, client *Client, accountID, messageID str
 	return err
 }
 
-func messages(ctx context.Context, client *Client, accountID string, filter map[string]any, full bool) ([]Message, error) {
+func queryMessages(ctx context.Context, client *Client, accountID string, filter map[string]any, page mailbackend.Page, full bool) ([]Message, string, error) {
 	if client == nil {
-		return nil, fmt.Errorf("missing stalwart client")
+		return nil, "", fmt.Errorf("missing stalwart client")
 	}
-	args := map[string]any{"accountId": accountID, "limit": 50}
+	limit, err := page.Bound()
+	if err != nil {
+		return nil, "", err
+	}
+	args := map[string]any{"accountId": accountID, "limit": limit + 1}
+	if page.After != "" {
+		args["anchor"] = page.After
+		args["anchorOffset"] = 1
+	}
 	if filter != nil {
 		args["filter"] = filter
 	}
 	raw, err := client.invoke(ctx, "q", "Email/query", args)
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "anchorNotFound") {
+			return nil, "", mailbackend.ErrPage
+		}
+		return nil, "", err
 	}
 	var query struct {
 		IDs []string `json:"ids"`
 	}
 	if err := json.Unmarshal(raw, &query); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if len(query.IDs) == 0 {
-		return nil, nil
+	ids := query.IDs
+	next := ""
+	if len(ids) > limit {
+		next = ids[limit-1]
+		ids = ids[:limit]
+	}
+	if len(ids) == 0 {
+		return nil, "", nil
 	}
 	props := []string{"subject", "preview"}
 	if full {
@@ -83,13 +104,14 @@ func messages(ctx context.Context, client *Client, accountID string, filter map[
 	}
 	raw, err = client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":  accountID,
-		"ids":        query.IDs,
+		"ids":        ids,
 		"properties": props,
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return decodeMessages(raw, full)
+	found, err := decodeMessages(raw, full)
+	return found, next, err
 }
 
 func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {

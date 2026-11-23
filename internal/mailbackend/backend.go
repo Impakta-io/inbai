@@ -62,11 +62,11 @@ type Backend interface {
 	CreateInbox(context.Context, InboxSpec) (string, error)
 	CreateInboxes(context.Context, []InboxSpec) ([]string, error)
 	Deliver(context.Context, Outbound) error
-	List(context.Context, string) ([]Message, error)
-	Search(context.Context, string, string) ([]Message, error)
+	List(context.Context, string, Page) ([]Message, string, error)
+	Search(context.Context, string, string, Page) ([]Message, string, error)
 	Get(context.Context, string, string) (Message, error)
 	Delete(context.Context, string, string) error
-	ListInboxes(context.Context) ([]Account, error)
+	ListInboxes(context.Context, Page) ([]Account, string, error)
 	DeleteInbox(context.Context, string) error
 	Download(context.Context, string, string) ([]byte, error)
 }
