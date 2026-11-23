@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `retention`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `domain relay`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `retention`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -20,6 +20,20 @@ Running init again reuses the domain, the roles, and the accounts. It keeps the 
 ## domain add
 
 `inbai domain add` prints the DNS zone file for the domain in the config file and checks the MX and TXT records. `--json` prints the zone and each check. The details are in [domain setup](domain-setup.md).
+
+## domain relay
+
+`inbai domain relay` sends mail for other domains through an authenticated SMTP relay. Mail for a domain this server hosts stays local. The password is `INBAI_RELAY_PASSWORD`. The operator password is `INBAI_OPERATOR_PASSWORD`, which is the same value `inbai init` used as `INBAI_RECOVERY_PASSWORD`. The command signs in as `operator@<domain>`. It does not use the service API key.
+
+```sh
+export INBAI_OPERATOR_PASSWORD='the-operator-password'
+export INBAI_RELAY_PASSWORD='the-relay-password'
+inbai domain relay --host smtp.example.net --user mailer
+```
+
+`--port` defaults to 587. `--implicit-tls` is for a relay that uses TLS from the first byte. `--allow-invalid-certs` accepts a certificate that does not validate. `--json` prints the host, port, and user. It does not print the password. `inbai domain relay --off` sends other domains to their MX hosts again.
+
+Run `inbai init` again, with Stalwart in recovery mode, before the first relay change on a server that was created before this command. That run gives the operator the route permissions. The service account does not receive them.
 
 ## doctor
 
@@ -74,4 +88,4 @@ Delivery to another server still depends on the DNS records from `domain add` an
 ## Planned sections
 
 - `login`.
-- Domain checks beyond MX and TXT, and the outbound relay.
+- Domain checks beyond MX and TXT.

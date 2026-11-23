@@ -13,7 +13,9 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai audit [--after n] [--limit n] [--config path] [--json]`
 - `usage: inbai backup --file path [--json]`
 - `usage: inbai doctor [--domain name] [--config path] [--tls-insecure] [--json]`
-- `usage: inbai domain add [--domain name] [--config path]`
+- `usage: inbai domain [add|relay]`
+- `usage: inbai domain relay --host name --user name [--port n] [--config path] [--json]`
+- `usage: inbai domain relay --off [--config path] [--json]`
 - `usage: inbai inbox [create|generate|list|delete]`
 - `usage: inbai inbox create <local-part>`
 - `usage: inbai inbox delete <address>`

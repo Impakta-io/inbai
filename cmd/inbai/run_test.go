@@ -55,6 +55,7 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 			writeInit(w, name, "r", map[string]any{"created": map[string]any{
 				"inbox": map[string]any{"id": "inbox-role"},
 				"svc":   map[string]any{"id": "service-role"},
+				"op":    map[string]any{"id": "operator-role"},
 			}})
 		case "x:Account/set":
 			writeInit(w, name, "a", map[string]any{"created": map[string]any{

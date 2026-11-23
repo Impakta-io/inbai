@@ -29,7 +29,7 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 `inbai init` creates the domain, an operator login `operator@example.com`, and a service account. The operator password is `INBAI_RECOVERY_PASSWORD`. The service API key is written to the config file and is not printed. Message retention defaults to 30 days.
 
-The operator account and the service account share the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes.
+The service account uses the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes. The operator account can also change the outbound route. The service account cannot.
 
 The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service uses `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. Set `INBAI_SIGNING_KEY` when more than one `inbaid` process must accept the same access tokens. Without it, the container prints a key once in its logs.
 
@@ -52,8 +52,6 @@ inbai message list alice@example.com
 
 Running `inbaid serve` on the host remains valid. Do not run that process and the Compose service against the same database at the same time unless `INBAI_SIGNING_KEY` is set on both.
 
-## What is not here yet
+## Outbound relay
 
-- An authenticated outbound relay
-
-The relay path was proved in the spike and is not part of this file.
+This file does not run a relay. After Stalwart has left recovery mode, `inbai domain relay` points other domains at an authenticated SMTP server. `INBAI_OPERATOR_PASSWORD` is the operator password from init. `INBAI_RELAY_PASSWORD` is the relay password. `inbai domain relay --off` restores MX delivery. The steps are in [domain setup](../../docs/guides/domain-setup.md).

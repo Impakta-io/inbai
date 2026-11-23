@@ -30,7 +30,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	case "init":
 		return initCmd(args[1:], stdout, stderr, getenv)
 	case "domain":
-		return domainCmd(args[1:], stdout, stderr)
+		return domainCmd(args[1:], stdout, stderr, getenv)
 	case "doctor":
 		return doctorCmd(args[1:], stdout, stderr)
 	case "inbox":
