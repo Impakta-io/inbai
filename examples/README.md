@@ -1,5 +1,7 @@
-Status: planned — examples arrive with the API and the mail-backend interface.
+Status: partial — the IMAP and SMTP backend example is in [imap](imap/README.md). Framework examples are not written yet.
 
 # Examples
 
-This directory will hold small programs that show an agent framework calling inbAI, and examples of extra mail backends. There is no API to call yet.
+[IMAP and SMTP](imap/README.md) shows how to run `inbaid` against mailboxes that already exist.
+
+Framework examples, which show an agent runtime calling the MCP server, are not written yet.

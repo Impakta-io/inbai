@@ -58,6 +58,9 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
 		return 2
 	}
+	if getenv("INBAI_MAIL") == "imap" {
+		return serveIMAP(*addr, stdout, stderr, getenv)
+	}
 	path, err := configPathOf(*configPath)
 	if err != nil {
 		writef(stderr, "config: %s\n", err)

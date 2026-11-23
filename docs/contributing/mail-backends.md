@@ -2,19 +2,17 @@ Status: current
 
 # Mail backends
 
-inbAI does not speak SMTP itself. A mail backend does that, or it calls a system that does.
-
-The Go interface is not in the tree yet. It will live in `internal/mailbackend`, and the Stalwart implementation will live in `internal/mailbackend/stalwart`. Until then, these rules are already in force.
+The service layer calls `internal/mailbackend`. A transport does not call a mail system, and a backend does not decide whether an agent may read an inbox.
 
 ## Boundary
 
 - Call the mail system over its network API. Do not import, copy, or vendor its source.
-- Stalwart is reached over JMAP only. Its Community Edition is AGPL-3.0 and stays in its own process.
-- The service layer calls the interface. CLI, REST, and MCP do not call a mail system directly.
-- Grants are checked before the backend is called. A backend does not decide whether an agent may read an inbox.
+- Stalwart is reached over JMAP from `internal/mailbackend/stalwart`. Its Community Edition is AGPL-3.0 and stays in its own process.
+- `internal/mailbackend/imap` reads mail over IMAP and submits it over SMTP. It does not provision accounts. `inbaid serve` uses it when `INBAI_MAIL=imap`. The account file and the addresses are described in [examples/imap](../../examples/imap/README.md).
+- Grants are checked before the backend is called.
 
 ## Adding a backend
 
-A new backend is a proposal, then an implementation of the interface. Gmail, Microsoft 365, and generic IMAP or SMTP are expected later, and each one is a separate package. Put usage examples under `examples/`.
+A new backend is a proposal, then an implementation of the interface. Gmail and Microsoft 365 are not included. Put a usage note under `examples/`.
 
 The contribution has to be licensable as Apache-2.0. Code copied from a mail server that uses a different license cannot be added here.
