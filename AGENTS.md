@@ -32,7 +32,7 @@ go run ./tools/docscheck
 golangci-lint run ./...
 ```
 
-A change is done when those commands pass, the diff is small enough for a person to review, and the human author can explain it.
+A change is done when those commands pass, the diff is small enough for a person to review, the human author can explain it, and a pull request is open.
 
 ## Where code goes
 
@@ -56,6 +56,34 @@ A change is done when those commands pass, the diff is small enough for a person
 | `docs` | Documentation. A behavior change updates the doc in the same change. |
 
 Each `internal` package has a `doc.go` that states its job. Read it before editing the package.
+
+## Branches and pull requests
+
+Do not commit on `main`. Do not push to `main`. Every change is a branch and a pull request into `main`.
+
+Name the branch `<type>/<summary>`.
+
+- `type` is one of `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `spike`.
+- `summary` is two to five lowercase words joined by hyphens.
+- Do not add a username, a ticket number, or an `agent/` prefix.
+
+Examples: `docs/agent-branch-naming`, `feat/inbox-create`, `fix/grant-check`.
+
+```sh
+git fetch origin
+git switch main
+git pull origin main
+git switch -c docs/agent-branch-naming
+```
+
+Commit on that branch. Each commit has `Signed-off-by`. Push and open the pull request before calling the work finished:
+
+```sh
+git push -u origin HEAD
+gh pr create --base main
+```
+
+One branch is one pull request. If work was started on `main` by mistake, move it onto a new branch before the first push.
 
 ## Rules
 

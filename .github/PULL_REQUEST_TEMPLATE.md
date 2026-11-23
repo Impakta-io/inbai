@@ -1,5 +1,9 @@
 Status: current
 
+## Branch
+
+- [ ] This branch is named `<type>/<summary>` and its base is `main`
+
 ## Summary
 
 What changed, and why.
