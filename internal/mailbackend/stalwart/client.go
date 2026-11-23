@@ -67,9 +67,21 @@ func (m *jmapMethodResponse) UnmarshalJSON(data []byte) error {
 }
 
 func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.RawMessage, error) {
+	found, err := c.invokeMany(ctx, []jmapCall{{Name: name, Args: args, ID: id}})
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := found[id]
+	if !ok {
+		return nil, fmt.Errorf("stalwart %s: missing response %s", name, id)
+	}
+	return raw, nil
+}
+
+func (c *Client) invokeMany(ctx context.Context, calls []jmapCall) (map[string]json.RawMessage, error) {
 	payload, err := json.Marshal(map[string]any{
 		"using":       jmapUsing,
-		"methodCalls": []jmapCall{{Name: name, Args: args, ID: id}},
+		"methodCalls": calls,
 	})
 	if err != nil {
 		return nil, err
@@ -98,17 +110,19 @@ func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.Ra
 	if err != nil {
 		return nil, err
 	}
+	label := "jmap"
+	if len(calls) > 0 {
+		label = calls[0].Name
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("stalwart %s returned HTTP %d", name, resp.StatusCode)
+		return nil, fmt.Errorf("stalwart %s returned HTTP %d", label, resp.StatusCode)
 	}
 	var parsed jmapResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("stalwart %s returned %w", name, err)
+		return nil, fmt.Errorf("stalwart %s returned %w", label, err)
 	}
+	out := make(map[string]json.RawMessage, len(parsed.MethodResponses))
 	for _, method := range parsed.MethodResponses {
-		if method.ID != id {
-			continue
-		}
 		if method.Name == "error" {
 			var problem struct {
 				Type        string `json:"type"`
@@ -116,11 +130,11 @@ func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.Ra
 			}
 			_ = json.Unmarshal(method.Raw, &problem)
 			if problem.Description != "" {
-				return nil, fmt.Errorf("stalwart %s: %s: %s", name, problem.Type, problem.Description)
+				return nil, fmt.Errorf("stalwart %s: %s: %s", method.ID, problem.Type, problem.Description)
 			}
-			return nil, fmt.Errorf("stalwart %s: %s", name, problem.Type)
+			return nil, fmt.Errorf("stalwart %s: %s", method.ID, problem.Type)
 		}
-		return method.Raw, nil
+		out[method.ID] = method.Raw
 	}
-	return nil, fmt.Errorf("stalwart %s: missing response %s", name, id)
+	return out, nil
 }

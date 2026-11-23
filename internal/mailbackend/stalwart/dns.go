@@ -71,6 +71,29 @@ func ZoneFile(ctx context.Context, client *Client, domain string) (string, error
 	return "", fmt.Errorf("stalwart domain %s has no zone file", domain)
 }
 
+// LookupDomainID returns the id of a domain that already exists.
+func LookupDomainID(ctx context.Context, client *Client, domain string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("missing stalwart client")
+	}
+	raw, err := client.invoke(ctx, "q", "x:Domain/query", map[string]any{
+		"filter": map[string]any{"name": domain},
+	})
+	if err != nil {
+		return "", err
+	}
+	var query struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &query); err != nil {
+		return "", err
+	}
+	if len(query.IDs) == 0 {
+		return "", fmt.Errorf("stalwart has no domain named %s", domain)
+	}
+	return domainID(ctx, client, query.IDs, domain)
+}
+
 func domainID(ctx context.Context, client *Client, ids []string, domain string) (string, error) {
 	raw, err := client.invoke(ctx, "g", "x:Domain/get", map[string]any{
 		"ids":        ids,

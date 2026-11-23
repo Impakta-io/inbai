@@ -1,13 +1,34 @@
-Status: planned — filled in when install, domain setup, and inbox creation work.
+Status: partial — install, domain setup, inbox creation, and a local send are documented. Public delivery still depends on DNS and a healthy `doctor` report.
 
 # Quickstart
 
-This guide will walk an operator from an empty Linux host to a working inbox. None of these commands exist yet.
+This walks an operator from the Compose stack to one inbox. Agents cannot connect yet. The API and the MCP server are not implemented.
 
-## Planned sections
+## Install
 
-- Install the server with the Compose stack.
-- Run `inbai init` and point the CLI at the server.
-- Add a domain and publish the DNS records it prints.
-- Create an inbox and send a message to it from outside.
-- Confirm `inbai doctor` reports the host healthy.
+Follow [install](install.md) and start the Compose stack in [deploy/compose](../../deploy/compose/README.md). Leave Stalwart in recovery mode for the next step.
+
+## Bootstrap
+
+```sh
+export INBAI_RECOVERY_PASSWORD='the-recovery-password'
+inbai init --url http://127.0.0.1:8080 --domain example.com
+```
+
+Set `STALWART_RECOVERY_MODE=0`, start the stack again, then print the DNS zone:
+
+```sh
+inbai domain add
+```
+
+Publish the zone, then run `inbai doctor`. A healthy host exits 0. The Compose certificate is self-signed, so the TLS line stays a fix until a real certificate is installed.
+
+## Create an inbox
+
+```sh
+inbai inbox create alice
+inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
+inbai message list alice@example.com
+```
+
+`message list` prints the subject and a preview. Mail from the public internet arrives only after the DNS records are published and Stalwart accepts the delivery.

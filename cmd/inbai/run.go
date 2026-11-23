@@ -33,8 +33,12 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		return domainCmd(args[1:], stdout, stderr)
 	case "doctor":
 		return doctorCmd(args[1:], stdout, stderr)
+	case "inbox":
+		return inboxCmd(args[1:], stdout, stderr)
+	case "message":
+		return messageCmd(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain|doctor]\n")
+		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])
@@ -115,6 +119,8 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		OperatorAccountID: result.OperatorAccountID,
 		InboxRoleID:       result.InboxRoleID,
 		ServiceRoleID:     result.ServiceRoleID,
+		DomainID:          result.DomainID,
+		Inboxes:           existing.Inboxes,
 		APIKey:            result.APIKey,
 		RetentionDays:     config.DefaultRetentionDays,
 	}

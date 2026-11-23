@@ -2,7 +2,7 @@ Status: current
 
 # Documentation
 
-The server does not send or receive mail yet. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
+`inbaid` does not serve the API yet. The operator CLI can create an inbox and submit or list mail through Stalwart. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
 
 ## Use cases
 
@@ -15,7 +15,7 @@ The server does not send or receive mail yet. Pages marked `Status: planned` nam
 
 ## Operators
 
-These guides are outlines until the commands exist.
+Install, domain setup, the CLI, troubleshooting, and the quickstart describe the commands that exist. Backup and scaling are still outlines.
 
 - [Quickstart](guides/quickstart.md)
 - [Install](guides/install.md)
