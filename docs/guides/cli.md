@@ -61,7 +61,7 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 ## backup and restore
 
-`inbai backup --file path` writes the inbAI database. `inbai restore --file path` replaces that database with the file. Both require `INBAI_DATABASE_URL`. The file has no message bodies. The procedure for the Stalwart copy is in [backup](backup.md).
+`inbai backup --file path` writes the inbAI database. `inbai restore --file path` replaces that database with the file. Both require `INBAI_DATABASE_URL`. `--json` prints the file path and the event and suppression counts. The file has no message bodies. The procedure for the Stalwart copy is in [backup](backup.md).
 
 ## Planned sections
 

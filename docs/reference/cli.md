@@ -10,7 +10,7 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai agent grant <agent> <inbox> <permission>`
 - `usage: inbai agent revoke <agent> <inbox> <permission>`
 - `usage: inbai agent suspend <name>`
-- `usage: inbai backup --file path`
+- `usage: inbai backup --file path [--json]`
 - `usage: inbai doctor [--domain name] [--config path] [--tls-insecure] [--json]`
 - `usage: inbai domain add [--domain name] [--config path]`
 - `usage: inbai inbox [create|generate|list|delete]`
@@ -27,5 +27,5 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai message list [--query text] <address>`
 - `usage: inbai message reply <address> <message-id> --to <address> [--body <text>]`
 - `usage: inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]`
-- `usage: inbai restore --file path`
+- `usage: inbai restore --file path [--json]`
 

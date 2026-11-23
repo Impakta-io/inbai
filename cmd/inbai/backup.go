@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -25,14 +26,15 @@ func snapshotCmd(args []string, stdout, stderr io.Writer, getenv func(string) st
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fileFlag := fs.String("file", "", "snapshot file")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *fileFlag == "" {
 		if name == "restore" {
-			writef(stderr, "usage: inbai restore --file path\n")
+			writef(stderr, "usage: inbai restore --file path [--json]\n")
 		} else {
-			writef(stderr, "usage: inbai backup --file path\n")
+			writef(stderr, "usage: inbai backup --file path [--json]\n")
 		}
 		return 2
 	}
@@ -68,8 +70,7 @@ func snapshotCmd(args []string, stdout, stderr io.Writer, getenv func(string) st
 			writef(stderr, "backup: %s\n", err)
 			return 1
 		}
-		writef(stdout, "backed up %d events and %d suppressed recipients\n", len(snap.Events), len(snap.Suppressions))
-		writef(stdout, "This file has no message bodies. Dump the Stalwart database and its volume as well.\n")
+		reportSnapshot(stdout, *asJSON, "backup", *fileFlag, len(snap.Events), len(snap.Suppressions))
 	case "restore":
 		raw, err := os.ReadFile(*fileFlag)
 		if err != nil {
@@ -85,10 +86,22 @@ func snapshotCmd(args []string, stdout, stderr io.Writer, getenv func(string) st
 			writef(stderr, "restore: %s\n", err)
 			return 1
 		}
-		writef(stdout, "restored %d events and %d suppressed recipients\n", len(snap.Events), len(snap.Suppressions))
+		reportSnapshot(stdout, *asJSON, "restore", *fileFlag, len(snap.Events), len(snap.Suppressions))
 	default:
 		writef(stderr, "unknown command %q\n", name)
 		return 2
 	}
 	return 0
+}
+
+func reportSnapshot(stdout io.Writer, asJSON bool, name, file string, events, suppressed int) {
+	body := map[string]any{"file": file, "events": events, "suppressions": suppressed}
+	if name == "backup" {
+		emit(stdout, asJSON, fmt.Sprintf("backed up %d events and %d suppressed recipients\n", events, suppressed), body)
+		if !asJSON {
+			writef(stdout, "This file has no message bodies. Dump the Stalwart database and its volume as well.\n")
+		}
+		return
+	}
+	emit(stdout, asJSON, fmt.Sprintf("restored %d events and %d suppressed recipients\n", events, suppressed), body)
 }

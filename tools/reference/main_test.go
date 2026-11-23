@@ -64,8 +64,8 @@ func TestCLIReferenceListsAgentCommands(t *testing.T) {
 	for _, line := range []string{
 		"usage: inbai agent grant <agent> <inbox> <permission>",
 		"usage: inbai agent revoke <agent> <inbox> <permission>",
-		"usage: inbai backup --file path",
-		"usage: inbai restore --file path",
+		"usage: inbai backup --file path [--json]",
+		"usage: inbai restore --file path [--json]",
 		"usage: inbai init --domain name",
 	} {
 		if !strings.Contains(page, line) {
