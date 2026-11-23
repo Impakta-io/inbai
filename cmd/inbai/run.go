@@ -37,8 +37,10 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		return inboxCmd(args[1:], stdout, stderr, getenv)
 	case "message":
 		return messageCmd(args[1:], stdout, stderr, getenv)
+	case "mcp":
+		return mcpCmd(args[1:], os.Stdin, stdout, stderr, getenv)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message]\n")
+		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message|mcp]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])

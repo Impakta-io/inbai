@@ -1,4 +1,4 @@
-Status: partial — `inbaid serve` creates one inbox or many, and can list, search, read, send, reply, and delete, including attachments. Operators and agents authenticate as described below. MCP is not implemented.
+Status: partial — `inbaid serve` creates one inbox or many, and can list, search, read, send, reply, and delete, including attachments. Operators and agents authenticate as described below. MCP is a separate transport, described in [MCP](mcp.md).
 
 # REST API
 

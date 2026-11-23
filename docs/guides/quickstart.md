@@ -2,7 +2,7 @@ Status: partial — install, domain setup, inbox creation, and a local send are 
 
 # Quickstart
 
-This walks an operator from the Compose stack to one inbox. Agents cannot connect yet. The API and the MCP server are not implemented.
+This walks an operator from the Compose stack to one inbox. An agent connects with a client credential, described in the [agent overview](../agents/overview.md). MCP is described in [MCP](../agents/mcp.md).
 
 ## Install
 

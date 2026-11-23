@@ -89,6 +89,17 @@ func TestAgentTokenCannotReadAnotherInbox(t *testing.T) {
 	if self.StatusCode != http.StatusForbidden {
 		t.Fatalf("self grant %d %s", self.StatusCode, readBody(t, self))
 	}
+
+	allowedMCP := agentJSON(t, srv.URL, tok.AccessToken, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":"inbox-a"}}}`)
+	if allowedMCP.StatusCode != http.StatusOK || !strings.Contains(readBody(t, allowedMCP), "secret") {
+		t.Fatalf("mcp allowed %d", allowedMCP.StatusCode)
+	}
+	mail.listed = false
+	deniedMCP := agentJSON(t, srv.URL, tok.AccessToken, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":"inbox-b"}}}`)
+	deniedBody := readBody(t, deniedMCP)
+	if deniedMCP.StatusCode != http.StatusOK || !strings.Contains(deniedBody, `"isError":true`) || mail.listed {
+		t.Fatalf("mcp denied %d listed %v body %s", deniedMCP.StatusCode, mail.listed, deniedBody)
+	}
 }
 
 func operatorJSON(t *testing.T, base, method, path, body string) *http.Response {

@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, and message send, list, get, reply, and delete are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, message send, list, get, reply, and delete, and `mcp serve` are implemented. The other commands are not.
 
 # CLI
 
@@ -48,6 +48,10 @@ inbai message get alice@example.com <message-id>
 ```
 
 Delivery to another server still depends on the DNS records from `domain add` and on Stalwart accepting the message. `inbaid serve` must be running.
+
+## mcp serve
+
+`inbai mcp serve` speaks MCP on stdin and stdout. It exchanges `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET` for an access token, or uses `INBAI_ACCESS_TOKEN` or `INBAI_OPERATOR_TOKEN` when one of those is already set. The tools and the HTTP endpoint are described in [MCP](../agents/mcp.md).
 
 ## Planned sections
 

@@ -6,7 +6,7 @@ An inbox for every agent.
 
 inbAI is open-source, self-hosted email infrastructure for AI agents. Operators use a command-line client. Agents use a REST API and an MCP server. There is no web inbox and no admin GUI.
 
-This repository is pre-alpha. `inbai` prints its version. `inbai init` bootstraps a Stalwart domain and service account, `inbai domain add` prints the DNS records for that domain, and `inbai doctor` checks the host. `inbai inbox create`, `inbox generate`, and the `message` commands call `inbaid`. `inbaid serve` exposes create, bulk generate, list, search, read, send, reply, and delete over HTTP, including attachments, an operator bearer token, an idempotency key, and a daily send quota. Agents authenticate with OAuth client credentials. The MCP server is not implemented yet.
+This repository is pre-alpha. `inbai` prints its version. `inbai init` bootstraps a Stalwart domain and service account, `inbai domain add` prints the DNS records for that domain, and `inbai doctor` checks the host. `inbai inbox create`, `inbox generate`, and the `message` commands call `inbaid`. `inbaid serve` exposes create, bulk generate, list, search, read, send, reply, and delete over HTTP, including attachments, an operator bearer token, an idempotency key, and a daily send quota. Agents authenticate with OAuth client credentials. `inbaid` serves the same mail operations over MCP at `/mcp`, and `inbai mcp serve` serves them on stdio.
 
 ## Build
 

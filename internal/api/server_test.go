@@ -121,6 +121,25 @@ func TestQuotaIsAProblem(t *testing.T) {
 	}
 }
 
+func TestMCPPost(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello", Text: "body"}}}
+	srv := httptest.NewServer((&Server{Service: service.New(mail), Token: "operator-token"}).Handler())
+	defer srv.Close()
+	res := call(t, srv.URL, http.MethodPost, "/mcp", "", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`, "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/mcp", "operator-token", "", "")
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("get %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodPost, "/mcp", "operator-token", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":"inbox-a"}}}`, "")
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusOK || !strings.Contains(body, "hello") || !strings.Contains(body, "externalContent") {
+		t.Fatalf("list %d %s", res.StatusCode, body)
+	}
+}
+
 func call(t *testing.T, base, method, path, token, body, idem string) *http.Response {
 	t.Helper()
 	var reader io.Reader

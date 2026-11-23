@@ -1,4 +1,4 @@
-Status: partial — an operator can issue a client credential and a grant. The agent can call the REST API with the access token. MCP is not implemented.
+Status: partial — an operator can issue a client credential and a grant. The agent can call the REST API or MCP with the access token.
 
 # Agents that use inbAI
 
@@ -38,9 +38,4 @@ curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
 
 Permissions are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another. `POST /v1/agents/ada/suspend` stops the agent on the next call.
 
-The REST routes are in [REST](rest.md). MCP is not implemented.
-
-## Planned sections
-
-- How message content is marked as untrusted.
-- `inbai mcp serve`.
+The REST routes are in [REST](rest.md). The same mail operations are available over MCP. See [MCP](mcp.md). Message bodies returned by MCP are marked as external content. See [Untrusted mail](untrusted-mail.md).

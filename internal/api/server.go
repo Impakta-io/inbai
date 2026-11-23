@@ -14,6 +14,7 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/auth"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/mcp"
 	"github.com/Impakta-io/inbai/internal/service"
 )
 
@@ -37,6 +38,8 @@ func (s *Server) Handler() http.Handler {
 	public.HandleFunc("GET /.well-known/oauth-authorization-server", s.authorizationMetadata)
 	public.HandleFunc("GET /.well-known/oauth-protected-resource", s.resourceMetadata)
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /mcp", s.mcp)
+	mux.HandleFunc("GET /mcp", s.mcp)
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
@@ -59,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, caller)))
 	})
+}
+
+func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
+	mcp.ServeHTTP(w, r, mcp.ServiceBox{Service: s.Service, Caller: s.requestCaller(r)})
 }
 
 func (s *Server) requestCaller(r *http.Request) service.Caller {
