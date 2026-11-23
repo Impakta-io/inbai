@@ -162,6 +162,32 @@ INSERT INTO agent_suspension (agent) VALUES ($1) ON CONFLICT DO NOTHING`, agent)
 	return err
 }
 
+// AppendAudit records one operator action. The row does not store secrets.
+func (p *Postgres) AppendAudit(ctx context.Context, actor, action, target string) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO audit_event (actor, action, target) VALUES ($1, $2, $3)`, actor, action, target)
+	return err
+}
+
+// AuditSince returns actions with an id greater than after, in order.
+// limit is the page size. The caller asks for one extra row when it needs to know that another page remains.
+func (p *Postgres) AuditSince(ctx context.Context, after int64, limit int) ([]AuditRow, error) {
+	rows, err := p.pool.Query(ctx, `
+SELECT id, at, actor, action, target FROM audit_event WHERE id > $1 ORDER BY id LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditRow
+	for rows.Next() {
+		var row AuditRow
+		if err := rows.Scan(&row.ID, &row.At, &row.Actor, &row.Action, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // AgentSuspended reports whether SuspendAgent has been recorded.
 func (p *Postgres) AgentSuspended(ctx context.Context, agent string) (bool, error) {
 	var ok bool

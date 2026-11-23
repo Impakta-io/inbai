@@ -54,4 +54,17 @@ func TestGrantIsVisibleToAnotherProcess(t *testing.T) {
 	if _, _, err := second.List(ctx, Caller{Agent: "durable-ada"}, "inbox-b", mailbackend.Page{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("other inbox %v", err)
 	}
+	rows, _, err := second.Audit(ctx, Caller{Operator: true}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range rows {
+		if row.Action == "grant" && row.Target == "durable-ada inbox-a read" && row.Actor == "operator" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("audit %+v", rows)
+	}
 }

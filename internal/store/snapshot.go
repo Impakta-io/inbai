@@ -63,6 +63,15 @@ type JobSnap struct {
 	Inboxes json.RawMessage `json:"inboxes"`
 }
 
+// AuditRow is one operator action. It does not contain secrets or message bodies.
+type AuditRow struct {
+	ID     int64     `json:"id"`
+	At     time.Time `json:"at"`
+	Actor  string    `json:"actor"`
+	Action string    `json:"action"`
+	Target string    `json:"target"`
+}
+
 // ClientRow is one hashed client credential. The plaintext secret is not stored.
 type ClientRow struct {
 	ID         string `json:"id"`
@@ -87,6 +96,7 @@ type Snapshot struct {
 	Jobs          []JobSnap        `json:"jobs"`
 	Clients       []ClientRow      `json:"clients"`
 	Suspensions   []string         `json:"suspensions"`
+	Audits        []AuditRow       `json:"audits"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -262,6 +272,16 @@ func (s Snapshot) check() error {
 			return fmt.Errorf("suspension is incomplete")
 		}
 	}
+	seenAudit := map[int64]struct{}{}
+	for _, row := range s.Audits {
+		if row.ID <= 0 || row.Actor == "" || row.Action == "" || row.Target == "" || row.At.IsZero() {
+			return fmt.Errorf("audit %d is incomplete", row.ID)
+		}
+		if _, dup := seenAudit[row.ID]; dup {
+			return fmt.Errorf("audit %d is duplicated", row.ID)
+		}
+		seenAudit[row.ID] = struct{}{}
+	}
 	return nil
 }
 
@@ -279,5 +299,6 @@ func emptySnapshot() Snapshot {
 		Jobs:          []JobSnap{},
 		Clients:       []ClientRow{},
 		Suspensions:   []string{},
+		Audits:        []AuditRow{},
 	}
 }

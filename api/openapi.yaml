@@ -137,6 +137,22 @@ paths:
           description: Revoked
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/audit:
+    get:
+      operationId: listAudit
+      summary: List operator actions for agents, grants, and inboxes.
+      parameters:
+        - name: after
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - $ref: "#/components/parameters/PageLimit"
+      responses:
+        "200":
+          description: Actions in order
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes:
     post:
       operationId: createInbox

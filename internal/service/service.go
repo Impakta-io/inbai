@@ -71,6 +71,8 @@ type Service struct {
 	generated map[string]GenerateResult
 	feed      *events.Feed
 	db        *store.Postgres
+	audit     []store.AuditRow
+	nextAudit int64
 }
 
 // New returns a service over a mail backend.
@@ -125,10 +127,13 @@ func (s *Service) Grant(caller Caller, agent, inbox string, perm Permission) err
 		return fmt.Errorf("%w: grant needs an agent, an inbox, and a permission", ErrInvalid)
 	}
 	if s.db != nil {
-		return s.db.SaveGrant(context.Background(), agent, inbox, string(perm))
+		if err := s.db.SaveGrant(context.Background(), agent, inbox, string(perm)); err != nil {
+			return err
+		}
+	} else {
+		s.Allow(agent, inbox, perm)
 	}
-	s.Allow(agent, inbox, perm)
-	return nil
+	return s.record(context.Background(), caller, "grant", agent+" "+inbox+" "+string(perm))
 }
 
 // Revoke removes one permission. Only an operator may do that.
@@ -141,10 +146,12 @@ func (s *Service) Revoke(caller Caller, agent, inbox string, perm Permission) er
 		return fmt.Errorf("%w: revoke needs an agent, an inbox, and a permission", ErrInvalid)
 	}
 	if s.db != nil {
-		return s.db.DeleteGrant(context.Background(), agent, inbox, string(perm))
+		if err := s.db.DeleteGrant(context.Background(), agent, inbox, string(perm)); err != nil {
+			return err
+		}
+		return s.record(context.Background(), caller, "revoke", agent+" "+inbox+" "+string(perm))
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	kept := s.grants[:0]
 	for _, item := range s.grants {
 		if item.agent == agent && item.inbox == inbox && item.perm == perm {
@@ -153,7 +160,8 @@ func (s *Service) Revoke(caller Caller, agent, inbox string, perm Permission) er
 		kept = append(kept, item)
 	}
 	s.grants = kept
-	return nil
+	s.mu.Unlock()
+	return s.record(context.Background(), caller, "revoke", agent+" "+inbox+" "+string(perm))
 }
 
 // ProvisionAgent creates a client credential for an agent. Only an operator may do that.
@@ -164,7 +172,14 @@ func (s *Service) ProvisionAgent(caller Caller, identities Identities, agent str
 	if identities == nil {
 		return "", "", fmt.Errorf("%w: credentials are not configured", ErrInvalid)
 	}
-	return identities.Create(agent, false)
+	id, secret, err := identities.Create(agent, false)
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.record(context.Background(), caller, "agent.create", agent); err != nil {
+		return id, secret, err
+	}
+	return id, secret, nil
 }
 
 // SuspendAgent stops an agent. Only an operator may do that.
@@ -176,7 +191,7 @@ func (s *Service) SuspendAgent(caller Caller, identities Identities, agent strin
 		return fmt.Errorf("%w: credentials are not configured", ErrInvalid)
 	}
 	identities.Suspend(agent)
-	return nil
+	return s.record(context.Background(), caller, "agent.suspend", agent)
 }
 
 func knownPermission(perm Permission) bool {
@@ -186,6 +201,62 @@ func knownPermission(perm Permission) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Service) record(ctx context.Context, caller Caller, action, target string) error {
+	actor := caller.Agent
+	if actor == "" && caller.Operator {
+		actor = "operator"
+	}
+	if s.db != nil {
+		return s.db.AppendAudit(ctx, actor, action, target)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextAudit++
+	s.audit = append(s.audit, store.AuditRow{
+		ID: s.nextAudit, At: s.now().UTC(), Actor: actor, Action: action, Target: target,
+	})
+	return nil
+}
+
+// Audit returns operator actions after the given id. Only an operator may read them.
+// next is the last returned id when another page remains.
+func (s *Service) Audit(ctx context.Context, caller Caller, after int64, limit int) ([]store.AuditRow, int64, error) {
+	if !caller.Operator {
+		return nil, 0, ErrForbidden
+	}
+	if after < 0 {
+		return nil, 0, fmt.Errorf("%w: after must be zero or greater", ErrInvalid)
+	}
+	size, err := (mailbackend.Page{Limit: limit}).Bound()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
+	var rows []store.AuditRow
+	if s.db != nil {
+		rows, err = s.db.AuditSince(ctx, after, size+1)
+		if err != nil {
+			return nil, 0, err
+		}
+	} else {
+		s.mu.Lock()
+		for _, row := range s.audit {
+			if row.ID > after {
+				rows = append(rows, row)
+			}
+		}
+		s.mu.Unlock()
+	}
+	var next int64
+	if len(rows) > size {
+		rows = rows[:size]
+		next = rows[len(rows)-1].ID
+	}
+	if rows == nil {
+		rows = []store.AuditRow{}
+	}
+	return rows, next, nil
 }
 
 // CreateInbox creates an address. Only an operator may do that.
@@ -212,6 +283,9 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 		if err := s.rememberCreated(ctx, key, id); err != nil {
 			return "", err
 		}
+	}
+	if err := s.record(ctx, caller, "inbox.create", id); err != nil {
+		return "", err
 	}
 	return id, nil
 }
@@ -342,7 +416,10 @@ func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) err
 	if id == "" {
 		return fmt.Errorf("%w: inbox id is required", ErrInvalid)
 	}
-	return s.mail.DeleteInbox(ctx, id)
+	if err := s.mail.DeleteInbox(ctx, id); err != nil {
+		return err
+	}
+	return s.record(ctx, caller, "inbox.delete", id)
 }
 
 // Attachment returns the bytes of one file on a message. It uses the same read grant as Get.

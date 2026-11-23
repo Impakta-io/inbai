@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -54,6 +54,10 @@ Delivery to another server still depends on the DNS records from `domain add` an
 ## agent
 
 `inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. `inbai agent revoke ada <inbox-id> read` removes it. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `--json` prints the result. All four commands use the operator token.
+
+## audit
+
+`inbai audit` prints actions that created an agent, granted or revoked a permission, suspended an agent, or created or deleted an inbox. `--after` asks for rows after an id. `--limit` sets the page size. A line that starts with `next` is the id to pass back. `--json` prints the API response. The command uses the operator token. A secret is not written in the log.
 
 ## mcp serve
 

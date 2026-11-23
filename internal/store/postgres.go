@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS agent_credential (
 CREATE TABLE IF NOT EXISTS agent_suspension (
     agent text PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS audit_event (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    at timestamptz NOT NULL DEFAULT now(),
+    actor text NOT NULL,
+    action text NOT NULL,
+    target text NOT NULL
+);
 `
 
 // Postgres is the event log that survives an inbaid restart.
@@ -413,6 +420,9 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 	if err := readGrants(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
+	if err := readAudit(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -465,6 +475,9 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		}
 	}
 	if err := writeGrants(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeAudit(ctx, tx, snap); err != nil {
 		return err
 	}
 	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
@@ -609,6 +622,41 @@ func readGrants(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
 	}
 	rows.Close()
 	return nil
+}
+
+func readAudit(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
+	rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target FROM audit_event ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row AuditRow
+		if err := rows.Scan(&row.ID, &row.At, &row.Actor, &row.Action, &row.Target); err != nil {
+			return err
+		}
+		snap.Audits = append(snap.Audits, row)
+	}
+	return rows.Err()
+}
+
+func writeAudit(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
+	if snap.Audits == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE audit_event`); err != nil {
+		return err
+	}
+	var max int64
+	for _, row := range snap.Audits {
+		if _, err := tx.Exec(ctx, `INSERT INTO audit_event (id, at, actor, action, target) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5)`, row.ID, row.At, row.Actor, row.Action, row.Target); err != nil {
+			return err
+		}
+		if row.ID > max {
+			max = row.ID
+		}
+	}
+	return setIdentity(ctx, tx, "audit_event", "id", max)
 }
 
 func writeGrants(ctx context.Context, tx pgx.Tx, snap Snapshot) error {

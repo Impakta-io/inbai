@@ -117,6 +117,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SuspendAgent(ctx, "ada"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AppendAudit(ctx, "operator", "grant", "ada inbox-a read"); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -172,6 +175,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || !found || job.Status != "done" || job.Created != 1 {
 		t.Fatalf("job restored %+v found %v err %v", job, found, err)
 	}
+	audits, err := db.AuditSince(ctx, 0, 10)
+	if err != nil || len(audits) != 1 || audits[0].Action != "grant" || audits[0].Target != "ada inbox-a read" {
+		t.Fatalf("audit %+v err %v", audits, err)
+	}
 }
 
 func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
@@ -179,7 +186,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

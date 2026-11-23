@@ -97,6 +97,26 @@ func (c apiClient) revoke(ctx context.Context, agent, inbox, permission string) 
 	return err
 }
 
+func (c apiClient) audit(ctx context.Context, after int64, limit int) ([]apiAudit, int64, error) {
+	query := url.Values{}
+	if after > 0 {
+		query.Set("after", strconv.FormatInt(after, 10))
+	}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/v1/audit"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var out struct {
+		Events []apiAudit `json:"events"`
+		Next   int64      `json:"next"`
+	}
+	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
+	return out.Events, out.Next, err
+}
+
 func (c apiClient) createInbox(ctx context.Context, local string) (apiInbox, error) {
 	var out apiInbox
 	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", map[string]string{"localPart": local}, &out)
@@ -230,6 +250,13 @@ type apiEvent struct {
 	ID        int64  `json:"id"`
 	MessageID string `json:"messageId"`
 	Kind      string `json:"kind"`
+}
+
+type apiAudit struct {
+	ID     int64  `json:"id"`
+	Actor  string `json:"actor"`
+	Action string `json:"action"`
+	Target string `json:"target"`
 }
 
 func (c apiClient) events(ctx context.Context, accountID string, after int64, timeout int) ([]apiEvent, error) {

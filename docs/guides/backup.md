@@ -4,7 +4,7 @@ Status: partial — `inbai backup` and `inbai restore` copy the inbAI database. 
 
 inbAI state and mail live in different places. A backup of one does not include the other.
 
-The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs. `inbai backup` writes those tables to one file. The file does not contain message bodies. A file written before grants were stored leaves the grant, credential, quota, idempotency, and job tables as they are.
+The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the suppression list, grants, client credentials, send quotas, idempotency keys, bulk jobs, and the audit log. `inbai backup` writes those tables to one file. The file does not contain message bodies. A file written before grants were stored leaves the grant, credential, quota, idempotency, and job tables as they are. A file written before the audit log leaves that table as it is.
 
 Stalwart holds messages and attachments in its own database and volume. Copy those with the tools that administer Stalwart. inbAI does not read Stalwart's tables.
 

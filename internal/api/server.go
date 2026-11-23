@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
 	mux.HandleFunc("DELETE /v1/grants/{agent}/{inbox}/{permission}", s.revokeGrant)
+	mux.HandleFunc("GET /v1/audit", s.audit)
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
@@ -195,7 +196,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, secret, err := s.Service.ProvisionAgent(s.requestCaller(r), s.identities(), body.Name)
-	if err != nil {
+	if err != nil && secret == "" {
 		writeServiceError(w, err)
 		return
 	}
@@ -235,6 +236,37 @@ func (s *Server) revokeGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
+	var after int64
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "after must be an integer")
+			return
+		}
+		after = value
+	}
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > mailbackend.MaxLimit {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "limit must be from 1 to 100")
+			return
+		}
+		limit = value
+	}
+	rows, next, err := s.Service.Audit(r.Context(), s.requestCaller(r), after, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	body := map[string]any{"events": rows}
+	if next != 0 {
+		body["next"] = next
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
