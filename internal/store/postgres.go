@@ -410,6 +410,9 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	rows.Close()
+	if err := readGrants(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -461,6 +464,9 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 			return err
 		}
 	}
+	if err := writeGrants(ctx, tx, snap); err != nil {
+		return err
+	}
 	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
 		return err
 	}
@@ -497,4 +503,154 @@ func setIdentity(ctx context.Context, tx pgx.Tx, table, column string, max int64
 	}
 	_, err := tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence($1, $2), $3, $4)`, table, column, max, called)
 	return err
+}
+
+func readGrants(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
+	rows, err := tx.Query(ctx, `SELECT agent, inbox, permission FROM access_grant ORDER BY agent, inbox, permission`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var row GrantRow
+		if err := rows.Scan(&row.Agent, &row.Inbox, &row.Permission); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Grants = append(snap.Grants, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT bucket, used FROM quota_counter ORDER BY bucket`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var row QuotaRow
+		if err := rows.Scan(&row.Bucket, &row.Used); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Quotas = append(snap.Quotas, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT kind, key, payload FROM idempotency ORDER BY kind, key`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var row IdempotencyRow
+		if err := rows.Scan(&row.Kind, &row.Key, &row.Payload); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Idempotency = append(snap.Idempotency, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT id, status, total, created, error, inboxes FROM bulk_job ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var row JobSnap
+		if err := rows.Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Jobs = append(snap.Jobs, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT id, agent, secret_hash, operator FROM agent_credential ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var row ClientRow
+		if err := rows.Scan(&row.ID, &row.Agent, &row.SecretHash, &row.Operator); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Clients = append(snap.Clients, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT agent FROM agent_suspension ORDER BY agent`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var agent string
+		if err := rows.Scan(&agent); err != nil {
+			rows.Close()
+			return err
+		}
+		snap.Suspensions = append(snap.Suspensions, agent)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	return nil
+}
+
+func writeGrants(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
+	if snap.Grants == nil && snap.Quotas == nil && snap.Idempotency == nil && snap.Jobs == nil && snap.Clients == nil && snap.Suspensions == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE access_grant, quota_counter, idempotency, bulk_job, agent_credential, agent_suspension`); err != nil {
+		return err
+	}
+	for _, row := range snap.Grants {
+		if _, err := tx.Exec(ctx, `INSERT INTO access_grant (agent, inbox, permission) VALUES ($1, $2, $3)`, row.Agent, row.Inbox, row.Permission); err != nil {
+			return err
+		}
+	}
+	for _, row := range snap.Quotas {
+		if _, err := tx.Exec(ctx, `INSERT INTO quota_counter (bucket, used) VALUES ($1, $2)`, row.Bucket, row.Used); err != nil {
+			return err
+		}
+	}
+	for _, row := range snap.Idempotency {
+		if _, err := tx.Exec(ctx, `INSERT INTO idempotency (kind, key, payload) VALUES ($1, $2, $3)`, row.Kind, row.Key, row.Payload); err != nil {
+			return err
+		}
+	}
+	for _, row := range snap.Jobs {
+		inboxes := row.Inboxes
+		if len(inboxes) == 0 {
+			inboxes = []byte("[]")
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO bulk_job (id, status, total, created, error, inboxes) VALUES ($1, $2, $3, $4, $5, $6)`, row.ID, row.Status, row.Total, row.Created, row.Error, inboxes); err != nil {
+			return err
+		}
+	}
+	for _, row := range snap.Clients {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_credential (id, agent, secret_hash, operator) VALUES ($1, $2, $3, $4)`, row.ID, row.Agent, row.SecretHash, row.Operator); err != nil {
+			return err
+		}
+	}
+	for _, agent := range snap.Suspensions {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_suspension (agent) VALUES ($1)`, agent); err != nil {
+			return err
+		}
+	}
+	return nil
 }

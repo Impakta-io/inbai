@@ -78,6 +78,7 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 		t.Skip("INBAI_TEST_DATABASE is not set")
 	}
 	ctx := context.Background()
+	lockTestDB(t, dsn)
 	db, err := Open(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +99,24 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.Suppress(ctx, "bad@example.com", "delivery.dsn-perm-fail: 550"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SaveGrant(ctx, "ada", "inbox-a", "read"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Consume(ctx, "inbox\ninbox-a\n2026-11-23", "domain\nexample.com\n2026-11-23", 50, 500); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveIdempotency(ctx, "sent", "ada\ninbox-a\nkey", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveJob(ctx, JobRow{ID: "job-1", Status: "done", Total: 1, Created: 1, Inboxes: []byte(`[{"id":"a","address":"a@example.com"}]`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveClient(ctx, "client-1", "ada", []byte("hash"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SuspendAgent(ctx, "ada"); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +130,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	}
 	if _, ok, err := db.Suppressed(ctx, "bad@example.com"); err != nil || ok {
 		t.Fatalf("wipe left a suppression ok %v err %v", ok, err)
+	}
+	if granted, err := db.HasGrant(ctx, "ada", "inbox-a", "read"); err != nil || granted {
+		t.Fatalf("wipe left a grant %v err %v", granted, err)
 	}
 	decoded, err := Decode(raw)
 	if err != nil {
@@ -133,5 +155,31 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	again, err := db.Since(ctx, "inbox-a", records[0].ID, 10)
 	if err != nil || len(again) != 1 || again[0].MessageID != "m2" {
 		t.Fatalf("identity after restore %+v err %v", again, err)
+	}
+	granted, err := db.HasGrant(ctx, "ada", "inbox-a", "read")
+	if err != nil || !granted {
+		t.Fatalf("grant restored %v err %v", granted, err)
+	}
+	stopped, err := db.AgentSuspended(ctx, "ada")
+	if err != nil || !stopped {
+		t.Fatalf("suspension restored %v err %v", stopped, err)
+	}
+	_, found, err := db.Idempotency(ctx, "sent", "ada\ninbox-a\nkey")
+	if err != nil || !found {
+		t.Fatalf("idempotency restored found %v err %v", found, err)
+	}
+	job, found, err := db.Job(ctx, "job-1")
+	if err != nil || !found || job.Status != "done" || job.Created != 1 {
+		t.Fatalf("job restored %+v found %v err %v", job, found, err)
+	}
+}
+
+func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
+	decoded, err := Decode([]byte(`{"version":1,"cursors":[],"events":[],"subscriptions":[],"deliveries":[],"suppressions":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil {
+		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

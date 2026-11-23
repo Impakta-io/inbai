@@ -33,14 +33,60 @@ type DeliveryRow struct {
 	Failed         bool      `json:"failed"`
 }
 
+// GrantRow is one inbox permission.
+type GrantRow struct {
+	Agent      string `json:"agent"`
+	Inbox      string `json:"inbox"`
+	Permission string `json:"permission"`
+}
+
+// QuotaRow is one daily send counter.
+type QuotaRow struct {
+	Bucket string `json:"bucket"`
+	Used   int    `json:"used"`
+}
+
+// IdempotencyRow is one completed request key.
+type IdempotencyRow struct {
+	Kind    string `json:"kind"`
+	Key     string `json:"key"`
+	Payload string `json:"payload"`
+}
+
+// JobSnap is one bulk-create job. Inboxes is the JSON array stored with the job.
+type JobSnap struct {
+	ID      string          `json:"id"`
+	Status  string          `json:"status"`
+	Total   int             `json:"total"`
+	Created int             `json:"created"`
+	Error   string          `json:"error,omitempty"`
+	Inboxes json.RawMessage `json:"inboxes"`
+}
+
+// ClientRow is one hashed client credential. The plaintext secret is not stored.
+type ClientRow struct {
+	ID         string `json:"id"`
+	Agent      string `json:"agent"`
+	SecretHash []byte `json:"secretHash"`
+	Operator   bool   `json:"operator"`
+}
+
 // Snapshot is the inbAI database. Message bodies are not in it.
+// A nil slice was written by an older file that did not include that table.
+// An empty slice means the table was empty.
 type Snapshot struct {
-	Version       int            `json:"version"`
-	Cursors       []CursorRow    `json:"cursors"`
-	Events        []Record       `json:"events"`
-	Subscriptions []Subscription `json:"subscriptions"`
-	Deliveries    []DeliveryRow  `json:"deliveries"`
-	Suppressions  []Suppression  `json:"suppressions"`
+	Version       int              `json:"version"`
+	Cursors       []CursorRow      `json:"cursors"`
+	Events        []Record         `json:"events"`
+	Subscriptions []Subscription   `json:"subscriptions"`
+	Deliveries    []DeliveryRow    `json:"deliveries"`
+	Suppressions  []Suppression    `json:"suppressions"`
+	Grants        []GrantRow       `json:"grants"`
+	Quotas        []QuotaRow       `json:"quotas"`
+	Idempotency   []IdempotencyRow `json:"idempotency"`
+	Jobs          []JobSnap        `json:"jobs"`
+	Clients       []ClientRow      `json:"clients"`
+	Suspensions   []string         `json:"suspensions"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -186,6 +232,36 @@ func (s Snapshot) check() error {
 			return fmt.Errorf("delivery %d names missing subscription %s", item.ID, item.SubscriptionID)
 		}
 	}
+	for _, grant := range s.Grants {
+		if grant.Agent == "" || grant.Inbox == "" || grant.Permission == "" {
+			return fmt.Errorf("grant for %s is incomplete", grant.Agent)
+		}
+	}
+	for _, quota := range s.Quotas {
+		if quota.Bucket == "" || quota.Used < 0 {
+			return fmt.Errorf("quota %q is incomplete", quota.Bucket)
+		}
+	}
+	for _, item := range s.Idempotency {
+		if item.Kind == "" || item.Key == "" {
+			return fmt.Errorf("idempotency key is incomplete")
+		}
+	}
+	for _, job := range s.Jobs {
+		if job.ID == "" || job.Status == "" {
+			return fmt.Errorf("job %s is incomplete", job.ID)
+		}
+	}
+	for _, client := range s.Clients {
+		if client.ID == "" || client.Agent == "" || len(client.SecretHash) == 0 {
+			return fmt.Errorf("client %s is incomplete", client.ID)
+		}
+	}
+	for _, agent := range s.Suspensions {
+		if agent == "" {
+			return fmt.Errorf("suspension is incomplete")
+		}
+	}
 	return nil
 }
 
@@ -197,5 +273,11 @@ func emptySnapshot() Snapshot {
 		Subscriptions: []Subscription{},
 		Deliveries:    []DeliveryRow{},
 		Suppressions:  []Suppression{},
+		Grants:        []GrantRow{},
+		Quotas:        []QuotaRow{},
+		Idempotency:   []IdempotencyRow{},
+		Jobs:          []JobSnap{},
+		Clients:       []ClientRow{},
+		Suspensions:   []string{},
 	}
 }
