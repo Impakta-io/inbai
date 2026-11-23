@@ -97,6 +97,49 @@ func TestInboxCreateThenListAndSend(t *testing.T) {
 	}
 }
 
+func TestInboxGenerateRecordsAddresses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := ioRead(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if methodNames(t, body)[0] != "x:Account/set" {
+			t.Fatalf("methods %v", methodNames(t, body))
+		}
+		writeInit(w, "x:Account/set", "b", map[string]any{"created": map[string]any{
+			"u0": map[string]any{"id": "id-0"},
+			"u1": map[string]any{"id": "id-1"},
+		}})
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	raw, err := json.Marshal(map[string]any{
+		"domain": "example.com", "domainId": "dom", "stalwartUrl": srv.URL,
+		"inboxRoleId": "inbox-role", "apiKey": "key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inbox", "generate", "--config", path, "--count", "2", "--prefix", "u"}, &stdout, &stderr, nil); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created 2 of 2") {
+		t.Fatalf("stdout %s", stdout.String())
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), "u00000@example.com") || !strings.Contains(string(saved), "u00001@example.com") {
+		t.Fatalf("config %s", saved)
+	}
+}
+
 type methodResult struct {
 	name    string
 	id      string

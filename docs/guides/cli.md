@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, `inbox create`, `message send`, and `message list` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, `inbox create`, `inbox generate`, `message send`, and `message list` are implemented. The other commands are not.
 
 # CLI
 
@@ -35,9 +35,11 @@ inbai inbox create alice
 
 That creates `alice@example.com` when the config domain is `example.com`.
 
+`inbai inbox generate --count 10` creates `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. The command prints progress after each batch and records every address in the config file. A count above 10000 is rejected. On `inbaid`, a count above 50 is returned as a job instead of waiting in the request.
+
 ## message send and message list
 
-`inbai message send` submits one plain-text message as an address created with `inbox create`. `inbai message list` prints the subject and preview of messages in that inbox.
+`inbai message send` submits one plain-text message as an address created with `inbox create`. `--attach` adds one file. `inbai message list` prints the subject and preview of messages in that inbox.
 
 ```sh
 inbai message send --from alice@example.com --to bob@example.com --subject hello --body 'hello'
@@ -51,6 +53,5 @@ Delivery to another server still depends on the DNS records from `domain add` an
 - Global flags, including JSON output for scripts.
 - `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
-- `inbox generate`, `inbox list`, and `inbox delete`.
-- Reading one message, replying, deleting, and attachments.
+- `inbox list` and `inbox delete`.
 - `agent create`, `agent bind`, `agent suspend`, and `agent revoke`.

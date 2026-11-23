@@ -18,15 +18,24 @@ func (m Mail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (stri
 	return CreateInbox(ctx, m.Client, InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local})
 }
 
+func (m Mail) CreateInboxes(ctx context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	in := make([]InboxInput, len(specs))
+	for i, spec := range specs {
+		in[i] = InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local}
+	}
+	return CreateInboxes(ctx, m.Client, in)
+}
+
 func (m Mail) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	return Deliver(ctx, m.Client, Delivery{
-		AccountID:  msg.AccountID,
-		From:       msg.From,
-		To:         msg.To,
-		Subject:    msg.Subject,
-		Body:       msg.Body,
-		InReplyTo:  msg.InReplyTo,
-		References: msg.References,
+		AccountID:   msg.AccountID,
+		From:        msg.From,
+		To:          msg.To,
+		Subject:     msg.Subject,
+		Body:        msg.Body,
+		InReplyTo:   msg.InReplyTo,
+		References:  msg.References,
+		Attachments: msg.Attachments,
 	})
 }
 
@@ -67,13 +76,18 @@ func toMessages(raw []Message) []mailbackend.Message {
 }
 
 func toMessage(message Message) mailbackend.Message {
+	files := make([]mailbackend.Attachment, len(message.Attachments))
+	for i, file := range message.Attachments {
+		files[i] = mailbackend.Attachment{Name: file.Name, Type: file.Type, Size: file.Size}
+	}
 	return mailbackend.Message{
-		ID:         message.ID,
-		Subject:    message.Subject,
-		Preview:    message.Preview,
-		Text:       message.Text,
-		MessageID:  message.MessageID,
-		InReplyTo:  message.InReplyTo,
-		References: message.References,
+		ID:          message.ID,
+		Subject:     message.Subject,
+		Preview:     message.Preview,
+		Text:        message.Text,
+		MessageID:   message.MessageID,
+		InReplyTo:   message.InReplyTo,
+		References:  message.References,
+		Attachments: files,
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
@@ -88,6 +89,64 @@ func TestFailedSendDoesNotConsumeQuota(t *testing.T) {
 	}
 }
 
+func TestGenerateRequiresAnOperatorAndBatches(t *testing.T) {
+	mail := &fakeMail{}
+	svc := New(mail)
+	_, err := svc.Generate(context.Background(), Caller{Agent: "ada"}, GenerateRequest{
+		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+	}, "")
+	if !errors.Is(err, ErrForbidden) || len(mail.batches) != 0 {
+		t.Fatalf("err %v batches %v", err, mail.batches)
+	}
+	got, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
+		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+	}, "gen-1")
+	if err != nil || len(got.Inboxes) != 2 || got.Inboxes[0].Address != "u00000@example.com" {
+		t.Fatalf("generate %+v %v", got, err)
+	}
+	again, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
+		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+	}, "gen-1")
+	if err != nil || again.Inboxes[0].ID != got.Inboxes[0].ID || len(mail.batches) != 1 {
+		t.Fatalf("replay %+v batches %v err %v", again, mail.batches, err)
+	}
+}
+
+func TestGenerateAboveTheLimitReturnsAJob(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mail := &fakeMail{started: started, release: release}
+	svc := New(mail)
+	svc.SetSyncLimit(1)
+	got, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
+		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, "")
+	if err != nil || got.JobID == "" {
+		t.Fatalf("job %+v %v", got, err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("job did not start")
+	}
+	job, err := svc.Job(got.JobID)
+	if err != nil || job.Status != "running" {
+		t.Fatalf("running %+v %v", job, err)
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		job, err = svc.Job(got.JobID)
+		if err == nil && job.Status == "done" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if job.Status != "done" || job.Created != 2 {
+		t.Fatalf("finished %+v", job)
+	}
+}
+
 func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{
 		ID: "m", Subject: "hello", MessageID: []string{"<a@example.com>"},
@@ -129,10 +188,32 @@ type fakeMail struct {
 	got      bool
 	deleted  bool
 	last     mailbackend.Outbound
+	batches  []int
+	started  chan struct{}
+	release  chan struct{}
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
 	return f.created, nil
+}
+
+func (f *fakeMail) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	if f.started != nil {
+		select {
+		case <-f.started:
+		default:
+			close(f.started)
+		}
+	}
+	if f.release != nil {
+		<-f.release
+	}
+	f.batches = append(f.batches, len(specs))
+	ids := make([]string, len(specs))
+	for i, spec := range specs {
+		ids[i] = spec.Local
+	}
+	return ids, nil
 }
 
 func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {

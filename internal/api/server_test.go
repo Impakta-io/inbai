@@ -76,6 +76,29 @@ func TestReadSearchReplyAndDelete(t *testing.T) {
 	}
 }
 
+func TestGenerateAndSendAnAttachment(t *testing.T) {
+	mail := &fakeMail{}
+	svc := service.New(mail)
+	svc.SetSyncLimit(1)
+	srv := httptest.NewServer((&Server{
+		Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role",
+	}).Handler())
+	defer srv.Close()
+	res := call(t, srv.URL, http.MethodPost, "/v1/inboxes/generate", "operator-token", `{"prefix":"u","count":1}`, "")
+	if res.StatusCode != http.StatusCreated || !strings.Contains(readBody(t, res), "u00000@example.com") {
+		t.Fatalf("generate %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodPost, "/v1/inboxes/generate", "operator-token", `{"prefix":"u","count":2}`, "")
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusAccepted || !strings.Contains(body, `"jobId"`) {
+		t.Fatalf("job %d %s", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages", "operator-token", `{"from":"alice@example.com","to":"bob@example.com","subject":"file","text":"see","attachments":[{"name":"note.txt","type":"text/plain","data":"bm90ZQ=="}]}`, "file-1")
+	if res.StatusCode != http.StatusAccepted || len(mail.last.Attachments) != 1 || string(mail.last.Attachments[0].Data) != "note" {
+		t.Fatalf("attach %d %+v", res.StatusCode, mail.last.Attachments)
+	}
+}
+
 func TestQuotaIsAProblem(t *testing.T) {
 	mail := &fakeMail{id: "alice-id"}
 	svc := service.New(mail)
@@ -133,14 +156,26 @@ type fakeMail struct {
 	id       string
 	messages []mailbackend.Message
 	sent     int
+	made     []string
+	last     mailbackend.Outbound
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
 	return f.id, nil
 }
 
-func (f *fakeMail) Deliver(context.Context, mailbackend.Outbound) error {
+func (f *fakeMail) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	ids := make([]string, len(specs))
+	for i, spec := range specs {
+		ids[i] = spec.Local
+	}
+	f.made = append(f.made, ids...)
+	return ids, nil
+}
+
+func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 	f.sent++
+	f.last = msg
 	return nil
 }
 

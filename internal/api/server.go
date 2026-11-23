@@ -28,6 +28,8 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
+	mux.HandleFunc("POST /v1/inboxes/generate", s.generateInboxes)
+	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages", s.sendMessage)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}", s.getMessage)
@@ -96,24 +98,50 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
-func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) generateInboxes(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		From    string `json:"from"`
-		To      string `json:"to"`
-		Subject string `json:"subject"`
-		Text    string `json:"text"`
+		Prefix string `json:"prefix"`
+		Count  int    `json:"count"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
 		return
 	}
-	err := s.Service.Deliver(r.Context(), service.Caller{Operator: true}, mailbackend.Outbound{
-		AccountID: r.PathValue("id"),
-		From:      body.From,
-		To:        body.To,
-		Subject:   body.Subject,
-		Body:      body.Text,
+	result, err := s.Service.Generate(r.Context(), service.Caller{Operator: true}, service.GenerateRequest{
+		Prefix:   body.Prefix,
+		Domain:   s.Domain,
+		DomainID: s.DomainID,
+		RoleID:   s.RoleID,
+		Count:    body.Count,
+		Wait:     body.Count <= s.Service.SyncLimit(),
 	}, r.Header.Get("Idempotency-Key"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if result.JobID != "" {
+		writeJSON(w, http.StatusAccepted, map[string]string{"jobId": result.JobID, "status": "running"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"inboxes": result.Inboxes})
+}
+
+func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
+	job, err := s.Service.Job(r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
+	var body sendBody
+	if err := readJSON(r, &body); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
+		return
+	}
+	err := s.Service.Deliver(r.Context(), service.Caller{Operator: true}, body.outbound(r.PathValue("id")), r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -140,22 +168,12 @@ func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) replyMessage(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		From    string `json:"from"`
-		To      string `json:"to"`
-		Subject string `json:"subject"`
-		Text    string `json:"text"`
-	}
+	var body sendBody
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
 		return
 	}
-	err := s.Service.Reply(r.Context(), service.Caller{Operator: true}, r.PathValue("id"), r.PathValue("messageId"), mailbackend.Outbound{
-		From:    body.From,
-		To:      body.To,
-		Subject: body.Subject,
-		Body:    body.Text,
-	}, r.Header.Get("Idempotency-Key"))
+	err := s.Service.Reply(r.Context(), service.Caller{Operator: true}, r.PathValue("id"), r.PathValue("messageId"), body.outbound(""), r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -163,9 +181,36 @@ func (s *Server) replyMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "submitted"})
 }
 
+type sendBody struct {
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Subject     string `json:"subject"`
+	Text        string `json:"text"`
+	Attachments []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Data []byte `json:"data"`
+	} `json:"attachments"`
+}
+
+func (b sendBody) outbound(accountID string) mailbackend.Outbound {
+	files := make([]mailbackend.File, len(b.Attachments))
+	for i, file := range b.Attachments {
+		files[i] = mailbackend.File{Name: file.Name, Type: file.Type, Data: file.Data}
+	}
+	return mailbackend.Outbound{
+		AccountID:   accountID,
+		From:        b.From,
+		To:          b.To,
+		Subject:     b.Subject,
+		Body:        b.Text,
+		Attachments: files,
+	}
+}
+
 func readJSON(r *http.Request, dest any) error {
 	defer func() { _ = r.Body.Close() }()
-	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	dec := json.NewDecoder(io.LimitReader(r.Body, 16<<20))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dest)
 }
@@ -182,6 +227,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusForbidden, "Forbidden", err.Error())
 	case errors.Is(err, service.ErrQuota):
 		writeProblem(w, http.StatusTooManyRequests, "Quota exceeded", err.Error())
+	case errors.Is(err, service.ErrInvalid):
+		writeProblem(w, http.StatusBadRequest, "Bad request", err.Error())
+	case errors.Is(err, service.ErrNotFound):
+		writeProblem(w, http.StatusNotFound, "Not found", err.Error())
 	default:
 		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
 	}
