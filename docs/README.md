@@ -15,7 +15,7 @@ The operator CLI calls `inbaid` for inbox and message commands. `init`, `domain 
 
 ## Operators
 
-Install, domain setup, the CLI, troubleshooting, and the quickstart describe the commands that exist. Backup and scaling are still outlines.
+Install, domain setup, the CLI, troubleshooting, backup, and the quickstart describe the commands that exist. Scaling is still an outline.
 
 - [Quickstart](guides/quickstart.md)
 - [Install](guides/install.md)

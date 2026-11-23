@@ -18,11 +18,11 @@ type Record struct {
 
 // Subscription is a consumer webhook. The secret is shown once when it is created.
 type Subscription struct {
-	ID     string
-	Agent  string
-	Inbox  string
-	URL    string
-	Secret string
+	ID     string `json:"id"`
+	Agent  string `json:"agent"`
+	Inbox  string `json:"inbox"`
+	URL    string `json:"url"`
+	Secret string `json:"secret"`
 }
 
 // Delivery is one webhook attempt claimed by a worker.
