@@ -36,6 +36,14 @@ inbai domain add
 
 Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates, so `domain add` skips certificate verification when the stored URL is localhost. Copy the printed zone file into DNS. Run `inbai domain add` again to see which MX and TXT records are published.
 
+Create an inbox and submit a message as that address:
+
+```sh
+inbai inbox create alice
+inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
+inbai message list alice@example.com
+```
+
 ## What is not here yet
 
 - The inbAI server process
