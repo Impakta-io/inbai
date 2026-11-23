@@ -1,0 +1,14 @@
+openapi: 3.1.0
+info:
+  title: inbAI API
+  version: 0.0.0
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  description: |
+    Contract skeleton. inbaid does not serve this API yet.
+
+    When the API is added, routes live under /v1, lists use cursor
+    pagination, create and send requests accept an Idempotency-Key header,
+    and errors use RFC 9457 problem details.
+paths: {}

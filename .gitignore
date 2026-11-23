@@ -1,0 +1,9 @@
+# Local planning notes. Never commit this directory.
+.private/
+
+# Build output
+bin/
+coverage.out
+
+# Editor and OS
+.DS_Store

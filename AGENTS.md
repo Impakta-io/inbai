@@ -1,0 +1,90 @@
+Status: current
+
+# Instructions for coding agents
+
+These instructions are for an agent editing this repository. An agent that sends or receives mail follows [docs/agents](docs/agents/overview.md) once that API exists. It does not exist yet.
+
+## Commands
+
+From the repository root, with Go 1.27.4 or newer:
+
+```sh
+make build
+make test
+make lint
+make fmt
+make docs-check
+```
+
+`make lint` needs `golangci-lint` v2.15.0 on `PATH`. Install it with:
+
+```sh
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+```
+
+On Windows, `make` may be missing. Use:
+
+```sh
+go build -o bin/inbai.exe ./cmd/inbai
+go build -o bin/inbaid.exe ./cmd/inbaid
+go test ./...
+go run ./tools/docscheck
+golangci-lint run ./...
+```
+
+A change is done when those commands pass, the diff is small enough for a person to review, and the human author can explain it.
+
+## Where code goes
+
+| Path | Owns |
+| --- | --- |
+| `cmd/inbai` | Operator CLI. It calls the API. It does not enforce grants. |
+| `cmd/inbaid` | Server process. It wires transports, the service layer, and workers. |
+| `internal/api` | REST transport. |
+| `internal/mcp` | MCP transport, HTTP and stdio. |
+| `internal/service` | Grants, quotas, and other policy. This is the isolation boundary. |
+| `internal/auth` | Credentials and token verification. A token names the caller only. |
+| `internal/mailbackend` | The mail interface. |
+| `internal/mailbackend/stalwart` | The Stalwart implementation of that interface. |
+| `internal/store` | PostgreSQL state. Message bodies do not belong here. |
+| `internal/jobs` | Background jobs. |
+| `internal/events` | Cursors, the event feed, and webhooks. |
+| `internal/config` | Process configuration. |
+| `internal/version` | The version string both binaries print. |
+| `api/openapi.yaml` | The HTTP contract. Change this before the client or the handlers. |
+| `tools/docscheck` | Checks public Markdown. |
+| `docs` | Documentation. A behavior change updates the doc in the same change. |
+
+Each `internal` package has a `doc.go` that states its job. Read it before editing the package.
+
+## Rules
+
+- Keep the change small. One issue, one pull request.
+- Add a test for every behavior change. A documentation-only change does not need a Go test.
+- Do not add a dependency without an issue a maintainer has accepted.
+- Do not import, copy, or vendor Stalwart source. Talk to Stalwart over JMAP from `internal/mailbackend/stalwart` only.
+- Do not put grant checks in a transport. `internal/service` decides access. See [internal/service/AGENTS.md](internal/service/AGENTS.md).
+- Do not store secrets in the repository.
+- Public Markdown needs a `Status:` line. Run `make docs-check`.
+- Do not mention gitignored local planning notes in a public file.
+- Write docs for what exists. A feature that is not built yet is an outline with `Status: planned`.
+
+## Ask a maintainer first
+
+Open an issue and wait before you:
+
+- add a dependency
+- change `internal/service` or `internal/auth`
+- change `.github/workflows`
+- change the license, the governance file, or the contribution policy
+
+## Disclosure
+
+The human who opens the pull request is the author.
+
+- Add `Signed-off-by: Name <email>` to every commit.
+- When an AI tool writes a material part of the change, add `Assisted-by: Tool:model`.
+- Spellcheck and single-line completion need no trailer.
+- Do not open a pull request for a change you cannot explain or debug.
+
+The policy is in [docs/contributing/ai-assisted.md](docs/contributing/ai-assisted.md).

@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p bin
+          go build -o bin/inbai ./cmd/inbai
+          go build -o bin/inbaid ./cmd/inbaid
+      - name: Test
+        run: go test ./...
+      - name: Check docs
+        run: go run ./tools/docscheck
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.15.0
+
+  makefile:
+    name: makefile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+      - name: Make
+        run: make build test lint docs-check
+
+  dco:
+    name: dco
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require Signed-off-by
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r commit; do
+            body=$(git log -1 --format=%B "$commit")
+            if ! printf '%s\n' "$body" | grep -q '^Signed-off-by: '; then
+              echo "Missing Signed-off-by: $commit"
+              missing=1
+            fi
+          done < <(git rev-list "${{ github.event.pull_request.base.sha }}..HEAD")
+          exit "$missing"

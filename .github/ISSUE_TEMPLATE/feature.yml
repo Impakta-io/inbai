@@ -1,0 +1,19 @@
+name: Feature
+description: Suggest a change that fits the current design.
+title: "Feature: "
+labels: [feature]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is blocked, and what they cannot do.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The smallest change that would help.
+    validations:
+      required: true
