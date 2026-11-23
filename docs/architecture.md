@@ -58,7 +58,7 @@ Human sign-in through an external OIDC provider is not part of this design yet.
 
 Each inbox is one account in the mail server. The service layer talks to a `MailBackend` interface. Stalwart is the first implementation. Another provider would be a new implementation of that interface.
 
-Domain setup prints the zone file Stalwart computes, including MX, SPF, DKIM, and DMARC. `inbai domain add` does that and checks the MX and TXT records. Direct delivery is supported, and an authenticated SMTP relay is a first-class setting. Sending has quotas per inbox, per domain, and per workspace, a rate limit per recipient domain, a suppression list fed by hard bounces, and a way to suspend an agent.
+Domain setup prints the zone file Stalwart computes, including MX, SPF, DKIM, and DMARC. `inbai domain add` does that and checks the MX and TXT records. `inbai doctor` also checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. Direct delivery is supported, and an authenticated SMTP relay is a first-class setting. Sending has quotas per inbox, per domain, and per workspace, a rate limit per recipient domain, a suppression list fed by hard bounces, and a way to suspend an agent.
 
 The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is untrusted input. Results will include SPF, DKIM, DMARC, and the spam verdict, and MCP results will mark message bodies as external content.
 

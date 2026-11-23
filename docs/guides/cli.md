@@ -1,4 +1,4 @@
-Status: partial — `init` and `domain add` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, and `doctor` are implemented. The other commands are not.
 
 # CLI
 
@@ -21,10 +21,14 @@ Running init again reuses the domain, the roles, and the accounts. It keeps the 
 
 `inbai domain add` prints the DNS zone file for the domain in the config file and checks the MX and TXT records. The details are in [domain setup](domain-setup.md).
 
+## doctor
+
+`inbai doctor` checks the same MX and TXT records, then checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. A healthy report exits 0. Any check that needs a fix exits 1. How to read a line is in [troubleshooting](troubleshooting.md).
+
 ## Planned sections
 
 - Global flags, including JSON output for scripts.
-- `login` and `doctor`.
+- `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
 - `inbox create`, `inbox generate`, `inbox list`, and `inbox delete`.
 - Sending, listing, reading, replying, and deleting mail.

@@ -64,9 +64,7 @@ func domainCmd(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 	client := &stalwart.Client{BaseURL: cfg.StalwartURL, APIKey: cfg.APIKey}
 	if *tlsInsecure || loopback(cfg.StalwartURL) {
-		client.HTTP = &http.Client{Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Stalwart's first certificate is self-signed.
-		}}
+		client.HTTP = insecureHTTP()
 	}
 	zone, err := stalwart.ZoneFile(ctx, client, name)
 	if err != nil {
@@ -95,4 +93,10 @@ func loopback(raw string) bool {
 	}
 	host := parsed.Hostname()
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+func insecureHTTP() *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Stalwart's first certificate is self-signed.
+	}}
 }

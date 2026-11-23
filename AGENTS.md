@@ -50,6 +50,7 @@ A change is done when those commands pass, the diff is small enough for a person
 | `internal/jobs` | Background jobs. |
 | `internal/events` | Cursors, the event feed, and webhooks. |
 | `internal/config` | Process configuration. |
+| `internal/doctor` | Host checks for `inbai doctor`. |
 | `internal/version` | The version string both binaries print. |
 | `api/openapi.yaml` | The HTTP contract. Change this before the client or the handlers. |
 | `tools/docscheck` | Checks public Markdown. |

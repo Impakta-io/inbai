@@ -31,8 +31,10 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		return initCmd(args[1:], stdout, stderr, getenv)
 	case "domain":
 		return domainCmd(args[1:], stdout, stderr)
+	case "doctor":
+		return doctorCmd(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain]\n")
+		writef(stdout, "usage: inbai [version|init|domain|doctor]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])
