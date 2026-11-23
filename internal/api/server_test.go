@@ -158,6 +158,7 @@ type fakeMail struct {
 	sent     int
 	made     []string
 	last     mailbackend.Outbound
+	listed   bool
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
@@ -180,10 +181,12 @@ func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 }
 
 func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
+	f.listed = true
 	return f.messages, nil
 }
 
 func (f *fakeMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
+	f.listed = true
 	return f.messages, nil
 }
 

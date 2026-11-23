@@ -15,6 +15,87 @@ servers:
 security:
   - operatorBearer: []
 paths:
+  /oauth/token:
+    post:
+      operationId: oauthToken
+      summary: Exchange a client id and secret for an access token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_secret]
+              properties:
+                grant_type:
+                  type: string
+                  const: client_credentials
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+      responses:
+        "200":
+          description: Access token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    const: bearer
+                  expires_in:
+                    type: integer
+        "401":
+          description: Invalid client
+  /v1/agents:
+    post:
+      operationId: createAgent
+      summary: Create a client credential. The secret is shown once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/grants:
+    post:
+      operationId: createGrant
+      summary: Grant one permission on one inbox to an agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent, inbox, permission]
+              properties:
+                agent:
+                  type: string
+                inbox:
+                  type: string
+                permission:
+                  type: string
+                  enum: [read, send, reply, delete, manage]
+      responses:
+        "201":
+          description: Created
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes:
     post:
       operationId: createInbox

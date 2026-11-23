@@ -1,15 +1,46 @@
-Status: planned — filled in when an agent can authenticate and use an inbox.
+Status: partial — an operator can issue a client credential and a grant. The agent can call the REST API with the access token. MCP is not implemented.
 
 # Agents that use inbAI
 
-This page is for an AI agent that will send and receive mail. The API and the MCP server are not implemented, so there is nothing to connect to yet.
+An agent calls the REST API with a credential an operator issued. The access token names the agent. A grant decides which inbox that agent can read, send, reply, delete, or manage. The agent does not receive Stalwart administrator credentials.
 
-When they exist, an agent will use a credential issued by an operator, bound to one or more inboxes. The server checks every call. An agent does not receive mail-server administrator credentials, and it cannot create an inbox unless an operator granted that permission.
+## Credential
+
+An operator creates the client while `inbaid serve` is running:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"ada"}' \
+  http://127.0.0.1:8787/v1/agents
+```
+
+The response includes `id` and `secret`. The secret is shown once. Exchange it for a token that lives ten minutes:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=client_credentials' \
+  -d 'client_id=THE_ID' \
+  -d 'client_secret=THE_SECRET' \
+  http://127.0.0.1:8787/oauth/token
+```
+
+Send `Authorization: Bearer` with the access token. A missing or rejected token is `401`. The server publishes `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`.
+
+## Grant
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"ada","inbox":"ACCOUNT_ID","permission":"read"}' \
+  http://127.0.0.1:8787/v1/grants
+```
+
+Permissions are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another. `POST /v1/agents/ada/suspend` stops the agent on the next call.
+
+The REST routes are in [REST](rest.md). MCP is not implemented.
 
 ## Planned sections
 
-- What an operator sets up before the agent starts.
-- How the agent obtains and refreshes a token.
-- Which inboxes the credential can use.
-- Where to read the MCP and REST guides.
 - How message content is marked as untrusted.
+- `inbai mcp serve`.

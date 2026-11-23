@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ const (
 	PermSend   Permission = "send"
 	PermReply  Permission = "reply"
 	PermDelete Permission = "delete"
+	PermManage Permission = "manage"
 )
 
 // ErrForbidden is returned when the caller has no grant for the action.
@@ -84,9 +86,59 @@ func (s *Service) SetQuota(inboxDaily, domainDaily int) {
 	s.domainDaily = domainDaily
 }
 
+// Identities creates and suspends agent credentials. The token still only names the caller.
+type Identities interface {
+	Create(agent string, operator bool) (id, secret string, err error)
+	Suspend(agent string)
+}
+
 // Allow records one grant. The store will own this once PostgreSQL is wired.
 func (s *Service) Allow(agent, inbox string, perm Permission) {
 	s.grants = append(s.grants, grant{agent: agent, inbox: inbox, perm: perm})
+}
+
+// Grant records a permission. Only an operator may do that.
+func (s *Service) Grant(caller Caller, agent, inbox string, perm Permission) error {
+	if !caller.Operator {
+		return ErrForbidden
+	}
+	if agent == "" || inbox == "" || !knownPermission(perm) {
+		return fmt.Errorf("%w: grant needs an agent, an inbox, and a permission", ErrInvalid)
+	}
+	s.Allow(agent, inbox, perm)
+	return nil
+}
+
+// ProvisionAgent creates a client credential for an agent. Only an operator may do that.
+func (s *Service) ProvisionAgent(caller Caller, identities Identities, agent string) (string, string, error) {
+	if !caller.Operator {
+		return "", "", ErrForbidden
+	}
+	if identities == nil {
+		return "", "", fmt.Errorf("%w: credentials are not configured", ErrInvalid)
+	}
+	return identities.Create(agent, false)
+}
+
+// SuspendAgent stops an agent. Only an operator may do that.
+func (s *Service) SuspendAgent(caller Caller, identities Identities, agent string) error {
+	if !caller.Operator {
+		return ErrForbidden
+	}
+	if identities == nil || agent == "" {
+		return fmt.Errorf("%w: credentials are not configured", ErrInvalid)
+	}
+	identities.Suspend(agent)
+	return nil
+}
+
+func knownPermission(perm Permission) bool {
+	switch perm {
+	case PermRead, PermSend, PermReply, PermDelete, PermManage:
+		return true
+	default:
+		return false
+	}
 }
 
 // CreateInbox creates an address. Only an operator may do that.

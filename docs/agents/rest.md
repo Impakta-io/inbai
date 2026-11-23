@@ -1,12 +1,12 @@
-Status: partial — `inbaid serve` creates one inbox or many, and can list, search, read, send, reply, and delete, including attachments. OAuth is not implemented.
+Status: partial — `inbaid serve` creates one inbox or many, and can list, search, read, send, reply, and delete, including attachments. Operators and agents authenticate as described below. MCP is not implemented.
 
 # REST API
 
 The contract is [api/openapi.yaml](../../api/openapi.yaml). `inbaid serve` listens on `127.0.0.1:8787` unless `--addr` is set. It reads the config file written by `inbai init`.
 
-## Operator token
+## Operator token and agent tokens
 
-Set `INBAI_OPERATOR_TOKEN` before starting the server. Send it as `Authorization: Bearer <token>`. A missing or rejected token is `401` with a problem document. Agent OAuth is not implemented, so this token is the only caller and it acts as the operator.
+Set `INBAI_OPERATOR_TOKEN` before starting the server. That bearer token acts as the operator. An agent exchanges a client id and secret at `POST /oauth/token` with `grant_type=client_credentials` and then sends the access token as `Authorization: Bearer`. The token lives ten minutes and only names the agent. Grants decide what the agent may do. A missing or rejected token is `401` with a problem document and a `WWW-Authenticate` header that points at the protected-resource metadata.
 
 ## Routes
 

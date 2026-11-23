@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Impakta-io/inbai/internal/api"
+	"github.com/Impakta-io/inbai/internal/auth"
 	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
 	"github.com/Impakta-io/inbai/internal/service"
@@ -81,12 +83,25 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			return 1
 		}
 	}
+	signingKey := []byte(getenv("INBAI_SIGNING_KEY"))
+	if len(signingKey) == 0 {
+		var err error
+		signingKey, err = randomKey()
+		if err != nil {
+			writef(stderr, "signing key: %s\n", err)
+			return 1
+		}
+		writef(stdout, "Signing key, shown once: %x\n", signingKey)
+	}
+	issuer := "http://" + *addr
 	handler := (&api.Server{
-		Service:  service.New(stalwart.Mail{Client: client}),
-		Token:    token,
-		Domain:   cfg.Domain,
-		DomainID: cfg.DomainID,
-		RoleID:   cfg.InboxRoleID,
+		Service:   service.New(stalwart.Mail{Client: client}),
+		Directory: auth.NewDirectory(signingKey, issuer),
+		Token:     token,
+		Issuer:    issuer,
+		Domain:    cfg.Domain,
+		DomainID:  cfg.DomainID,
+		RoleID:    cfg.InboxRoleID,
 	}).Handler()
 	writef(stdout, "listening on %s\n", *addr)
 	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
@@ -133,6 +148,12 @@ func insecureHTTP() *http.Client {
 	return &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Stalwart's first certificate is self-signed.
 	}}
+}
+
+func randomKey() ([]byte, error) {
+	buf := make([]byte, 32)
+	_, err := rand.Read(buf)
+	return buf, err
 }
 
 func writef(w io.Writer, format string, args ...any) {
