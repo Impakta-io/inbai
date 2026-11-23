@@ -43,7 +43,7 @@ func TestOneInboxOnStalwart(t *testing.T) {
 		_, _ = command(t, compose, env, "docker", "compose", "-p", "inbai-live", "down", "-v", "--remove-orphans")
 	})
 	_, _ = command(t, compose, env, "docker", "compose", "-p", "inbai-live", "down", "-v", "--remove-orphans")
-	must(t, compose, env, "docker", "compose", "-p", "inbai-live", "up", "-d")
+	must(t, compose, env, "docker", "compose", "-p", "inbai-live", "up", "-d", "--build")
 	waitURL(t, "http://127.0.0.1:8080/jmap/", false)
 
 	must(t, root, []string{"INBAI_RECOVERY_PASSWORD=" + password},
