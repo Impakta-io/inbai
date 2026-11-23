@@ -16,7 +16,11 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai domain [add|relay]`
 - `usage: inbai domain relay --host name --user name [--port n] [--config path] [--json]`
 - `usage: inbai domain relay --off [--config path] [--json]`
-- `usage: inbai inbox [create|generate|list|delete]`
+- `usage: inbai inbox [create|generate|list|delete|allowlist]`
+- `usage: inbai inbox allowlist [get|set|clear]`
+- `usage: inbai inbox allowlist clear [--config path] [--json] <inbox-id>`
+- `usage: inbai inbox allowlist get [--config path] [--json] <inbox-id>`
+- `usage: inbai inbox allowlist set [--config path] [--json] <inbox-id> <sender> [<sender>...]`
 - `usage: inbai inbox create <local-part>`
 - `usage: inbai inbox delete <address>`
 - `usage: inbai inbox generate --count <n> [--prefix <text>]`

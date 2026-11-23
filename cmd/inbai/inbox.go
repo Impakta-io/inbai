@@ -19,7 +19,7 @@ import (
 
 func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist]\n")
 		return 2
 	}
 	switch args[0] {
@@ -29,9 +29,11 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 		return inboxList(args[1:], stdout, stderr, getenv)
 	case "delete":
 		return inboxDelete(args[1:], stdout, stderr, getenv)
+	case "allowlist":
+		return inboxAllowlist(args[1:], stdout, stderr, getenv)
 	case "create":
 	default:
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist]\n")
 		return 2
 	}
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)

@@ -269,6 +269,49 @@ paths:
           $ref: "#/components/responses/Problem"
         "502":
           $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/allowlist:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getAllowlist
+      summary: Read the sender allowlist for one inbox.
+      responses:
+        "200":
+          description: Allowlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Allowlist"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setAllowlist
+      summary: Replace the sender allowlist for one inbox. An empty list removes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Allowlist"
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Allowlist"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes/generate:
     post:
       operationId: generateInboxes
@@ -682,6 +725,18 @@ components:
       properties:
         localPart:
           type: string
+    Allowlist:
+      type: object
+      required: [senders]
+      properties:
+        senders:
+          type: array
+          description: Addresses or domains. An empty array removes the list.
+          items:
+            type: string
+        set:
+          type: boolean
+          description: True when the inbox has a list.
     Inbox:
       type: object
       required: [id, address]
@@ -744,6 +799,12 @@ components:
           type: array
           items:
             type: string
+        from:
+          type: string
+          description: Sender address when the mail server returned one.
+        senderAllowed:
+          type: boolean
+          description: Present only when the inbox has a sender allowlist. True when from matches an address or its domain on that list.
         authentication:
           type: object
           description: SPF, DKIM, and DMARC results from Authentication-Results, and spam when the message is marked junk. An absent field was not on the message.

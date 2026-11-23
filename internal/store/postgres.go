@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS retention_policy (
     scope text PRIMARY KEY,
     days int NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sender_allowlist (
+    inbox text PRIMARY KEY,
+    senders jsonb NOT NULL
+);
 CREATE TABLE IF NOT EXISTS signing_key (
     id int PRIMARY KEY,
     secret bytea NOT NULL,
@@ -435,6 +439,9 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 	if err := readRetention(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
+	if err := readAllowlist(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := readSigningKey(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
@@ -496,6 +503,9 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		return err
 	}
 	if err := writeRetention(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeAllowlist(ctx, tx, snap); err != nil {
 		return err
 	}
 	if err := writeSigningKey(ctx, tx, snap); err != nil {

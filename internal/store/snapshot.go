@@ -104,6 +104,7 @@ type Snapshot struct {
 	Suspensions   []string         `json:"suspensions"`
 	Audits        []AuditRow       `json:"audits"`
 	Retention     []RetentionRow   `json:"retention"`
+	Allowlists    []AllowlistRow   `json:"allowlists"`
 	SigningKey    []byte           `json:"signingKey"`
 }
 
@@ -295,6 +296,11 @@ func (s Snapshot) check() error {
 			return fmt.Errorf("retention %q is incomplete", row.Scope)
 		}
 	}
+	for _, row := range s.Allowlists {
+		if row.Inbox == "" || len(row.Senders) == 0 {
+			return fmt.Errorf("allowlist %q is incomplete", row.Inbox)
+		}
+	}
 	return nil
 }
 
@@ -314,6 +320,7 @@ func emptySnapshot() Snapshot {
 		Suspensions:   []string{},
 		Audits:        []AuditRow{},
 		Retention:     []RetentionRow{},
+		Allowlists:    []AllowlistRow{},
 		SigningKey:    []byte{},
 	}
 }

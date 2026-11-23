@@ -289,6 +289,26 @@ type apiAudit struct {
 	Target string `json:"target"`
 }
 
+type apiAllowlist struct {
+	Senders []string `json:"senders"`
+	Set     bool     `json:"set"`
+}
+
+func (c apiClient) allowlist(ctx context.Context, inbox string) (apiAllowlist, error) {
+	var out apiAllowlist
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", nil, &out)
+	return out, err
+}
+
+func (c apiClient) setAllowlist(ctx context.Context, inbox string, senders []string) (apiAllowlist, error) {
+	if senders == nil {
+		senders = []string{}
+	}
+	var out apiAllowlist
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", map[string]any{"senders": senders}, &out)
+	return out, err
+}
+
 func (c apiClient) events(ctx context.Context, accountID string, after int64, timeout int) ([]apiEvent, error) {
 	path := fmt.Sprintf("/v1/events?inbox=%s&after=%d&timeout=%d", url.QueryEscape(accountID), after, timeout)
 	var out struct {

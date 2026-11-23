@@ -124,6 +124,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SaveRetention(ctx, "server", 14); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SaveAllowlist(ctx, "inbox-a", []string{"example.com"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +193,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || !ok || days != 14 {
 		t.Fatalf("retention %d ok %v err %v", days, ok, err)
 	}
+	senders, ok, err := db.Allowlist(ctx, "inbox-a")
+	if err != nil || !ok || len(senders) != 1 || senders[0] != "example.com" {
+		t.Fatalf("allowlist %+v ok %v err %v", senders, ok, err)
+	}
 	key, err := db.AdoptSigningKey(ctx, nil)
 	if err != nil || !bytes.Equal(key, []byte("signing-key")) {
 		t.Fatalf("signing key %q err %v", key, err)
@@ -201,7 +208,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.SigningKey != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.Allowlists != nil || decoded.SigningKey != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

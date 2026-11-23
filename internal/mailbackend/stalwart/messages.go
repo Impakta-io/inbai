@@ -30,7 +30,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":          accountID,
 		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
+		"properties":         []string{"subject", "preview", "receivedAt", "from", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
 		"fetchAllBodyValues": true,
 	})
 	if err != nil {
@@ -139,6 +139,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 			} `json:"attachments"`
 			Keywords json.RawMessage `json:"keywords"`
 			Auth     json.RawMessage `json:"header:Authentication-Results:asText"`
+			From     json.RawMessage `json:"from"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -165,6 +166,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID,
 			})
 		}
+		out[i].From = fromEmail(item.From)
 		out[i].Authentication = mailbackend.AuthenticationOf(headerText(item.Auth), junkKeyword(item.Keywords))
 	}
 	return out, nil
@@ -181,6 +183,16 @@ func headerText(raw json.RawMessage) string {
 	var many []string
 	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
 		return many[0]
+	}
+	return ""
+}
+
+func fromEmail(raw json.RawMessage) string {
+	var many []struct {
+		Email string `json:"email"`
+	}
+	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
+		return many[0].Email
 	}
 	return ""
 }

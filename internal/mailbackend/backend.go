@@ -58,8 +58,10 @@ type Message struct {
 	InReplyTo      []string       `json:"inReplyTo,omitempty"`
 	References     []string       `json:"references,omitempty"`
 	ReceivedAt     time.Time      `json:"receivedAt,omitempty"`
+	From           string         `json:"from,omitempty"`
 	Attachments    []Attachment   `json:"attachments,omitempty"`
 	Authentication Authentication `json:"authentication,omitempty"`
+	SenderAllowed  *bool          `json:"senderAllowed,omitempty"`
 }
 
 // Backend is how the service layer stores and sends mail.

@@ -29,6 +29,7 @@ func TestGetSearchAndDelete(t *testing.T) {
 			}
 			full := false
 			sawAuth := false
+			sawFrom := false
 			for _, prop := range props {
 				if prop == "bodyValues" {
 					full = true
@@ -36,15 +37,22 @@ func TestGetSearchAndDelete(t *testing.T) {
 				if prop == "header:Authentication-Results:asText" {
 					sawAuth = true
 				}
+				if prop == "from" {
+					sawFrom = true
+				}
 			}
 			if full && !sawAuth {
 				t.Error("get did not ask for authentication results")
+			}
+			if full && !sawFrom {
+				t.Error("get did not ask for the sender")
 			}
 			writeMethods(w, []any{[]any{"Email/get", map[string]any{"list": []any{map[string]any{
 				"id": "msg", "subject": "hello", "preview": "body",
 				"messageId":                            []string{"<a@example.com>"},
 				"textBody":                             []any{map[string]any{"partId": "p"}},
 				"bodyValues":                           map[string]any{"p": map[string]any{"value": "body"}},
+				"from":                                 []any{map[string]any{"email": "ada@example.com"}},
 				"keywords":                             map[string]bool{"$junk": true},
 				"header:Authentication-Results:asText": "mail.example.com; spf=pass; dkim=pass; dmarc=fail",
 			}}}, "g"}})
@@ -64,7 +72,7 @@ func TestGetSearchAndDelete(t *testing.T) {
 	defer srv.Close()
 	client := &Client{BaseURL: srv.URL, APIKey: "key"}
 	got, err := GetMessage(context.Background(), client, "alice-id", "msg")
-	if err != nil || got.Text != "body" || len(got.MessageID) != 1 || got.Authentication.SPF != "pass" || got.Authentication.DMARC != "fail" || got.Authentication.Spam != "spam" {
+	if err != nil || got.Text != "body" || got.From != "ada@example.com" || len(got.MessageID) != 1 || got.Authentication.SPF != "pass" || got.Authentication.DMARC != "fail" || got.Authentication.Spam != "spam" {
 		t.Fatalf("get %+v %v", got, err)
 	}
 	found, err := SearchMessages(context.Background(), client, "alice-id", "hello")

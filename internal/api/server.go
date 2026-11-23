@@ -66,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
+	mux.HandleFunc("GET /v1/inboxes/{id}/allowlist", s.getAllowlist)
+	mux.HandleFunc("PUT /v1/inboxes/{id}/allowlist", s.putAllowlist)
 	mux.HandleFunc("POST /v1/inboxes/generate", s.generateInboxes)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
@@ -367,6 +369,35 @@ func (s *Server) deleteInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getAllowlist(w http.ResponseWriter, r *http.Request) {
+	senders, set, err := s.Service.Allowlist(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"senders": senders, "set": set})
+}
+
+func (s *Server) putAllowlist(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Senders *[]string `json:"senders"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Senders == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "senders is required")
+		return
+	}
+	if err := s.Service.SetAllowlist(r.Context(), s.requestCaller(r), r.PathValue("id"), *body.Senders); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	senders, set, err := s.Service.Allowlist(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"senders": senders, "set": set})
 }
 
 func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {

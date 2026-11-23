@@ -176,7 +176,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			return fmt.Errorf("imap: message %s was not found", messageID)
 		}
 		text := string(got.literals[0])
-		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS)])")
+		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM)])")
 		if err != nil {
 			return err
 		}
@@ -188,6 +188,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 		message = mailbackend.Message{
 			ID:             messageID,
 			Text:           text,
+			From:           headerField(header, "From"),
 			Authentication: mailbackend.AuthenticationOf(header, strings.Contains(auth.text, `\Junk`)),
 		}
 		return nil
@@ -331,6 +332,17 @@ func (b *Backend) with(ctx context.Context, account string, fn func(*session) er
 	}
 	defer func() { _, _ = s.command("LOGOUT") }()
 	return fn(s)
+}
+
+func headerField(header, name string) string {
+	prefix := strings.ToLower(name) + ":"
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(strings.ToLower(line), prefix) {
+			return strings.TrimSpace(line[len(name)+1:])
+		}
+	}
+	return ""
 }
 
 func (b *Backend) login(account string) (Login, error) {

@@ -42,6 +42,7 @@ type Message struct {
 	InReplyTo      []string                   `json:"inReplyTo,omitempty"`
 	References     []string                   `json:"references,omitempty"`
 	ReceivedAt     time.Time                  `json:"receivedAt,omitempty"`
+	From           string                     `json:"from,omitempty"`
 	Attachments    []Attachment               `json:"attachments,omitempty"`
 	Authentication mailbackend.Authentication `json:"authentication,omitempty"`
 }

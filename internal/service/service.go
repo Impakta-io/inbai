@@ -74,6 +74,7 @@ type Service struct {
 	jobs      map[string]*Job
 	generated map[string]GenerateResult
 	keep      map[string]int
+	allow     map[string][]string
 	feed      *events.Feed
 	db        *store.Postgres
 	audit     []store.AuditRow
@@ -400,7 +401,14 @@ func (s *Service) Get(ctx context.Context, caller Caller, accountID, messageID s
 	if err := s.permit(ctx, caller, accountID, PermRead); err != nil {
 		return mailbackend.Message{}, err
 	}
-	return s.mail.Get(ctx, accountID, messageID)
+	msg, err := s.mail.Get(ctx, accountID, messageID)
+	if err != nil {
+		return mailbackend.Message{}, err
+	}
+	if err := s.applyAllowlist(ctx, accountID, &msg); err != nil {
+		return mailbackend.Message{}, err
+	}
+	return msg, nil
 }
 
 // Delete removes one message. An agent needs a delete grant for that account.

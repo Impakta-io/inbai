@@ -57,6 +57,48 @@ func TestReadGrantAllowsOnlyThatInbox(t *testing.T) {
 	}
 }
 
+func TestAllowlistIsASignalOnTheMessage(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", From: "Ada <ada@example.com>", Text: "hi"}}}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if err := svc.SetAllowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a", []string{"ada@example.com"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("read grant set err %v", err)
+	}
+	svc.Allow("ada", "inbox-b", PermManage)
+	if err := svc.SetAllowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a", []string{"ada@example.com"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("other inbox set err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", []string{"not an address"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad sender err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", []string{"Example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed == nil || !*msg.SenderAllowed {
+		t.Fatalf("match %+v err %v", msg.SenderAllowed, err)
+	}
+	mail.messages[0].From = "other@elsewhere.test"
+	msg, err = svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed == nil || *msg.SenderAllowed {
+		t.Fatalf("miss %+v err %v", msg.SenderAllowed, err)
+	}
+	list, set, err := svc.Allowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a")
+	if err != nil || !set || len(list) != 1 || list[0] != "example.com" {
+		t.Fatalf("list %+v set %v err %v", list, set, err)
+	}
+	if _, _, err := svc.Allowlist(context.Background(), Caller{Agent: "bea"}, "inbox-a"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("stranger read err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", nil); err != nil {
+		t.Fatal(err)
+	}
+	msg, err = svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed != nil {
+		t.Fatalf("cleared %+v err %v", msg.SenderAllowed, err)
+	}
+}
+
 func TestOperatorCanCreateAnInbox(t *testing.T) {
 	mail := &fakeMail{created: "id-1"}
 	svc := New(mail)
