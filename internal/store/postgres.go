@@ -49,6 +49,39 @@ CREATE TABLE IF NOT EXISTS suppression (
     address text PRIMARY KEY,
     reason text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS access_grant (
+    agent text NOT NULL,
+    inbox text NOT NULL,
+    permission text NOT NULL,
+    PRIMARY KEY (agent, inbox, permission)
+);
+CREATE TABLE IF NOT EXISTS quota_counter (
+    bucket text PRIMARY KEY,
+    used int NOT NULL
+);
+CREATE TABLE IF NOT EXISTS idempotency (
+    kind text NOT NULL,
+    key text NOT NULL,
+    payload text NOT NULL DEFAULT '',
+    PRIMARY KEY (kind, key)
+);
+CREATE TABLE IF NOT EXISTS bulk_job (
+    id text PRIMARY KEY,
+    status text NOT NULL,
+    total int NOT NULL,
+    created int NOT NULL DEFAULT 0,
+    error text NOT NULL DEFAULT '',
+    inboxes jsonb NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS agent_credential (
+    id text PRIMARY KEY,
+    agent text NOT NULL,
+    secret_hash bytea NOT NULL,
+    operator boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS agent_suspension (
+    agent text PRIMARY KEY
+);
 `
 
 // Postgres is the event log that survives an inbaid restart.

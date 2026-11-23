@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/store"
 )
 
 const (
@@ -90,7 +92,11 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	}
 	key := idempotencyKey(caller, prefix+"\n"+fmt.Sprint(req.Count), idemKey)
 	if key != "" {
-		if saved, ok := s.savedGenerate(key); ok {
+		saved, ok, err := s.savedGenerate(ctx, key)
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		if ok {
 			return saved, nil
 		}
 	}
@@ -109,7 +115,9 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 		}
 		result := GenerateResult{Inboxes: made}
 		if key != "" {
-			s.rememberGenerate(key, result)
+			if err := s.rememberGenerate(ctx, key, result); err != nil {
+				return GenerateResult{}, err
+			}
 		}
 		return result, nil
 	}
@@ -118,15 +126,14 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 		return GenerateResult{}, err
 	}
 	job := &Job{ID: id, Status: "running", Total: req.Count}
-	s.mu.Lock()
-	if s.jobs == nil {
-		s.jobs = map[string]*Job{}
+	if err := s.putJob(ctx, job); err != nil {
+		return GenerateResult{}, err
 	}
-	s.jobs[id] = job
-	s.mu.Unlock()
 	result := GenerateResult{JobID: id}
 	if key != "" {
-		s.rememberGenerate(key, result)
+		if err := s.rememberGenerate(ctx, key, result); err != nil {
+			return GenerateResult{}, err
+		}
 	}
 	go s.finishJob(job, specs, req.Domain)
 	return result, nil
@@ -134,6 +141,22 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 
 // Job returns a copy of a bulk-create job.
 func (s *Service) Job(id string) (Job, error) {
+	if s.db != nil {
+		row, ok, err := s.db.Job(context.Background(), id)
+		if err != nil {
+			return Job{}, err
+		}
+		if !ok {
+			return Job{}, ErrNotFound
+		}
+		job := Job{ID: row.ID, Status: row.Status, Total: row.Total, Created: row.Created, Error: row.Error}
+		if len(row.Inboxes) > 0 && string(row.Inboxes) != "[]" {
+			if err := json.Unmarshal(row.Inboxes, &job.Inboxes); err != nil {
+				return Job{}, err
+			}
+		}
+		return job, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	job, ok := s.jobs[id]
@@ -143,8 +166,40 @@ func (s *Service) Job(id string) (Job, error) {
 	return copyJob(job), nil
 }
 
+func (s *Service) putJob(ctx context.Context, job *Job) error {
+	if s.db != nil {
+		return s.db.SaveJob(ctx, store.JobRow{ID: job.ID, Status: job.Status, Total: job.Total, Inboxes: []byte("[]")})
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jobs == nil {
+		s.jobs = map[string]*Job{}
+	}
+	s.jobs[job.ID] = job
+	return nil
+}
+
 func (s *Service) finishJob(job *Job, specs []mailbackend.InboxSpec, domain string) {
 	made, err := s.createAll(context.Background(), specs, domain, nil)
+	if s.db != nil {
+		row := store.JobRow{ID: job.ID, Total: job.Total, Inboxes: []byte("[]")}
+		if err != nil {
+			row.Status = "failed"
+			row.Error = err.Error()
+		} else {
+			raw, encErr := json.Marshal(made)
+			if encErr != nil {
+				row.Status = "failed"
+				row.Error = encErr.Error()
+			} else {
+				row.Status = "done"
+				row.Created = len(made)
+				row.Inboxes = raw
+			}
+		}
+		_ = s.db.UpdateJob(context.Background(), row)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
@@ -188,20 +243,39 @@ func (s *Service) createAll(ctx context.Context, specs []mailbackend.InboxSpec, 
 	return made, nil
 }
 
-func (s *Service) savedGenerate(key string) (GenerateResult, bool) {
+func (s *Service) savedGenerate(ctx context.Context, key string) (GenerateResult, bool, error) {
+	if s.db != nil {
+		raw, ok, err := s.db.Idempotency(ctx, "generate", key)
+		if err != nil || !ok {
+			return GenerateResult{}, ok, err
+		}
+		var result GenerateResult
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return GenerateResult{}, false, err
+		}
+		return result, true, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result, ok := s.generated[key]
-	return result, ok
+	return result, ok, nil
 }
 
-func (s *Service) rememberGenerate(key string, result GenerateResult) {
+func (s *Service) rememberGenerate(ctx context.Context, key string, result GenerateResult) error {
+	if s.db != nil {
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		return s.db.SaveIdempotency(ctx, "generate", key, string(raw))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.generated == nil {
 		s.generated = map[string]GenerateResult{}
 	}
 	s.generated[key] = result
+	return nil
 }
 
 func copyJob(job *Job) Job {

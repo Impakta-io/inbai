@@ -99,6 +99,8 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stdout, "Signing key, shown once: %x\n", signingKey)
 	}
 	svc := service.New(stalwart.Mail{Client: client})
+	issuer := "http://" + *addr
+	directory := auth.NewDirectory(signingKey, issuer)
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		log, err := store.Open(ctx, dsn)
@@ -107,14 +109,15 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			writef(stderr, "database: %s\n", err)
 			return 1
 		}
+		svc.SetDB(log)
+		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
 		go feed.Run(context.Background(), stalwart.Mail{Client: client}, nil)
 	}
-	issuer := "http://" + *addr
 	handler := (&api.Server{
 		Service:      svc,
-		Directory:    auth.NewDirectory(signingKey, issuer),
+		Directory:    directory,
 		Token:        token,
 		Issuer:       issuer,
 		Domain:       cfg.Domain,

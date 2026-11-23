@@ -48,6 +48,7 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stdout, "Signing key, shown once: %x\n", signingKey)
 	}
 	svc := service.New(backend)
+	directory := auth.NewDirectory(signingKey, "http://"+addr)
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		log, err := store.Open(ctx, dsn)
@@ -56,13 +57,15 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 			writef(stderr, "database: %s\n", err)
 			return 1
 		}
+		svc.SetDB(log)
+		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
 		go feed.Run(context.Background(), backend, nil)
 	}
 	handler := (&api.Server{
 		Service:      svc,
-		Directory:    auth.NewDirectory(signingKey, "http://"+addr),
+		Directory:    directory,
 		Token:        getenv("INBAI_OPERATOR_TOKEN"),
 		Issuer:       "http://" + addr,
 		Domain:       domain,

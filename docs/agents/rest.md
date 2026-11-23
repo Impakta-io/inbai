@@ -14,7 +14,7 @@ Set `INBAI_OPERATOR_TOKEN` before starting the server. That bearer token acts as
 
 Create and send take an optional `Idempotency-Key` header. Repeating a completed key returns the first result and does not create or send again.
 
-The server allows 50 submitted messages per inbox per UTC day and 500 per domain. The next send is `429`. A failed submit does not consume the quota. These counters live in the process and reset when `inbaid` restarts.
+The server allows 50 submitted messages per inbox per UTC day and 500 per domain. The next send is `429`. A failed submit does not consume the quota. When `INBAI_DATABASE_URL` is set, the counters are in PostgreSQL and stay there after `inbaid` restarts. Without that URL they stay in the process.
 
 Errors use `application/problem+json` with `type`, `title`, `status`, and `detail`.
 

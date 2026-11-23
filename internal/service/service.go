@@ -13,6 +13,7 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/store"
 )
 
 // Permission is one action a grant allows on one inbox.
@@ -69,6 +70,7 @@ type Service struct {
 	jobs      map[string]*Job
 	generated map[string]GenerateResult
 	feed      *events.Feed
+	db        *store.Postgres
 }
 
 // New returns a service over a mail backend.
@@ -97,8 +99,18 @@ type Identities interface {
 	Suspend(agent string)
 }
 
+// SetDB stores grants, quotas, idempotency keys, and jobs in PostgreSQL.
+// A second process that opens the same database sees them.
+func (s *Service) SetDB(db *store.Postgres) {
+	s.db = db
+}
+
 // Allow records one grant. The store will own this once PostgreSQL is wired.
 func (s *Service) Allow(agent, inbox string, perm Permission) {
+	if s.db != nil {
+		_ = s.db.SaveGrant(context.Background(), agent, inbox, string(perm))
+		return
+	}
 	s.grants = append(s.grants, grant{agent: agent, inbox: inbox, perm: perm})
 }
 
@@ -109,6 +121,9 @@ func (s *Service) Grant(caller Caller, agent, inbox string, perm Permission) err
 	}
 	if agent == "" || inbox == "" || !knownPermission(perm) {
 		return fmt.Errorf("%w: grant needs an agent, an inbox, and a permission", ErrInvalid)
+	}
+	if s.db != nil {
+		return s.db.SaveGrant(context.Background(), agent, inbox, string(perm))
 	}
 	s.Allow(agent, inbox, perm)
 	return nil
@@ -154,7 +169,11 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 	}
 	key := idempotencyKey(caller, spec.Local, idemKey)
 	if key != "" {
-		if id, ok := s.created(key); ok {
+		id, ok, err := s.created(ctx, key)
+		if err != nil {
+			return "", err
+		}
+		if ok {
 			return id, nil
 		}
 	}
@@ -163,7 +182,9 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 		return "", err
 	}
 	if key != "" {
-		s.rememberCreated(key, id)
+		if err := s.rememberCreated(ctx, key, id); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }
@@ -172,12 +193,18 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 // An agent needs a send grant for that account.
 // idemKey is the Idempotency-Key. A repeat of a completed key does not send again and does not consume quota.
 func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Outbound, idemKey string) error {
-	if !s.allowed(caller, msg.AccountID, PermSend) {
-		return ErrForbidden
+	if err := s.permit(ctx, caller, msg.AccountID, PermSend); err != nil {
+		return err
 	}
 	key := idempotencyKey(caller, msg.AccountID, idemKey)
-	if key != "" && s.alreadySent(key) {
-		return nil
+	if key != "" {
+		seen, err := s.alreadySent(ctx, key)
+		if err != nil {
+			return err
+		}
+		if seen {
+			return nil
+		}
 	}
 	return s.submit(ctx, key, msg)
 }
@@ -192,15 +219,17 @@ func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbou
 			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
 		}
 	}
-	if err := s.consume(msg); err != nil {
+	if err := s.consume(ctx, msg); err != nil {
 		return err
 	}
 	if err := s.mail.Deliver(ctx, msg); err != nil {
-		s.refund(msg)
+		s.refund(ctx, msg)
 		return err
 	}
 	if key != "" {
-		s.remember(key)
+		if err := s.remember(ctx, key); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -208,8 +237,8 @@ func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbou
 // List returns messages in an inbox. An operator may always read.
 // An agent needs a read grant for that account.
 func (s *Service) List(ctx context.Context, caller Caller, accountID string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
-	if !s.allowed(caller, accountID, PermRead) {
-		return nil, "", ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermRead); err != nil {
+		return nil, "", err
 	}
 	if _, err := page.Bound(); err != nil {
 		return nil, "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
@@ -223,8 +252,8 @@ func (s *Service) List(ctx context.Context, caller Caller, accountID string, pag
 
 // Search returns messages matching text. It uses the same read grant as List.
 func (s *Service) Search(ctx context.Context, caller Caller, accountID, query string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
-	if !s.allowed(caller, accountID, PermRead) {
-		return nil, "", ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermRead); err != nil {
+		return nil, "", err
 	}
 	if _, err := page.Bound(); err != nil {
 		return nil, "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
@@ -238,16 +267,16 @@ func (s *Service) Search(ctx context.Context, caller Caller, accountID, query st
 
 // Get returns one message. It uses the same read grant as List.
 func (s *Service) Get(ctx context.Context, caller Caller, accountID, messageID string) (mailbackend.Message, error) {
-	if !s.allowed(caller, accountID, PermRead) {
-		return mailbackend.Message{}, ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermRead); err != nil {
+		return mailbackend.Message{}, err
 	}
 	return s.mail.Get(ctx, accountID, messageID)
 }
 
 // Delete removes one message. An agent needs a delete grant for that account.
 func (s *Service) Delete(ctx context.Context, caller Caller, accountID, messageID string) error {
-	if !s.allowed(caller, accountID, PermDelete) {
-		return ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermDelete); err != nil {
+		return err
 	}
 	return s.mail.Delete(ctx, accountID, messageID)
 }
@@ -291,8 +320,8 @@ func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) err
 
 // Attachment returns the bytes of one file on a message. It uses the same read grant as Get.
 func (s *Service) Attachment(ctx context.Context, caller Caller, accountID, messageID, blobID string) ([]byte, mailbackend.Attachment, error) {
-	if !s.allowed(caller, accountID, PermRead) {
-		return nil, mailbackend.Attachment{}, ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermRead); err != nil {
+		return nil, mailbackend.Attachment{}, err
 	}
 	if blobID == "" {
 		return nil, mailbackend.Attachment{}, fmt.Errorf("%w: blob id is required", ErrInvalid)
@@ -323,8 +352,8 @@ func (s *Service) Attachment(ctx context.Context, caller Caller, accountID, mess
 // Reply submits a message that references an existing one.
 // An agent needs a reply grant. The send quota still applies.
 func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID string, msg mailbackend.Outbound, idemKey string) error {
-	if !s.allowed(caller, accountID, PermReply) {
-		return ErrForbidden
+	if err := s.permit(ctx, caller, accountID, PermReply); err != nil {
+		return err
 	}
 	original, err := s.mail.Get(ctx, accountID, messageID)
 	if err != nil {
@@ -337,8 +366,14 @@ func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID
 	msg.InReplyTo = original.MessageID
 	msg.References = append(append([]string{}, original.References...), original.MessageID...)
 	key := idempotencyKey(caller, accountID, idemKey)
-	if key != "" && s.alreadySent(key) {
-		return nil
+	if key != "" {
+		seen, err := s.alreadySent(ctx, key)
+		if err != nil {
+			return err
+		}
+		if seen {
+			return nil
+		}
 	}
 	return s.submit(ctx, key, msg)
 }
@@ -355,36 +390,61 @@ func idempotencyKey(caller Caller, inbox, key string) string {
 	return who + "\n" + inbox + "\n" + key
 }
 
-func (s *Service) alreadySent(key string) bool {
+func (s *Service) alreadySent(ctx context.Context, key string) (bool, error) {
+	if s.db != nil {
+		_, ok, err := s.db.Idempotency(ctx, "sent", key)
+		return ok, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.sentID[key]
-	return ok
+	return ok, nil
 }
 
-func (s *Service) remember(key string) {
+func (s *Service) remember(ctx context.Context, key string) error {
+	if s.db != nil {
+		return s.db.SaveIdempotency(ctx, "sent", key, "")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sentID[key] = struct{}{}
+	return nil
 }
 
-func (s *Service) created(key string) (string, bool) {
+func (s *Service) created(ctx context.Context, key string) (string, bool, error) {
+	if s.db != nil {
+		return s.db.Idempotency(ctx, "created", key)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id, ok := s.createdID[key]
-	return id, ok
+	return id, ok, nil
 }
 
-func (s *Service) rememberCreated(key string, id string) {
+func (s *Service) rememberCreated(ctx context.Context, key, id string) error {
+	if s.db != nil {
+		return s.db.SaveIdempotency(ctx, "created", key, id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createdID[key] = id
+	return nil
 }
 
-func (s *Service) consume(msg mailbackend.Outbound) error {
+func (s *Service) consume(ctx context.Context, msg mailbackend.Outbound) error {
 	day := s.now().UTC().Format("2006-01-02")
 	inboxKey := "inbox\n" + msg.AccountID + "\n" + day
 	domainKey := "domain\n" + domainOf(msg.From) + "\n" + day
+	if s.db != nil {
+		ok, err := s.db.Consume(ctx, inboxKey, domainKey, s.inboxDaily, s.domainDaily)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrQuota
+		}
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sent[inboxKey] >= s.inboxDaily || s.sent[domainKey] >= s.domainDaily {
@@ -395,10 +455,14 @@ func (s *Service) consume(msg mailbackend.Outbound) error {
 	return nil
 }
 
-func (s *Service) refund(msg mailbackend.Outbound) {
+func (s *Service) refund(ctx context.Context, msg mailbackend.Outbound) {
 	day := s.now().UTC().Format("2006-01-02")
 	inboxKey := "inbox\n" + msg.AccountID + "\n" + day
 	domainKey := "domain\n" + domainOf(msg.From) + "\n" + day
+	if s.db != nil {
+		_ = s.db.Refund(ctx, inboxKey, domainKey)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sent[inboxKey] > 0 {
@@ -417,17 +481,31 @@ func domainOf(address string) string {
 	return strings.ToLower(domain)
 }
 
-func (s *Service) allowed(caller Caller, inbox string, perm Permission) bool {
+func (s *Service) permit(ctx context.Context, caller Caller, inbox string, perm Permission) error {
+	ok, err := s.allowed(ctx, caller, inbox, perm)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrForbidden
+	}
+	return nil
+}
+
+func (s *Service) allowed(ctx context.Context, caller Caller, inbox string, perm Permission) (bool, error) {
 	if caller.Operator {
-		return true
+		return true, nil
 	}
 	if caller.Agent == "" {
-		return false
+		return false, nil
+	}
+	if s.db != nil {
+		return s.db.HasGrant(ctx, caller.Agent, inbox, string(perm))
 	}
 	for _, item := range s.grants {
 		if item.agent == caller.Agent && item.inbox == inbox && item.perm == perm {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }

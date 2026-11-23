@@ -139,8 +139,8 @@ func (s *Service) Suppressions(ctx context.Context, caller Caller) ([]store.Supp
 // Events returns the feed for one inbox after a consumer cursor.
 // An agent needs a read grant. The log is not read when the grant is missing.
 func (s *Service) Events(ctx context.Context, caller Caller, inbox string, after int64, timeout time.Duration) ([]store.Record, error) {
-	if !s.allowed(caller, inbox, PermRead) {
-		return nil, ErrForbidden
+	if err := s.permit(ctx, caller, inbox, PermRead); err != nil {
+		return nil, err
 	}
 	if s.feed == nil {
 		return nil, fmt.Errorf("%w", ErrUnavailable)
@@ -170,8 +170,8 @@ func (s *Service) Events(ctx context.Context, caller Caller, inbox string, after
 
 // SubscribeWebhook registers a signed webhook for one inbox.
 func (s *Service) SubscribeWebhook(ctx context.Context, caller Caller, inbox, rawURL string) (string, string, error) {
-	if !s.allowed(caller, inbox, PermRead) {
-		return "", "", ErrForbidden
+	if err := s.permit(ctx, caller, inbox, PermRead); err != nil {
+		return "", "", err
 	}
 	if s.feed == nil {
 		return "", "", fmt.Errorf("%w", ErrUnavailable)
