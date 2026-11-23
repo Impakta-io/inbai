@@ -1,0 +1,100 @@
+// Copyright 2026 Impakta-io
+// SPDX-License-Identifier: Apache-2.0
+
+package stalwart
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// ZoneFile returns the BIND zone Stalwart computed for the domain.
+// It creates the domain when the server does not already have it.
+func ZoneFile(ctx context.Context, client *Client, domain string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("missing stalwart client")
+	}
+	if strings.TrimSpace(domain) == "" || !strings.Contains(domain, ".") || strings.ContainsAny(domain, " /\t") {
+		return "", fmt.Errorf("domain %q is not a DNS name", domain)
+	}
+	raw, err := client.invoke(ctx, "q", "x:Domain/query", map[string]any{
+		"filter": map[string]any{"name": domain},
+	})
+	if err != nil {
+		return "", err
+	}
+	var query struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &query); err != nil {
+		return "", err
+	}
+	id := ""
+	if len(query.IDs) == 0 {
+		id, err = ensureDomain(ctx, client, domain)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		id, err = domainID(ctx, client, query.IDs, domain)
+		if err != nil {
+			return "", err
+		}
+	}
+	raw, err = client.invoke(ctx, "g", "x:Domain/get", map[string]any{
+		"ids":        []string{id},
+		"properties": []string{"name", "dnsZoneFile"},
+	})
+	if err != nil {
+		return "", err
+	}
+	var got struct {
+		List []struct {
+			Name        string `json:"name"`
+			DNSZoneFile string `json:"dnsZoneFile"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return "", err
+	}
+	for _, item := range got.List {
+		if !strings.EqualFold(item.Name, domain) && item.Name != "" {
+			continue
+		}
+		if strings.TrimSpace(item.DNSZoneFile) == "" {
+			return "", fmt.Errorf("stalwart domain %s has no zone file", domain)
+		}
+		return item.DNSZoneFile, nil
+	}
+	return "", fmt.Errorf("stalwart domain %s has no zone file", domain)
+}
+
+func domainID(ctx context.Context, client *Client, ids []string, domain string) (string, error) {
+	raw, err := client.invoke(ctx, "g", "x:Domain/get", map[string]any{
+		"ids":        ids,
+		"properties": []string{"name"},
+	})
+	if err != nil {
+		return "", err
+	}
+	var got struct {
+		List []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return "", err
+	}
+	for _, item := range got.List {
+		if strings.EqualFold(item.Name, domain) {
+			return item.ID, nil
+		}
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
+	return "", fmt.Errorf("stalwart has no domain named %s", domain)
+}

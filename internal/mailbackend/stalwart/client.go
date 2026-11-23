@@ -28,6 +28,7 @@ type Client struct {
 	User     string
 	Password string
 	HTTP     *http.Client
+	APIKey   string
 }
 
 type jmapCall struct {
@@ -77,8 +78,13 @@ func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.Ra
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(c.User, c.Password)
 	req.Header.Set("Content-Type", "application/json")
+	switch {
+	case c.APIKey != "":
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	default:
+		req.SetBasicAuth(c.User, c.Password)
+	}
 	httpClient := c.HTTP
 	if httpClient == nil {
 		httpClient = http.DefaultClient

@@ -2,6 +2,6 @@ Status: current
 
 # Commands
 
-`inbai` is the operator CLI. With no arguments it prints its version. `inbai init` bootstraps Stalwart. `inbaid` is the server and prints its version.
+`inbai` is the operator CLI. With no arguments it prints its version. `inbai init` bootstraps Stalwart, and `inbai domain add` prints that domain's DNS records. `inbaid` is the server and prints its version.
 
 Shared version text lives in `internal/version`.

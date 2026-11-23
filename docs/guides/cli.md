@@ -1,4 +1,4 @@
-Status: partial — `init` is implemented. The other commands are not.
+Status: partial — `init` and `domain add` are implemented. The other commands are not.
 
 # CLI
 
@@ -17,11 +17,15 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 Running init again reuses the domain, the roles, and the accounts. It keeps the API key already in the config file.
 
+## domain add
+
+`inbai domain add` prints the DNS zone file for the domain in the config file and checks the MX and TXT records. The details are in [domain setup](domain-setup.md).
+
 ## Planned sections
 
 - Global flags, including JSON output for scripts.
 - `login` and `doctor`.
-- `domain add` and domain checks.
+- Domain checks beyond MX and TXT, and the outbound relay.
 - `inbox create`, `inbox generate`, `inbox list`, and `inbox delete`.
 - Sending, listing, reading, replying, and deleting mail.
 - `agent create`, `agent bind`, `agent suspend`, and `agent revoke`.
