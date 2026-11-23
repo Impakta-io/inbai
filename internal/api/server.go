@@ -55,11 +55,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
+	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
+	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
 	mux.HandleFunc("POST /v1/inboxes/generate", s.generateInboxes)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages", s.sendMessage)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}", s.getMessage)
+	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}/attachments/{blobId}", s.attachment)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}/messages/{messageId}", s.deleteMessage)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages/{messageId}/reply", s.replyMessage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +251,42 @@ func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 		"id":      id,
 		"address": address,
 	})
+}
+
+func (s *Server) listInboxes(w http.ResponseWriter, r *http.Request) {
+	inboxes, err := s.Service.ListInboxes(r.Context(), s.requestCaller(r), s.Domain)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if inboxes == nil {
+		inboxes = []service.Inbox{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"inboxes": inboxes})
+}
+
+func (s *Server) deleteInbox(w http.ResponseWriter, r *http.Request) {
+	if err := s.Service.DeleteInbox(r.Context(), s.requestCaller(r), r.PathValue("id")); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
+	data, meta, err := s.Service.Attachment(r.Context(), s.requestCaller(r), r.PathValue("id"), r.PathValue("messageId"), r.PathValue("blobId"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	kind := meta.Type
+	if kind == "" {
+		kind = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", kind)
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(meta.Name))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {

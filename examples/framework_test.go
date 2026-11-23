@@ -110,3 +110,8 @@ func (b *box) Get(context.Context, string, string) (mailbackend.Message, error) 
 	return mailbackend.Message{}, nil
 }
 func (b *box) Delete(context.Context, string, string) error { return nil }
+func (b *box) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	return nil, nil
+}
+func (b *box) DeleteInbox(context.Context, string) error                { return nil }
+func (b *box) Download(context.Context, string, string) ([]byte, error) { return nil, nil }

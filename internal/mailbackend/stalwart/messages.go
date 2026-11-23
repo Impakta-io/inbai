@@ -108,9 +108,10 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Value string `json:"value"`
 			} `json:"bodyValues"`
 			Attachments []struct {
-				Name string `json:"name"`
-				Type string `json:"type"`
-				Size int    `json:"size"`
+				Name   string `json:"name"`
+				Type   string `json:"type"`
+				Size   int    `json:"size"`
+				BlobID string `json:"blobId"`
 			} `json:"attachments"`
 		} `json:"list"`
 	}
@@ -135,9 +136,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 		}
 		for _, file := range item.Attachments {
 			out[i].Attachments = append(out[i].Attachments, Attachment{
-				Name: file.Name,
-				Type: file.Type,
-				Size: file.Size,
+				Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID,
 			})
 		}
 	}

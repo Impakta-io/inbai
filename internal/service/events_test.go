@@ -96,6 +96,13 @@ func (eventMail) Get(context.Context, string, string) (mailbackend.Message, erro
 	return mailbackend.Message{}, nil
 }
 func (eventMail) Delete(context.Context, string, string) error { return nil }
+func (eventMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	return nil, nil
+}
+func (eventMail) DeleteInbox(context.Context, string) error { return nil }
+func (eventMail) Download(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}
 func (m *eventMail) MailState(context.Context, string) (string, error) {
 	return m.state, nil
 }

@@ -124,6 +124,12 @@ func (m *mailbox) Get(_ context.Context, id, messageID string) (mailbackend.Mess
 
 func (m *mailbox) Delete(context.Context, string, string) error { return nil }
 
+func (m *mailbox) ListInboxes(context.Context) ([]mailbackend.Account, error) { return nil, nil }
+
+func (m *mailbox) DeleteInbox(context.Context, string) error { return nil }
+
+func (m *mailbox) Download(context.Context, string, string) ([]byte, error) { return nil, nil }
+
 func (m *mailbox) MailState(_ context.Context, inbox string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

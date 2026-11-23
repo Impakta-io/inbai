@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/smtp"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,30 @@ func (b *Backend) CreateInbox(context.Context, mailbackend.InboxSpec) (string, e
 // CreateInboxes reports that this backend cannot provision mailboxes.
 func (b *Backend) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]string, error) {
 	return nil, errors.New("imap: this backend does not provision accounts")
+}
+
+// DeleteInbox reports that this backend cannot remove an account.
+func (b *Backend) DeleteInbox(context.Context, string) error {
+	return errors.New("imap: this backend does not delete accounts")
+}
+
+// ListInboxes returns the accounts named in the account file.
+func (b *Backend) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	out := make([]mailbackend.Account, 0, len(b.accounts))
+	for id, login := range b.accounts {
+		local := login.User
+		if at := strings.IndexByte(local, '@'); at > 0 {
+			local = local[:at]
+		}
+		out = append(out, mailbackend.Account{ID: id, Local: local})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// Download reports that IMAP messages are read with Get. There is no blob id.
+func (b *Backend) Download(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("imap: this backend has no blob download")
 }
 
 // Deliver submits one message over SMTP using the account password.
