@@ -162,6 +162,43 @@ func TestSendQuotaAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestWorkspaceQuotaAndRecipientDomainRateLimit(t *testing.T) {
+	mail := &fakeMail{}
+	svc := New(mail)
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	svc.SetSendLimits(10, 10, 3, 2)
+
+	// Two sends to target.test succeed; third in same minute hits recipient-domain rate limit.
+	m1 := mailbackend.Outbound{AccountID: "inbox-a", From: "a@dom1.test", To: "u1@target.test", Subject: "1"}
+	m2 := mailbackend.Outbound{AccountID: "inbox-b", From: "b@dom2.test", To: "u2@target.test", Subject: "2"}
+	m3 := mailbackend.Outbound{AccountID: "inbox-c", From: "c@dom3.test", To: "u3@target.test", Subject: "3"}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m2, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m3, ""); !errors.Is(err, ErrQuota) {
+		t.Fatalf("recipient rate limit err = %v", err)
+	}
+
+	// A different recipient domain still works in the same minute, consuming the 3rd workspace send.
+	mOther := mailbackend.Outbound{AccountID: "inbox-c", From: "c@dom3.test", To: "u@other.test", Subject: "other"}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, mOther, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advancing to the next minute clears recipient rate limit, but workspace daily quota (3) still blocks.
+	now = now.Add(time.Minute)
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m3, ""); !errors.Is(err, ErrQuota) {
+		t.Fatalf("workspace daily quota err = %v", err)
+	}
+	if mail.sent != 3 {
+		t.Fatalf("backend sends = %d, want 3", mail.sent)
+	}
+}
+
 func TestFailedSendDoesNotConsumeQuota(t *testing.T) {
 	mail := &fakeMail{sendErr: errors.New("down")}
 	svc := New(mail)

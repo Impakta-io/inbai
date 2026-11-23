@@ -110,6 +110,10 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stdout, "Signing key, shown once: %x\n", signingKey)
 	}
 	svc := service.New(stalwart.Mail{Client: client})
+	if err := applySendLimits(svc, getenv); err != nil {
+		writef(stderr, "send limits: %s\n", err)
+		return 2
+	}
 	issuer := "http://" + *addr
 	directory := auth.NewDirectory(signingKey, issuer)
 	if log != nil {

@@ -13,7 +13,7 @@ export INBAI_OPERATOR_TOKEN='the-operator-token'
 go run ./tools/load -url http://127.0.0.1:8787 -inboxes 10 -messages 1 -concurrency 4
 ```
 
-`-inboxes` and `-messages` are the size of that run. A count above 50 addresses becomes a job, and the tool waits for it. The domain send quota still applies, so a large send run stops with HTTP 429 until the operator raises the quota. The JSON report counts those as errors.
+`-inboxes` and `-messages` are the size of that run. A count above 50 addresses becomes a job, and the tool waits for it. The send quotas and per-recipient-domain rate limit still apply, so a large send run stops with HTTP 429 until the operator raises them via `INBAI_QUOTA_INBOX_DAILY`, `INBAI_QUOTA_DOMAIN_DAILY`, `INBAI_QUOTA_WORKSPACE_DAILY`, and `INBAI_RATE_RECIPIENT_PER_MINUTE`. The JSON report counts those as errors.
 
 `events` is `seen` when the probe message appears on `GET /v1/events`, `empty` when the wait ends without one, and `unavailable` when the server has no database. `eventLagMs` is the time from the probe send returning to seeing that event. A server without `INBAI_DATABASE_URL` cannot record one.
 

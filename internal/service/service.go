@@ -34,15 +34,21 @@ const (
 // ErrForbidden is returned when the caller has no grant for the action.
 var ErrForbidden = errors.New("forbidden")
 
-// ErrQuota is returned when the inbox or the domain has used its daily send quota.
+// ErrQuota is returned when a send quota or recipient-domain rate limit is exceeded.
 var ErrQuota = errors.New("send quota exceeded")
 
 // ErrSuppressed is returned when the recipient is on the hard-bounce list.
 var ErrSuppressed = errors.New("recipient is suppressed")
 
 const (
-	defaultInboxDaily  = 50
-	defaultDomainDaily = 500
+	// DefaultInboxDaily is the default daily send cap per inbox.
+	DefaultInboxDaily = 50
+	// DefaultDomainDaily is the default daily send cap per sender domain.
+	DefaultDomainDaily = 500
+	// DefaultWorkspaceDaily is the default daily send cap across the workspace.
+	DefaultWorkspaceDaily = 5000
+	// DefaultRecipientPerMinute is the default per-minute send rate limit per recipient domain.
+	DefaultRecipientPerMinute = 30
 )
 
 // Caller is who is asking. An operator is the human running the CLI.
@@ -60,12 +66,14 @@ type grant struct {
 
 // Service is the isolation boundary. Transports call this and do not check grants themselves.
 type Service struct {
-	mail        mailbackend.Backend
-	grants      []grant
-	inboxDaily  int
-	domainDaily int
-	now         func() time.Time
-	syncLimit   int
+	mail               mailbackend.Backend
+	grants             []grant
+	inboxDaily         int
+	domainDaily        int
+	workspaceDaily     int
+	recipientPerMinute int
+	now                func() time.Time
+	syncLimit          int
 
 	mu        sync.Mutex
 	sent      map[string]int
@@ -82,23 +90,35 @@ type Service struct {
 }
 
 // New returns a service over a mail backend.
-// The default send quota is 50 messages per inbox per day and 500 per domain per day.
+// Product default send limits are 50/inbox/day, 500/domain/day, 5000/workspace/day,
+// and 30/recipient-domain/minute.
 func New(mail mailbackend.Backend) *Service {
 	return &Service{
-		mail:        mail,
-		inboxDaily:  defaultInboxDaily,
-		domainDaily: defaultDomainDaily,
-		now:         time.Now,
-		sent:        map[string]int{},
-		sentID:      map[string]struct{}{},
-		createdID:   map[string]string{},
+		mail:               mail,
+		inboxDaily:         DefaultInboxDaily,
+		domainDaily:        DefaultDomainDaily,
+		workspaceDaily:     DefaultWorkspaceDaily,
+		recipientPerMinute: DefaultRecipientPerMinute,
+		now:                time.Now,
+		sent:               map[string]int{},
+		sentID:             map[string]struct{}{},
+		createdID:          map[string]string{},
 	}
 }
 
-// SetQuota replaces the daily send limits. Zero rejects every send.
+// SetQuota replaces the daily inbox and domain send limits. Zero rejects every send.
 func (s *Service) SetQuota(inboxDaily, domainDaily int) {
 	s.inboxDaily = inboxDaily
 	s.domainDaily = domainDaily
+}
+
+// SetSendLimits replaces all send quotas and the per-recipient-domain per-minute rate limit.
+// Zero on any limit rejects every send.
+func (s *Service) SetSendLimits(inboxDaily, domainDaily, workspaceDaily, recipientPerMinute int) {
+	s.inboxDaily = inboxDaily
+	s.domainDaily = domainDaily
+	s.workspaceDaily = workspaceDaily
+	s.recipientPerMinute = recipientPerMinute
 }
 
 // Identities creates and suspends agent credentials. The token still only names the caller.
@@ -572,12 +592,22 @@ func (s *Service) rememberCreated(ctx context.Context, key, id string) error {
 	return nil
 }
 
+func (s *Service) sendBuckets(msg mailbackend.Outbound) []store.BucketLimit {
+	now := s.now().UTC()
+	day := now.Format("2006-01-02")
+	minute := now.Format("2006-01-02T15:04")
+	return []store.BucketLimit{
+		{Key: "inbox\n" + msg.AccountID + "\n" + day, Limit: s.inboxDaily},
+		{Key: "domain\n" + domainOf(msg.From) + "\n" + day, Limit: s.domainDaily},
+		{Key: "workspace\n" + store.WorkspaceID + "\n" + day, Limit: s.workspaceDaily},
+		{Key: "rcpt\n" + domainOf(msg.To) + "\n" + minute, Limit: s.recipientPerMinute},
+	}
+}
+
 func (s *Service) consume(ctx context.Context, msg mailbackend.Outbound) error {
-	day := s.now().UTC().Format("2006-01-02")
-	inboxKey := "inbox\n" + msg.AccountID + "\n" + day
-	domainKey := "domain\n" + domainOf(msg.From) + "\n" + day
+	buckets := s.sendBuckets(msg)
 	if s.db != nil {
-		ok, err := s.db.Consume(ctx, inboxKey, domainKey, s.inboxDaily, s.domainDaily)
+		ok, err := s.db.ConsumeBuckets(ctx, buckets)
 		if err != nil {
 			return err
 		}
@@ -588,29 +618,33 @@ func (s *Service) consume(ctx context.Context, msg mailbackend.Outbound) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sent[inboxKey] >= s.inboxDaily || s.sent[domainKey] >= s.domainDaily {
-		return ErrQuota
+	for _, b := range buckets {
+		if b.Limit <= 0 || s.sent[b.Key] >= b.Limit {
+			return ErrQuota
+		}
 	}
-	s.sent[inboxKey]++
-	s.sent[domainKey]++
+	for _, b := range buckets {
+		s.sent[b.Key]++
+	}
 	return nil
 }
 
 func (s *Service) refund(ctx context.Context, msg mailbackend.Outbound) {
-	day := s.now().UTC().Format("2006-01-02")
-	inboxKey := "inbox\n" + msg.AccountID + "\n" + day
-	domainKey := "domain\n" + domainOf(msg.From) + "\n" + day
+	buckets := s.sendBuckets(msg)
 	if s.db != nil {
-		_ = s.db.Refund(ctx, inboxKey, domainKey)
+		keys := make([]string, len(buckets))
+		for i, b := range buckets {
+			keys[i] = b.Key
+		}
+		_ = s.db.RefundBuckets(ctx, keys)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sent[inboxKey] > 0 {
-		s.sent[inboxKey]--
-	}
-	if s.sent[domainKey] > 0 {
-		s.sent[domainKey]--
+	for _, b := range buckets {
+		if s.sent[b.Key] > 0 {
+			s.sent[b.Key]--
+		}
 	}
 }
 

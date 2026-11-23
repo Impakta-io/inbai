@@ -31,24 +31,39 @@ SELECT EXISTS(SELECT 1 FROM access_grant WHERE agent = $1 AND inbox = $2 AND per
 	return ok, err
 }
 
+// BucketLimit pairs a counter bucket key with its maximum allowed count.
+type BucketLimit struct {
+	Key   string
+	Limit int
+}
+
 // Consume adds one to both counters when each is still under its limit.
 // A rejected consume leaves both counters unchanged.
 func (p *Postgres) Consume(ctx context.Context, inboxKey, domainKey string, inboxLimit, domainLimit int) (bool, error) {
-	if inboxLimit <= 0 || domainLimit <= 0 {
-		return false, nil
+	return p.ConsumeBuckets(ctx, []BucketLimit{
+		{Key: inboxKey, Limit: inboxLimit},
+		{Key: domainKey, Limit: domainLimit},
+	})
+}
+
+// ConsumeBuckets atomically adds one to every bucket when all are under their limits.
+// If any bucket is at or over its limit, none of the buckets change.
+func (p *Postgres) ConsumeBuckets(ctx context.Context, buckets []BucketLimit) (bool, error) {
+	for _, b := range buckets {
+		if b.Limit <= 0 {
+			return false, nil
+		}
 	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	ok, err := bump(ctx, tx, inboxKey, inboxLimit)
-	if err != nil || !ok {
-		return false, err
-	}
-	ok, err = bump(ctx, tx, domainKey, domainLimit)
-	if err != nil || !ok {
-		return false, err
+	for _, b := range buckets {
+		ok, err := bump(ctx, tx, b.Key, b.Limit)
+		if err != nil || !ok {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
@@ -71,8 +86,16 @@ RETURNING used`, key, limit).Scan(&used)
 
 // Refund removes one use from each counter. A missing counter stays missing.
 func (p *Postgres) Refund(ctx context.Context, inboxKey, domainKey string) error {
+	return p.RefundBuckets(ctx, []string{inboxKey, domainKey})
+}
+
+// RefundBuckets removes one use from every listed counter.
+func (p *Postgres) RefundBuckets(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
 	_, err := p.pool.Exec(ctx, `
-UPDATE quota_counter SET used = GREATEST(used - 1, 0) WHERE bucket = $1 OR bucket = $2`, inboxKey, domainKey)
+UPDATE quota_counter SET used = GREATEST(used - 1, 0) WHERE bucket = ANY($1)`, keys)
 	return err
 }
 

@@ -60,6 +60,10 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stdout, "Signing key, shown once: %x\n", signingKey)
 	}
 	svc := service.New(backend)
+	if err := applySendLimits(svc, getenv); err != nil {
+		writef(stderr, "send limits: %s\n", err)
+		return 2
+	}
 	directory := auth.NewDirectory(signingKey, "http://"+addr)
 	if log != nil {
 		svc.SetDB(log)
