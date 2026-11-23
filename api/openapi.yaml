@@ -96,6 +96,47 @@ paths:
           description: Created
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/agents/{name}/suspend:
+    post:
+      operationId: suspendAgent
+      summary: Stop an agent from exchanging a secret or using an access token.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Suspended
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/grants/{agent}/{inbox}/{permission}:
+    delete:
+      operationId: revokeGrant
+      summary: Remove one permission. A grant that is already gone is still a success.
+      parameters:
+        - name: agent
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: inbox
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: permission
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [read, send, reply, delete, manage]
+      responses:
+        "204":
+          description: Revoked
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes:
     post:
       operationId: createInbox

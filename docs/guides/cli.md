@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -51,6 +51,10 @@ inbai message get alice@example.com <message-id>
 
 Delivery to another server still depends on the DNS records from `domain add` and on Stalwart accepting the message. `inbaid serve` must be running.
 
+## agent
+
+`inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. `inbai agent revoke ada <inbox-id> read` removes it. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `--json` prints the result. All four commands use the operator token.
+
 ## mcp serve
 
 `inbai mcp serve` speaks MCP on stdin and stdout. It exchanges `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET` for an access token, or uses `INBAI_ACCESS_TOKEN` or `INBAI_OPERATOR_TOKEN` when one of those is already set. The tools and the HTTP endpoint are described in [MCP](../agents/mcp.md).
@@ -63,4 +67,3 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 - `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
-- `agent create`, `agent bind`, `agent suspend`, and `agent revoke`.

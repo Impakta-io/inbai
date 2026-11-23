@@ -311,6 +311,21 @@ func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
 	return []byte("file-bytes"), nil
 }
 
+func TestRevokeRemovesTheGrant(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello"}}}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if err := svc.Revoke(Caller{Agent: "ada"}, "ada", "inbox-a", PermRead); !errors.Is(err, ErrForbidden) || mail.listed {
+		t.Fatalf("agent revoke err %v listed %v", err, mail.listed)
+	}
+	if err := svc.Revoke(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{}); !errors.Is(err, ErrForbidden) || mail.listed {
+		t.Fatalf("after revoke err %v listed %v", err, mail.listed)
+	}
+}
+
 func TestListReturnsTheNextCursor(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "a", Subject: "one"}, {ID: "b", Subject: "two"}}}
 	svc := New(mail)

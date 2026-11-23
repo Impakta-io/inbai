@@ -105,13 +105,15 @@ func (s *Service) SetDB(db *store.Postgres) {
 	s.db = db
 }
 
-// Allow records one grant. The store will own this once PostgreSQL is wired.
+// Allow records one grant.
 func (s *Service) Allow(agent, inbox string, perm Permission) {
 	if s.db != nil {
 		_ = s.db.SaveGrant(context.Background(), agent, inbox, string(perm))
 		return
 	}
+	s.mu.Lock()
 	s.grants = append(s.grants, grant{agent: agent, inbox: inbox, perm: perm})
+	s.mu.Unlock()
 }
 
 // Grant records a permission. Only an operator may do that.
@@ -126,6 +128,31 @@ func (s *Service) Grant(caller Caller, agent, inbox string, perm Permission) err
 		return s.db.SaveGrant(context.Background(), agent, inbox, string(perm))
 	}
 	s.Allow(agent, inbox, perm)
+	return nil
+}
+
+// Revoke removes one permission. Only an operator may do that.
+// A grant that is already gone is still a success.
+func (s *Service) Revoke(caller Caller, agent, inbox string, perm Permission) error {
+	if !caller.Operator {
+		return ErrForbidden
+	}
+	if agent == "" || inbox == "" || !knownPermission(perm) {
+		return fmt.Errorf("%w: revoke needs an agent, an inbox, and a permission", ErrInvalid)
+	}
+	if s.db != nil {
+		return s.db.DeleteGrant(context.Background(), agent, inbox, string(perm))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.grants[:0]
+	for _, item := range s.grants {
+		if item.agent == agent && item.inbox == inbox && item.perm == perm {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	s.grants = kept
 	return nil
 }
 
@@ -502,6 +529,8 @@ func (s *Service) allowed(ctx context.Context, caller Caller, inbox string, perm
 	if s.db != nil {
 		return s.db.HasGrant(ctx, caller.Agent, inbox, string(perm))
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, item := range s.grants {
 		if item.agent == caller.Agent && item.inbox == inbox && item.perm == perm {
 			return true, nil

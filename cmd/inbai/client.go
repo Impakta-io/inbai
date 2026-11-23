@@ -70,6 +70,33 @@ func (c apiClient) pause() time.Duration {
 	return 200 * time.Millisecond
 }
 
+func (c apiClient) createAgent(ctx context.Context, name string) (string, string, error) {
+	var out struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+	}
+	_, err := c.call(ctx, http.MethodPost, "/v1/agents", map[string]string{"name": name}, &out)
+	return out.ID, out.Secret, err
+}
+
+func (c apiClient) grant(ctx context.Context, agent, inbox, permission string) error {
+	_, err := c.call(ctx, http.MethodPost, "/v1/grants", map[string]string{
+		"agent": agent, "inbox": inbox, "permission": permission,
+	}, nil)
+	return err
+}
+
+func (c apiClient) suspendAgent(ctx context.Context, name string) error {
+	_, err := c.call(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(name)+"/suspend", map[string]string{}, nil)
+	return err
+}
+
+func (c apiClient) revoke(ctx context.Context, agent, inbox, permission string) error {
+	path := "/v1/grants/" + url.PathEscape(agent) + "/" + url.PathEscape(inbox) + "/" + url.PathEscape(permission)
+	_, err := c.call(ctx, http.MethodDelete, path, nil, nil)
+	return err
+}
+
 func (c apiClient) createInbox(ctx context.Context, local string) (apiInbox, error) {
 	var out apiInbox
 	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", map[string]string{"localPart": local}, &out)
