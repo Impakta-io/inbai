@@ -2,7 +2,7 @@ Status: planned — the situations below are the design. No agent can send or re
 
 # Use cases
 
-inbAI is a control plane in front of a mail server. An operator provisions domains and inboxes. An agent uses the REST API or the MCP server. A grant decides what that agent may do. The `inbai` and `inbaid` binaries do not do this yet. They print their version and exit.
+inbAI is a control plane in front of a mail server. An operator provisions domains and inboxes. An agent uses the REST API or the MCP server. A grant decides what that agent may do. `inbai init` can bootstrap the mail server. The API, the MCP server, and inbox commands are not implemented.
 
 ## One inbox per agent
 

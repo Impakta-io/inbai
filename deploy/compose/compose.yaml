@@ -28,6 +28,7 @@ services:
       - "25:25"
       - "587:587"
       - "443:443"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - stalwart:/var/lib/stalwart

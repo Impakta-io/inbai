@@ -4,7 +4,7 @@ Status: current
 
 inbAI is a control plane in front of a mail server. It provisions domains and inboxes, holds agent identity and grants, enforces quotas, and delivers events. It does not implement SMTP, IMAP, or spam filtering.
 
-The code in this repository does not do that yet. The `inbai` and `inbaid` binaries print their version. This document is the design they will follow. Items still waiting on a validation spike are marked proposed.
+`inbai init` creates the Stalwart domain, operator, and service account described below. `inbaid` still only prints its version. The API, grants, and mail commands are not implemented. This document is the design the rest of the code will follow.
 
 ## Components
 

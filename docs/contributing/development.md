@@ -38,7 +38,7 @@ golangci-lint run ./...
 
 ## What the binaries do
 
-`bin/inbai` prints `inbai 0.0.0-dev`. `bin/inbaid` prints `inbaid 0.0.0-dev`. There are no subcommands yet.
+`bin/inbai` prints `inbai 0.0.0-dev`. `inbai init` bootstraps Stalwart. `bin/inbaid` prints `inbaid 0.0.0-dev`.
 
 ## Branches
 
