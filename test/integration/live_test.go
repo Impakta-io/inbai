@@ -4,11 +4,14 @@
 package integration
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +19,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Impakta-io/inbai/internal/config"
+	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
 )
 
 func TestOneInboxOnStalwart(t *testing.T) {
@@ -59,7 +65,14 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	waitURL(t, "http://127.0.0.1:8787/healthz", false)
 
 	cli := []string{"INBAI_OPERATOR_TOKEN=integration-token"}
-	must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "create", "--config", cfg, "alice")
+	createdOut := must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "create", "--config", cfg, "--json", "alice")
+	var alice struct {
+		ID      string `json:"id"`
+		Address string `json:"address"`
+	}
+	if err := json.Unmarshal([]byte(createdOut), &alice); err != nil || alice.ID == "" {
+		t.Fatalf("create %s: %v", createdOut, err)
+	}
 	must(t, root, cli, filepath.Join(bin, "inbai"), "message", "send", "--config", cfg,
 		"--from", "alice@inbai.test", "--to", "alice@inbai.test", "--subject", "hello", "--body", "hello from inbai")
 
@@ -95,6 +108,156 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	got := must(t, root, cli, filepath.Join(bin, "inbai"), "message", "get", "--config", cfg, "--json", "alice@inbai.test", id)
 	if !strings.Contains(got, "hello from inbai") {
 		t.Fatalf("message %s", got)
+	}
+
+	// Bulk generate 10 addresses against live Stalwart.
+	genOut := must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "generate", "--config", cfg, "--prefix", "gen", "--count", "10", "--json")
+	var generated struct {
+		Inboxes []struct {
+			ID      string `json:"id"`
+			Address string `json:"address"`
+		} `json:"inboxes"`
+	}
+	if err := json.Unmarshal([]byte(genOut), &generated); err != nil || len(generated.Inboxes) != 10 {
+		t.Fatalf("generate 10 %s: %v", genOut, err)
+	}
+
+	// OAuth credentials, grants, isolation, and MCP reply against live Stalwart.
+	const baseURL = "http://127.0.0.1:8787"
+	var adaCred, beaCred struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+	}
+	adaOut := must(t, root, cli, filepath.Join(bin, "inbai"), "agent", "create", "--config", cfg, "--json", "ada")
+	if err := json.Unmarshal([]byte(adaOut), &adaCred); err != nil || adaCred.ID == "" {
+		t.Fatalf("agent ada %s: %v", adaOut, err)
+	}
+	beaOut := must(t, root, cli, filepath.Join(bin, "inbai"), "agent", "create", "--config", cfg, "--json", "bea")
+	if err := json.Unmarshal([]byte(beaOut), &beaCred); err != nil || beaCred.ID == "" {
+		t.Fatalf("agent bea %s: %v", beaOut, err)
+	}
+	for _, perm := range []string{"read", "send", "reply"} {
+		must(t, root, cli, filepath.Join(bin, "inbai"), "agent", "grant", "--config", cfg, "ada", alice.ID, perm)
+	}
+	adaTok := exchangeToken(t, baseURL, adaCred.ID, adaCred.Secret)
+	beaTok := exchangeToken(t, baseURL, beaCred.ID, beaCred.Secret)
+
+	// bea has no grant on alice and is blocked on REST and MCP.
+	doJSON(t, baseURL, beaTok, http.MethodGet, "/v1/inboxes/"+alice.ID+"/messages", "", http.StatusForbidden, nil)
+	beaMCP := doRaw(t, baseURL, beaTok, http.MethodPost, "/mcp",
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":%q}}}`, alice.ID),
+		http.StatusOK)
+	if !strings.Contains(beaMCP, `"isError":true`) {
+		t.Fatalf("bea MCP read alice: %s", beaMCP)
+	}
+
+	// ada lists and replies over MCP.
+	adaMCPList := doRaw(t, baseURL, adaTok, http.MethodPost, "/mcp",
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":%q}}}`, alice.ID),
+		http.StatusOK)
+	if !strings.Contains(adaMCPList, "hello") || !strings.Contains(adaMCPList, "untrusted external content") {
+		t.Fatalf("ada MCP list: %s", adaMCPList)
+	}
+	adaMCPReply := doRaw(t, baseURL, adaTok, http.MethodPost, "/mcp",
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"reply_message","arguments":{"inbox":%q,"messageId":%q,"from":"alice@inbai.test","to":"alice@inbai.test","text":"reply from mcp"}}}`, alice.ID, id),
+		http.StatusOK)
+	if strings.Contains(adaMCPReply, `"isError":true`) {
+		t.Fatalf("ada MCP reply: %s", adaMCPReply)
+	}
+
+	replyDeadline := time.Now().Add(45 * time.Second)
+	sawReply := false
+	for time.Now().Before(replyDeadline) {
+		body := doRaw(t, baseURL, adaTok, http.MethodPost, "/mcp",
+			fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_messages","arguments":{"inbox":%q}}}`, alice.ID),
+			http.StatusOK)
+		if strings.Contains(body, "Re: hello") {
+			sawReply = true
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !sawReply {
+		t.Fatal("MCP reply did not arrive")
+	}
+
+	// Event feed survives inbaid stopping while a message is delivered to Stalwart.
+	var before struct {
+		Events []struct {
+			ID int64 `json:"id"`
+		} `json:"events"`
+	}
+	doJSON(t, baseURL, adaTok, http.MethodGet, "/v1/events?inbox="+url.QueryEscape(alice.ID)+"&after=0&timeout=1", "", http.StatusOK, &before)
+	var lastEvent int64
+	for _, ev := range before.Events {
+		if ev.ID > lastEvent {
+			lastEvent = ev.ID
+		}
+	}
+
+	must(t, compose, env, "docker", "compose", "-p", "inbai-live", "stop", "inbaid")
+	deliverDirect(t, cfg, alice.ID, "alice@inbai.test", "while stopped", "delivered while inbaid was down")
+	must(t, compose, env, "docker", "compose", "-p", "inbai-live", "start", "inbaid")
+	waitURL(t, baseURL+"/healthz", false)
+
+	eventDeadline := time.Now().Add(60 * time.Second)
+	sawEvent := false
+	for time.Now().Before(eventDeadline) {
+		var after struct {
+			Events []struct {
+				ID   int64  `json:"id"`
+				Kind string `json:"kind"`
+			} `json:"events"`
+		}
+		doJSON(t, baseURL, adaTok, http.MethodGet,
+			fmt.Sprintf("/v1/events?inbox=%s&after=%d&timeout=2", url.QueryEscape(alice.ID), lastEvent),
+			"", http.StatusOK, &after)
+		for _, ev := range after.Events {
+			if ev.Kind == "created" {
+				sawEvent = true
+				break
+			}
+		}
+		if sawEvent {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !sawEvent {
+		t.Fatal("event delivered while inbaid was stopped did not appear on the feed")
+	}
+}
+
+func deliverDirect(t *testing.T, cfgPath, accountID, address, subject, body string) {
+	t.Helper()
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.File
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	client := &stalwart.Client{
+		BaseURL: "https://127.0.0.1",
+		APIKey:  cfg.APIKey,
+		HTTP: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // local Stalwart certificate is self-signed
+			},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := stalwart.Deliver(ctx, client, stalwart.Delivery{
+		AccountID: accountID,
+		From:      address,
+		To:        address,
+		Subject:   subject,
+		Body:      body,
+	}); err != nil {
+		t.Fatalf("direct deliver: %v", err)
 	}
 }
 
