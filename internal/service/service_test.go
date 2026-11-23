@@ -88,24 +88,78 @@ func TestFailedSendDoesNotConsumeQuota(t *testing.T) {
 	}
 }
 
+func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{
+		ID: "m", Subject: "hello", MessageID: []string{"<a@example.com>"},
+	}}}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if _, err := svc.Search(context.Background(), Caller{Agent: "ada"}, "inbox-b", "hello"); !errors.Is(err, ErrForbidden) || mail.listed {
+		t.Fatalf("search err %v listed %v", err, mail.listed)
+	}
+	if err := svc.Delete(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m"); !errors.Is(err, ErrForbidden) || mail.deleted {
+		t.Fatalf("delete err %v deleted %v", err, mail.deleted)
+	}
+	reply := mailbackend.Outbound{From: "a@example.com", To: "b@example.com"}
+	if err := svc.Reply(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", reply, ""); !errors.Is(err, ErrForbidden) || mail.got {
+		t.Fatalf("reply err %v got %v", err, mail.got)
+	}
+	svc.Allow("ada", "inbox-a", PermReply)
+	if err := svc.Reply(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", reply, ""); err != nil {
+		t.Fatal(err)
+	}
+	if mail.last.Subject != "Re: hello" || len(mail.last.InReplyTo) != 1 || mail.last.InReplyTo[0] != "<a@example.com>" {
+		t.Fatalf("reply %+v", mail.last)
+	}
+	svc.Allow("ada", "inbox-a", PermDelete)
+	if err := svc.Delete(context.Background(), Caller{Agent: "ada"}, "inbox-b", "m"); !errors.Is(err, ErrForbidden) || mail.deleted {
+		t.Fatalf("other inbox err %v deleted %v", err, mail.deleted)
+	}
+	if err := svc.Delete(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m"); err != nil || !mail.deleted {
+		t.Fatalf("delete err %v deleted %v", err, mail.deleted)
+	}
+}
+
 type fakeMail struct {
 	created  string
 	messages []mailbackend.Message
 	listed   bool
 	sent     int
 	sendErr  error
+	got      bool
+	deleted  bool
+	last     mailbackend.Outbound
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
 	return f.created, nil
 }
 
-func (f *fakeMail) Deliver(context.Context, mailbackend.Outbound) error {
+func (f *fakeMail) Deliver(_ context.Context, msg mailbackend.Outbound) error {
 	f.sent++
+	f.last = msg
 	return f.sendErr
 }
 
 func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
 	f.listed = true
 	return f.messages, nil
+}
+
+func (f *fakeMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
+	f.listed = true
+	return f.messages, nil
+}
+
+func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, error) {
+	f.got = true
+	if len(f.messages) == 0 {
+		return mailbackend.Message{}, nil
+	}
+	return f.messages[0], nil
+}
+
+func (f *fakeMail) Delete(context.Context, string, string) error {
+	f.deleted = true
+	return nil
 }

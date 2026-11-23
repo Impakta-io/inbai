@@ -17,8 +17,10 @@ import (
 type Permission string
 
 const (
-	PermRead Permission = "read"
-	PermSend Permission = "send"
+	PermRead   Permission = "read"
+	PermSend   Permission = "send"
+	PermReply  Permission = "reply"
+	PermDelete Permission = "delete"
 )
 
 // ErrForbidden is returned when the caller has no grant for the action.
@@ -117,6 +119,10 @@ func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Ou
 	if key != "" && s.alreadySent(key) {
 		return nil
 	}
+	return s.submit(ctx, key, msg)
+}
+
+func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbound) error {
 	if err := s.consume(msg); err != nil {
 		return err
 	}
@@ -137,6 +143,53 @@ func (s *Service) List(ctx context.Context, caller Caller, accountID string) ([]
 		return nil, ErrForbidden
 	}
 	return s.mail.List(ctx, accountID)
+}
+
+// Search returns messages matching text. It uses the same read grant as List.
+func (s *Service) Search(ctx context.Context, caller Caller, accountID, query string) ([]mailbackend.Message, error) {
+	if !s.allowed(caller, accountID, PermRead) {
+		return nil, ErrForbidden
+	}
+	return s.mail.Search(ctx, accountID, query)
+}
+
+// Get returns one message. It uses the same read grant as List.
+func (s *Service) Get(ctx context.Context, caller Caller, accountID, messageID string) (mailbackend.Message, error) {
+	if !s.allowed(caller, accountID, PermRead) {
+		return mailbackend.Message{}, ErrForbidden
+	}
+	return s.mail.Get(ctx, accountID, messageID)
+}
+
+// Delete removes one message. An agent needs a delete grant for that account.
+func (s *Service) Delete(ctx context.Context, caller Caller, accountID, messageID string) error {
+	if !s.allowed(caller, accountID, PermDelete) {
+		return ErrForbidden
+	}
+	return s.mail.Delete(ctx, accountID, messageID)
+}
+
+// Reply submits a message that references an existing one.
+// An agent needs a reply grant. The send quota still applies.
+func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID string, msg mailbackend.Outbound, idemKey string) error {
+	if !s.allowed(caller, accountID, PermReply) {
+		return ErrForbidden
+	}
+	original, err := s.mail.Get(ctx, accountID, messageID)
+	if err != nil {
+		return err
+	}
+	msg.AccountID = accountID
+	if msg.Subject == "" {
+		msg.Subject = "Re: " + original.Subject
+	}
+	msg.InReplyTo = original.MessageID
+	msg.References = append(append([]string{}, original.References...), original.MessageID...)
+	key := idempotencyKey(caller, accountID, idemKey)
+	if key != "" && s.alreadySent(key) {
+		return nil
+	}
+	return s.submit(ctx, key, msg)
 }
 
 func idempotencyKey(caller Caller, inbox, key string) string {

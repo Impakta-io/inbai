@@ -19,18 +19,24 @@ type InboxInput struct {
 
 // Delivery is one message submitted as an existing account.
 type Delivery struct {
-	AccountID string
-	From      string
-	To        string
-	Subject   string
-	Body      string
+	AccountID  string
+	From       string
+	To         string
+	Subject    string
+	Body       string
+	InReplyTo  []string
+	References []string
 }
 
 // Message is one message in an inbox.
 type Message struct {
-	ID      string `json:"id"`
-	Subject string `json:"subject"`
-	Preview string `json:"preview"`
+	ID         string   `json:"id"`
+	Subject    string   `json:"subject"`
+	Preview    string   `json:"preview"`
+	Text       string   `json:"text,omitempty"`
+	MessageID  []string `json:"messageId,omitempty"`
+	InReplyTo  []string `json:"inReplyTo,omitempty"`
+	References []string `json:"references,omitempty"`
 }
 
 // CreateInbox creates a Stalwart account that can receive mail.
@@ -102,20 +108,25 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 	if len(query.IDs) == 0 {
 		return fmt.Errorf("account %s has no inbox", msg.AccountID)
 	}
+	draft := map[string]any{
+		"mailboxIds": map[string]bool{query.IDs[0]: true},
+		"from":       []any{map[string]any{"email": msg.From}},
+		"to":         []any{map[string]any{"email": msg.To}},
+		"subject":    msg.Subject,
+		"keywords":   map[string]bool{"$draft": true},
+		"textBody":   []any{map[string]any{"partId": "p", "type": "text/plain"}},
+		"bodyValues": map[string]any{"p": map[string]any{"value": msg.Body}},
+	}
+	if len(msg.InReplyTo) > 0 {
+		draft["inReplyTo"] = msg.InReplyTo
+	}
+	if len(msg.References) > 0 {
+		draft["references"] = msg.References
+	}
 	_, err = client.invokeMany(ctx, []jmapCall{
 		{Name: "Email/set", ID: "e", Args: map[string]any{
 			"accountId": msg.AccountID,
-			"create": map[string]any{
-				"m": map[string]any{
-					"mailboxIds": map[string]bool{query.IDs[0]: true},
-					"from":       []any{map[string]any{"email": msg.From}},
-					"to":         []any{map[string]any{"email": msg.To}},
-					"subject":    msg.Subject,
-					"keywords":   map[string]bool{"$draft": true},
-					"textBody":   []any{map[string]any{"partId": "p", "type": "text/plain"}},
-					"bodyValues": map[string]any{"p": map[string]any{"value": msg.Body}},
-				},
-			},
+			"create":    map[string]any{"m": draft},
 		}},
 		{Name: "EmailSubmission/set", ID: "s", Args: map[string]any{
 			"accountId": msg.AccountID,

@@ -1,4 +1,4 @@
-Status: partial — `inbaid serve` creates an inbox, lists messages, and submits plain text. OAuth, attachments, search, reply, and delete are not implemented.
+Status: partial — `inbaid serve` creates an inbox and can list, search, read, send, reply, and delete. OAuth and attachments are not implemented.
 
 # REST API
 
@@ -10,7 +10,7 @@ Set `INBAI_OPERATOR_TOKEN` before starting the server. Send it as `Authorization
 
 ## Routes
 
-`POST /v1/inboxes` with `{"localPart":"alice"}` creates `alice@<domain>` and returns the account id. `GET /v1/inboxes/{id}/messages` returns id, subject, and preview. `POST /v1/inboxes/{id}/messages` submits `from`, `to`, `subject`, and `text`.
+`POST /v1/inboxes` with `{"localPart":"alice"}` creates `alice@<domain>` and returns the account id. `GET /v1/inboxes/{id}/messages` returns id, subject, and preview. Add `?q=` to search message text. `GET /v1/inboxes/{id}/messages/{messageId}` adds the plain-text body and threading headers. `POST /v1/inboxes/{id}/messages` submits `from`, `to`, `subject`, and `text`. `POST /v1/inboxes/{id}/messages/{messageId}/reply` does the same and sets `In-Reply-To` and `References` from the original message. `DELETE /v1/inboxes/{id}/messages/{messageId}` removes that message.
 
 Create and send take an optional `Idempotency-Key` header. Repeating a completed key returns the first result and does not create or send again.
 
@@ -22,4 +22,4 @@ Errors use `application/problem+json` with `type`, `title`, `status`, and `detai
 
 - How to exchange a client credential for an access token.
 - Cursor pagination.
-- Reading one message, searching, replying, and deleting, including attachments and threading headers.
+- Attachments.

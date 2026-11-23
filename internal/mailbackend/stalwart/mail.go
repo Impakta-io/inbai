@@ -20,11 +20,13 @@ func (m Mail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (stri
 
 func (m Mail) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	return Deliver(ctx, m.Client, Delivery{
-		AccountID: msg.AccountID,
-		From:      msg.From,
-		To:        msg.To,
-		Subject:   msg.Subject,
-		Body:      msg.Body,
+		AccountID:  msg.AccountID,
+		From:       msg.From,
+		To:         msg.To,
+		Subject:    msg.Subject,
+		Body:       msg.Body,
+		InReplyTo:  msg.InReplyTo,
+		References: msg.References,
 	})
 }
 
@@ -33,9 +35,45 @@ func (m Mail) List(ctx context.Context, accountID string) ([]mailbackend.Message
 	if err != nil {
 		return nil, err
 	}
+	return toMessages(raw), nil
+}
+
+func (m Mail) Search(ctx context.Context, accountID, query string) ([]mailbackend.Message, error) {
+	raw, err := SearchMessages(ctx, m.Client, accountID, query)
+	if err != nil {
+		return nil, err
+	}
+	return toMessages(raw), nil
+}
+
+func (m Mail) Get(ctx context.Context, accountID, messageID string) (mailbackend.Message, error) {
+	raw, err := GetMessage(ctx, m.Client, accountID, messageID)
+	if err != nil {
+		return mailbackend.Message{}, err
+	}
+	return toMessage(raw), nil
+}
+
+func (m Mail) Delete(ctx context.Context, accountID, messageID string) error {
+	return DeleteMessage(ctx, m.Client, accountID, messageID)
+}
+
+func toMessages(raw []Message) []mailbackend.Message {
 	out := make([]mailbackend.Message, len(raw))
 	for i, message := range raw {
-		out[i] = mailbackend.Message{ID: message.ID, Subject: message.Subject, Preview: message.Preview}
+		out[i] = toMessage(message)
 	}
-	return out, nil
+	return out
+}
+
+func toMessage(message Message) mailbackend.Message {
+	return mailbackend.Message{
+		ID:         message.ID,
+		Subject:    message.Subject,
+		Preview:    message.Preview,
+		Text:       message.Text,
+		MessageID:  message.MessageID,
+		InReplyTo:  message.InReplyTo,
+		References: message.References,
+	}
 }
