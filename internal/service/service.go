@@ -238,6 +238,68 @@ func (s *Service) Delete(ctx context.Context, caller Caller, accountID, messageI
 	return s.mail.Delete(ctx, accountID, messageID)
 }
 
+// ListInboxes returns every account. Only an operator may do that.
+func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string) ([]Inbox, error) {
+	if !caller.Operator {
+		return nil, ErrForbidden
+	}
+	accounts, err := s.mail.ListInboxes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Inbox, 0, len(accounts))
+	for _, account := range accounts {
+		address := account.Local
+		if domain != "" && !strings.Contains(account.Local, "@") {
+			address = account.Local + "@" + domain
+		}
+		out = append(out, Inbox{ID: account.ID, Address: address})
+	}
+	return out, nil
+}
+
+// DeleteInbox removes one account. Only an operator may do that.
+func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) error {
+	if !caller.Operator {
+		return ErrForbidden
+	}
+	if id == "" {
+		return fmt.Errorf("%w: inbox id is required", ErrInvalid)
+	}
+	return s.mail.DeleteInbox(ctx, id)
+}
+
+// Attachment returns the bytes of one file on a message. It uses the same read grant as Get.
+func (s *Service) Attachment(ctx context.Context, caller Caller, accountID, messageID, blobID string) ([]byte, mailbackend.Attachment, error) {
+	if !s.allowed(caller, accountID, PermRead) {
+		return nil, mailbackend.Attachment{}, ErrForbidden
+	}
+	if blobID == "" {
+		return nil, mailbackend.Attachment{}, fmt.Errorf("%w: blob id is required", ErrInvalid)
+	}
+	message, err := s.mail.Get(ctx, accountID, messageID)
+	if err != nil {
+		return nil, mailbackend.Attachment{}, err
+	}
+	var meta mailbackend.Attachment
+	found := false
+	for _, file := range message.Attachments {
+		if file.BlobID == blobID {
+			meta = file
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, mailbackend.Attachment{}, ErrNotFound
+	}
+	data, err := s.mail.Download(ctx, accountID, blobID)
+	if err != nil {
+		return nil, mailbackend.Attachment{}, err
+	}
+	return data, meta, nil
+}
+
 // Reply submits a message that references an existing one.
 // An agent needs a reply grant. The send quota still applies.
 func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID string, msg mailbackend.Outbound, idemKey string) error {

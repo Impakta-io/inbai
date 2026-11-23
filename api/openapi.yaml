@@ -121,6 +121,45 @@ paths:
           $ref: "#/components/responses/Problem"
         "502":
           $ref: "#/components/responses/Problem"
+    get:
+      operationId: listInboxes
+      summary: List accounts in the mail backend. An operator token is required.
+      responses:
+        "200":
+          description: Inboxes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inboxes]
+                properties:
+                  inboxes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Inbox"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteInbox
+      summary: Delete one account. An operator token is required.
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes/generate:
     post:
       operationId: generateInboxes
@@ -272,6 +311,40 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "502":
+          $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/messages/{messageId}/attachments/{blobId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: blobId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: downloadAttachment
+      summary: Download one attachment. The caller needs a read grant.
+      responses:
+        "200":
+          description: Attachment bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentEncoding: binary
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
   /v1/inboxes/{id}/messages/{messageId}/reply:
     parameters:
@@ -550,6 +623,8 @@ components:
           type: string
         size:
           type: integer
+        blobId:
+          type: string
     Job:
       type: object
       required: [id, status, total, created]

@@ -97,3 +97,10 @@ func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, er
 	return f.messages[0], nil
 }
 func (f *fakeMail) Delete(context.Context, string, string) error { return nil }
+func (f *fakeMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	return nil, nil
+}
+func (f *fakeMail) DeleteInbox(context.Context, string) error { return nil }
+func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}

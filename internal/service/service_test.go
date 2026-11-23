@@ -196,6 +196,39 @@ func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 	}
 }
 
+func TestInboxDirectoryIsOperatorOnly(t *testing.T) {
+	mail := &fakeMail{}
+	svc := New(mail)
+	if _, err := svc.ListInboxes(context.Background(), Caller{Agent: "ada"}, "example.com"); !errors.Is(err, ErrForbidden) || mail.dir {
+		t.Fatalf("list err %v called %v", err, mail.dir)
+	}
+	if err := svc.DeleteInbox(context.Background(), Caller{Agent: "ada"}, "alice-id"); !errors.Is(err, ErrForbidden) || mail.dir {
+		t.Fatalf("delete err %v called %v", err, mail.dir)
+	}
+	got, err := svc.ListInboxes(context.Background(), Caller{Operator: true}, "example.com")
+	if err != nil || len(got) != 1 || got[0].Address != "alice@example.com" || !mail.dir {
+		t.Fatalf("list %+v err %v", got, err)
+	}
+}
+
+func TestAttachmentRequiresTheReadGrant(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{
+		ID: "m", Attachments: []mailbackend.Attachment{{Name: "note.txt", Type: "text/plain", BlobID: "blob-1"}},
+	}}}
+	svc := New(mail)
+	if _, _, err := svc.Attachment(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", "blob-1"); !errors.Is(err, ErrForbidden) || mail.got {
+		t.Fatalf("err %v got %v", err, mail.got)
+	}
+	svc.Allow("ada", "inbox-a", PermRead)
+	data, meta, err := svc.Attachment(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", "blob-1")
+	if err != nil || string(data) != "file-bytes" || meta.Name != "note.txt" {
+		t.Fatalf("data %q meta %+v err %v", data, meta, err)
+	}
+	if _, _, err := svc.Attachment(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing %v", err)
+	}
+}
+
 type fakeMail struct {
 	created  string
 	messages []mailbackend.Message
@@ -204,6 +237,7 @@ type fakeMail struct {
 	sendErr  error
 	got      bool
 	deleted  bool
+	dir      bool
 	last     mailbackend.Outbound
 	batches  []int
 	started  chan struct{}
@@ -260,4 +294,19 @@ func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, er
 func (f *fakeMail) Delete(context.Context, string, string) error {
 	f.deleted = true
 	return nil
+}
+
+func (f *fakeMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	f.dir = true
+	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, nil
+}
+
+func (f *fakeMail) DeleteInbox(context.Context, string) error {
+	f.dir = true
+	return nil
+}
+
+func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
+	f.got = true
+	return []byte("file-bytes"), nil
 }

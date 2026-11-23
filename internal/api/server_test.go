@@ -54,6 +54,26 @@ func TestCreateListAndSend(t *testing.T) {
 	}
 }
 
+func TestListDeleteAndDownload(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{
+		ID: "m", Attachments: []mailbackend.Attachment{{Name: "note.txt", Type: "text/plain", BlobID: "blob-1"}},
+	}}}
+	srv := httptest.NewServer((&Server{Service: service.New(mail), Token: "operator-token", Domain: "example.com"}).Handler())
+	defer srv.Close()
+	res := call(t, srv.URL, http.MethodGet, "/v1/inboxes", "operator-token", "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(readBody(t, res), `"address":"alice@example.com"`) {
+		t.Fatalf("list %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodDelete, "/v1/inboxes/alice-id", "operator-token", "", "")
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete %d %s", res.StatusCode, readBody(t, res))
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages/m/attachments/blob-1", "operator-token", "", "")
+	if res.StatusCode != http.StatusOK || readBody(t, res) != "file-bytes" {
+		t.Fatalf("download %d", res.StatusCode)
+	}
+}
+
 func TestReadSearchReplyAndDelete(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body", Text: "body"}}}
 	srv := httptest.NewServer((&Server{Service: service.New(mail), Token: "operator-token", Domain: "example.com"}).Handler())
@@ -232,4 +252,15 @@ func (f *fakeMail) MailChanges(_ context.Context, _, since string) (mailbackend.
 		return mailbackend.Delta{State: "s1", Created: []string{"m-new"}}, nil
 	}
 	return mailbackend.Delta{State: since}, nil
+}
+
+func (f *fakeMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
+	f.listed = true
+	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, nil
+}
+
+func (f *fakeMail) DeleteInbox(context.Context, string) error { return nil }
+
+func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
+	return []byte("file-bytes"), nil
 }

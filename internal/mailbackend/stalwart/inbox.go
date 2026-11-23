@@ -45,9 +45,10 @@ type Message struct {
 
 // Attachment is one file on a stored message.
 type Attachment struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size int    `json:"size"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   int    `json:"size"`
+	BlobID string `json:"blobId,omitempty"`
 }
 
 // CreateInbox creates a Stalwart account that can receive mail.

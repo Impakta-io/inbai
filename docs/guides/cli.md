@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, message send, list, get, reply, and delete, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -35,11 +35,13 @@ inbai inbox create alice
 
 That creates `alice@example.com` when the config domain is `example.com`.
 
+`inbai inbox list` prints each address and account id. `--json` prints the API response. `inbai inbox delete alice@example.com` removes that account and the address from the config file. Both commands use the operator token.
+
 `inbai inbox generate --count 10` asks `inbaid` to create `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. When the server returns a job, the command polls it and prints progress. It records every address in the config file.
 
 ## message send and message list
 
-`inbai message send` submits one plain-text message as an address created with `inbox create`. `--attach` adds one file. `inbai message list` prints the subject and preview. `--query` searches message text. `inbai message get` prints one message, `inbai message reply` answers it, and `inbai message delete` removes it. `--json` prints the API document.
+`inbai message send` submits one plain-text message as an address created with `inbox create`. `--attach` adds one file. `inbai message list` prints the subject and preview. `--query` searches message text. `inbai message get` prints one message and each attachment as `blobId` and name. `inbai message attachment --output note.txt alice@example.com <message-id> <blob-id>` writes that file. `inbai message reply` answers a message, and `inbai message delete` removes it. `--json` prints the API document.
 
 ```sh
 inbai message send --from alice@example.com --to bob@example.com --subject hello --body 'hello'
@@ -62,5 +64,4 @@ Delivery to another server still depends on the DNS records from `domain add` an
 - JSON output for `init`, `domain`, and `doctor`.
 - `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
-- `inbox list` and `inbox delete`.
 - `agent create`, `agent bind`, `agent suspend`, and `agent revoke`.

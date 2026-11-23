@@ -67,6 +67,26 @@ func (m Mail) Delete(ctx context.Context, accountID, messageID string) error {
 	return DeleteMessage(ctx, m.Client, accountID, messageID)
 }
 
+func (m Mail) ListInboxes(ctx context.Context) ([]mailbackend.Account, error) {
+	raw, err := ListInboxes(ctx, m.Client)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mailbackend.Account, len(raw))
+	for i, account := range raw {
+		out[i] = mailbackend.Account{ID: account.ID, Local: account.Local}
+	}
+	return out, nil
+}
+
+func (m Mail) DeleteInbox(ctx context.Context, id string) error {
+	return DeleteInbox(ctx, m.Client, id)
+}
+
+func (m Mail) Download(ctx context.Context, accountID, blobID string) ([]byte, error) {
+	return m.Client.download(ctx, accountID, blobID)
+}
+
 func (m Mail) MailState(ctx context.Context, accountID string) (string, error) {
 	return MailState(ctx, m.Client, accountID)
 }
@@ -90,7 +110,7 @@ func toMessages(raw []Message) []mailbackend.Message {
 func toMessage(message Message) mailbackend.Message {
 	files := make([]mailbackend.Attachment, len(message.Attachments))
 	for i, file := range message.Attachments {
-		files[i] = mailbackend.Attachment{Name: file.Name, Type: file.Type, Size: file.Size}
+		files[i] = mailbackend.Attachment{Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID}
 	}
 	return mailbackend.Message{
 		ID:          message.ID,

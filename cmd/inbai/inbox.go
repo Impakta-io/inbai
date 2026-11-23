@@ -20,15 +20,19 @@ import (
 
 func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox [create|generate]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete]\n")
 		return 2
 	}
 	switch args[0] {
 	case "generate":
 		return inboxGenerate(args[1:], stdout, stderr, getenv)
+	case "list":
+		return inboxList(args[1:], stdout, stderr, getenv)
+	case "delete":
+		return inboxDelete(args[1:], stdout, stderr, getenv)
 	case "create":
 	default:
-		writef(stderr, "usage: inbai inbox [create|generate]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete]\n")
 		return 2
 	}
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)
@@ -66,9 +70,78 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	return 0
 }
 
+func inboxList(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	fs := flag.NewFlagSet("inbox list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "config file")
+	asJSON := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	_, _, client, code := openAPI(configPath, stderr, getenv)
+	if code != 0 {
+		return code
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	inboxes, err := client.listInboxes(ctx)
+	if err != nil {
+		writef(stderr, "inbox list: %s\n", err)
+		return 1
+	}
+	if *asJSON {
+		emit(stdout, true, "", map[string]any{"inboxes": inboxes})
+		return 0
+	}
+	if len(inboxes) == 0 {
+		writef(stdout, "No inboxes.\n")
+		return 0
+	}
+	for _, inbox := range inboxes {
+		writef(stdout, "%s\t%s\n", inbox.Address, inbox.ID)
+	}
+	return 0
+}
+
+func inboxDelete(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	fs := flag.NewFlagSet("inbox delete", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "config file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		writef(stderr, "usage: inbai inbox delete <address>\n")
+		return 2
+	}
+	address := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
+	cfg, path, client, code := openAPI(configPath, stderr, getenv)
+	if code != 0 {
+		return code
+	}
+	id, ok := cfg.Inboxes[address]
+	if !ok {
+		writef(stderr, "inbox delete: %s is not in the config.\n", address)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := client.deleteInbox(ctx, id); err != nil {
+		writef(stderr, "inbox delete: %s\n", err)
+		return 1
+	}
+	delete(cfg.Inboxes, address)
+	if err := writeConfig(path, cfg); err != nil {
+		writef(stderr, "write config: %s\n", err)
+		return 1
+	}
+	writef(stdout, "Deleted %s\n", address)
+	return 0
+}
+
 func messageCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
-		writef(stderr, "usage: inbai message [send|list|get|reply|delete]\n")
+		writef(stderr, "usage: inbai message [send|list|get|reply|delete|attachment]\n")
 		return 2
 	}
 	switch args[0] {
@@ -78,6 +151,8 @@ func messageCmd(args []string, stdout, stderr io.Writer, getenv func(string) str
 		return messageSend(args[1:], stdout, stderr, getenv)
 	case "get":
 		return messageGet(args[1:], stdout, stderr, getenv)
+	case "attachment":
+		return messageAttachment(args[1:], stdout, stderr, getenv)
 	case "reply":
 		return messageReply(args[1:], stdout, stderr, getenv)
 	case "delete":
@@ -206,8 +281,48 @@ func messageGet(args []string, stdout, stderr io.Writer, getenv func(string) str
 	}
 	writef(stdout, "%s\n%s\n", message.Subject, message.Text)
 	for _, file := range message.Attachments {
-		writef(stdout, "attachment %s\n", file.Name)
+		if file.BlobID == "" {
+			writef(stdout, "attachment %s\n", file.Name)
+			continue
+		}
+		writef(stdout, "attachment %s %s\n", file.BlobID, file.Name)
 	}
+	return 0
+}
+
+func messageAttachment(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	fs := flag.NewFlagSet("message attachment", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "config file")
+	output := fs.String("output", "", "file to write")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 3 || *output == "" {
+		writef(stderr, "usage: inbai message attachment --output <file> <address> <message-id> <blob-id>\n")
+		return 2
+	}
+	cfg, _, client, code := openAPI(configPath, stderr, getenv)
+	if code != 0 {
+		return code
+	}
+	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	if !ok {
+		writef(stderr, "message attachment: %s is not in the config.\n", fs.Arg(0))
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	data, err := client.download(ctx, accountID, fs.Arg(1), fs.Arg(2))
+	if err != nil {
+		writef(stderr, "message attachment: %s\n", err)
+		return 1
+	}
+	if err := os.WriteFile(*output, data, 0o600); err != nil {
+		writef(stderr, "message attachment: %s\n", err)
+		return 1
+	}
+	writef(stdout, "Wrote %s\n", *output)
 	return 0
 }
 

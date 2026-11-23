@@ -34,9 +34,10 @@ type apiMessage struct {
 	Preview     string `json:"preview"`
 	Text        string `json:"text,omitempty"`
 	Attachments []struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
-		Size int    `json:"size"`
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Size   int    `json:"size"`
+		BlobID string `json:"blobId,omitempty"`
 	} `json:"attachments,omitempty"`
 }
 
@@ -157,6 +158,24 @@ func (c apiClient) send(ctx context.Context, accountID string, msg apiSend) erro
 func (c apiClient) reply(ctx context.Context, accountID, messageID string, msg apiSend) error {
 	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes/"+accountID+"/messages/"+messageID+"/reply", msg, nil)
 	return err
+}
+
+func (c apiClient) listInboxes(ctx context.Context) ([]apiInbox, error) {
+	var out struct {
+		Inboxes []apiInbox `json:"inboxes"`
+	}
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes", nil, &out)
+	return out.Inboxes, err
+}
+
+func (c apiClient) deleteInbox(ctx context.Context, id string) error {
+	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+id, nil, nil)
+	return err
+}
+
+func (c apiClient) download(ctx context.Context, accountID, messageID, blobID string) ([]byte, error) {
+	_, raw, err := c.callRaw(ctx, http.MethodGet, "/v1/inboxes/"+accountID+"/messages/"+messageID+"/attachments/"+blobID, nil)
+	return raw, err
 }
 
 func (c apiClient) deleteMessage(ctx context.Context, accountID, messageID string) error {

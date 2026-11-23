@@ -21,9 +21,16 @@ type File struct {
 
 // Attachment is one file stored on a message.
 type Attachment struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size int    `json:"size"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   int    `json:"size"`
+	BlobID string `json:"blobId,omitempty"`
+}
+
+// Account is one mailbox the backend already has.
+type Account struct {
+	ID    string
+	Local string
 }
 
 // Outbound is a message submitted as an existing account.
@@ -59,4 +66,7 @@ type Backend interface {
 	Search(context.Context, string, string) ([]Message, error)
 	Get(context.Context, string, string) (Message, error)
 	Delete(context.Context, string, string) error
+	ListInboxes(context.Context) ([]Account, error)
+	DeleteInbox(context.Context, string) error
+	Download(context.Context, string, string) ([]byte, error)
 }
