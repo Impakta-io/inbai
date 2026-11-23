@@ -175,7 +175,11 @@ func (s *Service) createAll(ctx context.Context, specs []mailbackend.InboxSpec, 
 			return nil, fmt.Errorf("created %d addresses, want %d", len(ids), end-start)
 		}
 		for i, id := range ids {
-			made = append(made, Inbox{ID: id, Address: specs[start+i].Local + "@" + domain})
+			address := specs[start+i].Local + "@" + domain
+			made = append(made, Inbox{ID: id, Address: address})
+			if err := s.BindInbox(ctx, id, address); err != nil {
+				return nil, err
+			}
 		}
 		if progress != nil {
 			progress(len(made), len(specs))

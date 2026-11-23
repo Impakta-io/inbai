@@ -67,6 +67,18 @@ func (m Mail) Delete(ctx context.Context, accountID, messageID string) error {
 	return DeleteMessage(ctx, m.Client, accountID, messageID)
 }
 
+func (m Mail) MailState(ctx context.Context, accountID string) (string, error) {
+	return MailState(ctx, m.Client, accountID)
+}
+
+func (m Mail) MailChanges(ctx context.Context, accountID, since string) (mailbackend.Delta, error) {
+	delta, err := MailChanges(ctx, m.Client, accountID, since)
+	if err != nil {
+		return mailbackend.Delta{}, err
+	}
+	return mailbackend.Delta{State: delta.State, Created: delta.Created, Destroyed: delta.Destroyed, More: delta.More}, nil
+}
+
 func toMessages(raw []Message) []mailbackend.Message {
 	out := make([]mailbackend.Message, len(raw))
 	for i, message := range raw {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -161,6 +162,21 @@ func (c apiClient) reply(ctx context.Context, accountID, messageID string, msg a
 func (c apiClient) deleteMessage(ctx context.Context, accountID, messageID string) error {
 	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+accountID+"/messages/"+messageID, nil, nil)
 	return err
+}
+
+type apiEvent struct {
+	ID        int64  `json:"id"`
+	MessageID string `json:"messageId"`
+	Kind      string `json:"kind"`
+}
+
+func (c apiClient) events(ctx context.Context, accountID string, after int64, timeout int) ([]apiEvent, error) {
+	path := fmt.Sprintf("/v1/events?inbox=%s&after=%d&timeout=%d", url.QueryEscape(accountID), after, timeout)
+	var out struct {
+		Events []apiEvent `json:"events"`
+	}
+	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
+	return out.Events, err
 }
 
 func (c apiClient) call(ctx context.Context, method, path string, in, out any) (int, error) {

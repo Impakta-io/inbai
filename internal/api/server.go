@@ -10,7 +10,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/auth"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
@@ -20,13 +22,14 @@ import (
 
 // Server is the REST transport. It authenticates the caller and calls the service layer.
 type Server struct {
-	Service   *service.Service
-	Directory *auth.Directory
-	Token     string
-	Issuer    string
-	Domain    string
-	DomainID  string
-	RoleID    string
+	Service      *service.Service
+	Directory    *auth.Directory
+	Token        string
+	Issuer       string
+	Domain       string
+	DomainID     string
+	RoleID       string
+	IngestSecret string
 }
 
 type callerKey struct{}
@@ -37,9 +40,15 @@ func (s *Server) Handler() http.Handler {
 	public.HandleFunc("POST /oauth/token", s.oauthToken)
 	public.HandleFunc("GET /.well-known/oauth-authorization-server", s.authorizationMetadata)
 	public.HandleFunc("GET /.well-known/oauth-protected-resource", s.resourceMetadata)
+	public.HandleFunc("GET /healthz", s.health)
+	public.HandleFunc("GET /readyz", s.ready)
+	public.HandleFunc("GET /metrics", s.metrics)
+	public.HandleFunc("POST /v1/hooks/ingest", s.ingest)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /mcp", s.mcp)
 	mux.HandleFunc("GET /mcp", s.mcp)
+	mux.HandleFunc("GET /v1/events", s.events)
+	mux.HandleFunc("POST /v1/webhooks", s.createWebhook)
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
@@ -52,7 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/inboxes/{id}/messages/{messageId}", s.deleteMessage)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages/{messageId}/reply", s.replyMessage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/oauth/token" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
+		if r.URL.Path == "/oauth/token" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/metrics" || r.URL.Path == "/v1/hooks/ingest" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
 			public.ServeHTTP(w, r)
 			return
 		}
@@ -228,9 +237,14 @@ func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	address := strings.ToLower(strings.TrimSpace(body.LocalPart)) + "@" + s.Domain
+	if err := s.Service.BindInbox(r.Context(), id, address); err != nil {
+		writeServiceError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":      id,
-		"address": strings.ToLower(strings.TrimSpace(body.LocalPart)) + "@" + s.Domain,
+		"address": address,
 	})
 }
 
@@ -364,6 +378,109 @@ func (b sendBody) outbound(accountID string) mailbackend.Outbound {
 	}
 }
 
+func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	inbox := r.URL.Query().Get("inbox")
+	if inbox == "" {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "inbox is required")
+		return
+	}
+	var after int64
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "after must be an integer")
+			return
+		}
+		after = value
+	}
+	timeout := 25 * time.Second
+	if raw := r.URL.Query().Get("timeout"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "timeout must be seconds")
+			return
+		}
+		timeout = time.Duration(seconds) * time.Second
+	}
+	records, err := s.Service.Events(r.Context(), s.requestCaller(r), inbox, after, timeout)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": records})
+}
+
+func (s *Server) createWebhook(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Inbox string `json:"inbox"`
+		URL   string `json:"url"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
+		return
+	}
+	id, secret, err := s.Service.SubscribeWebhook(r.Context(), s.requestCaller(r), body.Inbox, body.URL)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "secret": secret})
+}
+
+func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Inbai-Ingest")), []byte(s.IngestSecret)) != 1 || s.IngestSecret == "" {
+		writeProblem(w, http.StatusUnauthorized, "Unauthorized", "ingest secret was rejected")
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	_ = r.Body.Close()
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
+		return
+	}
+	var body struct {
+		Events []struct {
+			Type string `json:"type"`
+			Data struct {
+				To []string `json:"to"`
+			} `json:"data"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
+		return
+	}
+	var recipients []string
+	for _, event := range body.Events {
+		if strings.HasPrefix(event.Type, "message-ingest") {
+			recipients = append(recipients, event.Data.To...)
+		}
+	}
+	synced, err := s.Service.Ingest(r.Context(), recipients)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]int{"synced": synced})
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	if err := s.Service.Ready(r.Context()); err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "Not ready", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	_, _ = io.WriteString(w, s.Service.Metrics())
+}
+
 func readJSON(r *http.Request, dest any) error {
 	defer func() { _ = r.Body.Close() }()
 	dec := json.NewDecoder(io.LimitReader(r.Body, 16<<20))
@@ -387,6 +504,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusBadRequest, "Bad request", err.Error())
 	case errors.Is(err, service.ErrNotFound):
 		writeProblem(w, http.StatusNotFound, "Not found", err.Error())
+	case errors.Is(err, service.ErrUnavailable):
+		writeProblem(w, http.StatusServiceUnavailable, "Event store unavailable", err.Error())
 	default:
 		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
 	}

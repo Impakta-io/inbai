@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
@@ -64,6 +65,7 @@ type Service struct {
 	createdID map[string]string
 	jobs      map[string]*Job
 	generated map[string]GenerateResult
+	feed      *events.Feed
 }
 
 // New returns a service over a mail backend.

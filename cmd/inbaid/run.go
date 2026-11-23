@@ -21,8 +21,10 @@ import (
 	"github.com/Impakta-io/inbai/internal/api"
 	"github.com/Impakta-io/inbai/internal/auth"
 	"github.com/Impakta-io/inbai/internal/config"
+	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
 	"github.com/Impakta-io/inbai/internal/service"
+	"github.com/Impakta-io/inbai/internal/store"
 	"github.com/Impakta-io/inbai/internal/version"
 )
 
@@ -93,15 +95,29 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		}
 		writef(stdout, "Signing key, shown once: %x\n", signingKey)
 	}
+	svc := service.New(stalwart.Mail{Client: client})
+	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		log, err := store.Open(ctx, dsn)
+		cancel()
+		if err != nil {
+			writef(stderr, "database: %s\n", err)
+			return 1
+		}
+		feed := events.New(log)
+		svc.SetFeed(feed)
+		go feed.Run(context.Background(), stalwart.Mail{Client: client}, nil)
+	}
 	issuer := "http://" + *addr
 	handler := (&api.Server{
-		Service:   service.New(stalwart.Mail{Client: client}),
-		Directory: auth.NewDirectory(signingKey, issuer),
-		Token:     token,
-		Issuer:    issuer,
-		Domain:    cfg.Domain,
-		DomainID:  cfg.DomainID,
-		RoleID:    cfg.InboxRoleID,
+		Service:      svc,
+		Directory:    auth.NewDirectory(signingKey, issuer),
+		Token:        token,
+		Issuer:       issuer,
+		Domain:       cfg.Domain,
+		DomainID:     cfg.DomainID,
+		RoleID:       cfg.InboxRoleID,
+		IngestSecret: getenv("INBAI_INGEST_SECRET"),
 	}).Handler()
 	writef(stdout, "listening on %s\n", *addr)
 	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}

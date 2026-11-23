@@ -42,6 +42,17 @@ func (s ServiceBox) Delete(ctx context.Context, inbox, messageID string) error {
 }
 
 func (s ServiceBox) Wait(ctx context.Context, inbox string, timeout time.Duration) ([]mailbackend.Message, error) {
+	if s.Service.HasFeed() {
+		records, err := s.Service.Events(ctx, s.Caller, inbox, 0, timeout)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]mailbackend.Message, len(records))
+		for i, record := range records {
+			out[i] = mailbackend.Message{ID: record.MessageID, Subject: record.Kind}
+		}
+		return out, nil
+	}
 	deadline := time.Now().Add(timeout)
 	for {
 		messages, err := s.List(ctx, inbox, "")

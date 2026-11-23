@@ -9,7 +9,7 @@ info:
     Operator HTTP API served by inbaid. Routes live under /v1.
     Create and send accept an Idempotency-Key header.
     Errors use RFC 9457 problem details.
-    The caller is an operator bearer token. Agent OAuth is not implemented.
+    The caller is an operator bearer token or an agent access token.
 servers:
   - url: http://127.0.0.1:8787
 security:
@@ -305,6 +305,115 @@ paths:
           $ref: "#/components/responses/Problem"
         "502":
           $ref: "#/components/responses/Problem"
+  /healthz:
+    get:
+      operationId: health
+      summary: Process is running.
+      security: []
+      responses:
+        "200":
+          description: OK
+  /readyz:
+    get:
+      operationId: ready
+      summary: Dependencies answer. The event database is pinged when INBAI_DATABASE_URL is set.
+      security: []
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+  /metrics:
+    get:
+      operationId: metrics
+      summary: Prometheus text for the event feed.
+      security: []
+      responses:
+        "200":
+          description: Metrics
+  /v1/hooks/ingest:
+    post:
+      operationId: ingestHint
+      summary: Stalwart message-ingest hint. The recipient address selects the inbox. The numeric account id is ignored.
+      security: []
+      parameters:
+        - name: X-Inbai-Ingest
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Inboxes synced
+        "401":
+          description: Rejected secret
+  /v1/events:
+    get:
+      operationId: listEvents
+      summary: Long-poll mail changes after a consumer cursor.
+      parameters:
+        - name: inbox
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          schema:
+            type: integer
+        - name: timeout
+          in: query
+          description: Seconds to wait. The maximum is 25.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Events in order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/webhooks:
+    post:
+      operationId: createWebhook
+      summary: Register a signed webhook. The secret is shown once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inbox, url]
+              properties:
+                inbox:
+                  type: string
+                url:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, secret]
+                properties:
+                  id:
+                    type: string
+                  secret:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     operatorBearer:
@@ -442,3 +551,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Message"
+    Event:
+      type: object
+      required: [id, inbox, messageId, kind]
+      properties:
+        id:
+          type: integer
+        inbox:
+          type: string
+        messageId:
+          type: string
+        kind:
+          type: string
+    EventList:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"

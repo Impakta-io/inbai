@@ -272,7 +272,7 @@ func toolDefs() []map[string]any {
 			"to": map[string]any{"type": "string"}, "text": map[string]any{"type": "string"},
 		}),
 		tool("delete_message", "Delete one message.", []string{"inbox", "messageId"}, map[string]any{"inbox": inbox, "messageId": map[string]any{"type": "string"}}),
-		tool("wait_for_message", "Poll an inbox until a message is present or the timeout elapses. This is not the durable event cursor.", []string{"inbox"}, map[string]any{
+		tool("wait_for_message", "Wait on the event feed until a message change is recorded, or until the timeout elapses. The subject field is the change kind. Without a database this polls the mailbox instead.", []string{"inbox"}, map[string]any{
 			"inbox": inbox, "timeoutSeconds": map[string]any{"type": "number"},
 		}),
 	}
