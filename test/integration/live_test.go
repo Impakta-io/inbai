@@ -226,6 +226,28 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	if !sawEvent {
 		t.Fatal("event delivered while inbaid was stopped did not appear on the feed")
 	}
+
+	// Storage quota get/set against live Stalwart 1.1.1.
+	qOut := must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "quota", "get", "--config", cfg, "--json", alice.ID)
+	var quota struct {
+		LimitBytes int64 `json:"limitBytes"`
+		UsedBytes  int64 `json:"usedBytes"`
+	}
+	if err := json.Unmarshal([]byte(qOut), &quota); err != nil || quota.LimitBytes != 104857600 {
+		t.Fatalf("initial storage quota %s: %v", qOut, err)
+	}
+	qSetOut := must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "quota", "set", "--config", cfg, "--json", alice.ID, "209715200")
+	if err := json.Unmarshal([]byte(qSetOut), &quota); err != nil || quota.LimitBytes != 209715200 {
+		t.Fatalf("updated storage quota %s: %v", qSetOut, err)
+	}
+
+	// Operator login saves credentials in config.json so later commands need no env var.
+	loginCfg := filepath.Join(t.TempDir(), "operator.json")
+	must(t, root, cli, filepath.Join(bin, "inbai"), "login", "--url", baseURL, "--config", loginCfg, "--json")
+	listOut := must(t, root, nil, filepath.Join(bin, "inbai"), "inbox", "list", "--config", loginCfg, "--json")
+	if !strings.Contains(listOut, "alice@inbai.test") {
+		t.Fatalf("inbox list after login: %s", listOut)
+	}
 }
 
 func deliverDirect(t *testing.T, cfgPath, accountID, address, subject, body string) {
