@@ -27,7 +27,7 @@ Install, domain setup, the CLI, troubleshooting, and the quickstart describe the
 
 ## Agents that use inbAI
 
-The REST guide describes the routes `inbaid serve` implements. The other agent guides are outlines until MCP and the event feed exist.
+The REST guide and the agent overview describe the routes and client credentials that exist. The MCP, events, and untrusted-mail guides are still outlines.
 
 - [Overview](agents/overview.md)
 - [MCP](agents/mcp.md)

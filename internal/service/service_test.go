@@ -12,6 +12,23 @@ import (
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
+func TestAgentCannotGrantItself(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "secret"}}}
+	svc := New(mail)
+	if err := svc.Grant(Caller{Agent: "ada"}, "ada", "inbox-a", PermRead); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a"); !errors.Is(err, ErrForbidden) || mail.listed {
+		t.Fatalf("list err %v listed %v", err, mail.listed)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a"); err != nil || !mail.listed {
+		t.Fatalf("granted list err %v listed %v", err, mail.listed)
+	}
+}
+
 func TestAgentWithoutAGrantCannotRead(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "secret"}}}
 	svc := New(mail)
