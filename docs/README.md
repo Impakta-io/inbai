@@ -46,4 +46,4 @@ The REST guide, the agent overview, the MCP guide, and the events guide describe
 
 ## Reference
 
-Generated from the CLI and from [api/openapi.yaml](../api/openapi.yaml) once those surfaces exist. See [reference](reference/README.md).
+Generated from the CLI usage lines and from [api/openapi.yaml](../api/openapi.yaml). See [reference](reference/README.md).

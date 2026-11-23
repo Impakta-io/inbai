@@ -20,6 +20,10 @@ var doctorProbe doctor.Probe = doctor.Live()
 func doctorCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		writef(stderr, "usage: inbai doctor [--domain name] [--config path] [--tls-insecure] [--json]\n")
+		fs.PrintDefaults()
+	}
 	domain := fs.String("domain", "", "domain to check (default is the domain in the config file)")
 	configPath := fs.String("config", "", "config file written by inbai init")
 	tlsInsecure := fs.Bool("tls-insecure", false, "skip TLS verification for a server that is not on localhost")

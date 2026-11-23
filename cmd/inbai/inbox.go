@@ -72,6 +72,10 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 func inboxList(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("inbox list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		writef(stderr, "usage: inbai inbox list [--limit n] [--cursor token] [--config path] [--json]\n")
+		fs.PrintDefaults()
+	}
 	configPath := fs.String("config", "", "config file")
 	asJSON := fs.Bool("json", false, "print JSON")
 	cursor := fs.String("cursor", "", "opaque cursor from the previous page")

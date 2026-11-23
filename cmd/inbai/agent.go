@@ -83,7 +83,11 @@ func agentGrantOrRevoke(args []string, stdout, stderr io.Writer, getenv func(str
 		return 2
 	}
 	if fs.NArg() != 3 {
-		writef(stderr, "usage: inbai agent %s <agent> <inbox> <permission>\n", name)
+		if revoke {
+			writef(stderr, "usage: inbai agent revoke <agent> <inbox> <permission>\n")
+		} else {
+			writef(stderr, "usage: inbai agent grant <agent> <inbox> <permission>\n")
+		}
 		return 2
 	}
 	_, _, client, code := openAPI(configPath, stderr, getenv)

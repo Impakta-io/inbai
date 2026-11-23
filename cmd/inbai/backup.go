@@ -29,7 +29,11 @@ func snapshotCmd(args []string, stdout, stderr io.Writer, getenv func(string) st
 		return 2
 	}
 	if *fileFlag == "" {
-		writef(stderr, "usage: inbai %s --file path\n", name)
+		if name == "restore" {
+			writef(stderr, "usage: inbai restore --file path\n")
+		} else {
+			writef(stderr, "usage: inbai backup --file path\n")
+		}
 		return 2
 	}
 	dsn := ""

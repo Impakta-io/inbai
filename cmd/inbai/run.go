@@ -61,6 +61,10 @@ func writef(w io.Writer, format string, args ...any) {
 func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		writef(stderr, "usage: inbai init --domain name [--url url] [--hostname name] [--stalwart-url url] [--config path] [--json]\n")
+		fs.PrintDefaults()
+	}
 	url := fs.String("url", "http://127.0.0.1:8080", "Stalwart recovery API, reachable on the host")
 	domain := fs.String("domain", "", "DNS domain to create")
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")

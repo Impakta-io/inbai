@@ -17,4 +17,5 @@ lint:
 	golangci-lint run ./...
 
 docs-check:
+	go run ./tools/reference -check
 	go run ./tools/docscheck
