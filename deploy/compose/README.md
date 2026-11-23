@@ -50,7 +50,7 @@ inbai message send --from alice@example.com --to alice@example.com --subject hel
 inbai message list alice@example.com
 ```
 
-Running `inbaid serve` on the host remains valid. Both processes accept the same tokens when they use this database. Both also delete old mail on their own schedule.
+Running `inbaid serve` on the host remains valid. Both processes accept the same tokens when they use this database, and both claim bulk generation, cursor sweeps, retention sweeps, and webhook deliveries from the database queue.
 
 ## Outbound relay
 

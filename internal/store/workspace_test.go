@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSchemaTablesHaveAWorkspaceColumn(t *testing.T) {
@@ -110,6 +111,9 @@ func TestExistingRowsGainTheWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Put(ctx, "inbox-a", "ada@example.com", "state-1", []Record{{MessageID: "m", Kind: "created"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.Enqueue(ctx, "cursor.sweep", "singleton", []byte(`{}`), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range workspaceTables {

@@ -121,6 +121,22 @@ CREATE TABLE IF NOT EXISTS signing_key (
     workspace_id text NOT NULL DEFAULT 'default',
     CONSTRAINT signing_key_singleton CHECK (id = 1)
 );
+CREATE TABLE IF NOT EXISTS job_queue (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind text NOT NULL,
+    payload jsonb NOT NULL DEFAULT '{}',
+    unique_key text NOT NULL DEFAULT '',
+    attempt int NOT NULL DEFAULT 0,
+    next_at timestamptz NOT NULL DEFAULT now(),
+    done_at timestamptz,
+    failed_at timestamptz,
+    last_error text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default'
+);
+CREATE INDEX IF NOT EXISTS job_queue_due ON job_queue (next_at)
+    WHERE done_at IS NULL AND failed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS job_queue_unique_open ON job_queue (kind, unique_key)
+    WHERE unique_key <> '' AND done_at IS NULL AND failed_at IS NULL;
 `
 
 // Postgres is the event log that survives an inbaid restart.
@@ -165,6 +181,7 @@ var workspaceTables = []string{
 	"retention_policy",
 	"sender_allowlist",
 	"signing_key",
+	"job_queue",
 }
 
 func ensureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
@@ -499,6 +516,9 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 	if err := readSigningKey(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
+	if err := readQueue(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -563,6 +583,9 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		return err
 	}
 	if err := writeSigningKey(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeQueue(ctx, tx, snap); err != nil {
 		return err
 	}
 	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {

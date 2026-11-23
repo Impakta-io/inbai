@@ -117,7 +117,10 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
-		go feed.Run(context.Background(), stalwart.Mail{Client: client}, nil)
+		go feed.RunWebhooks(context.Background(), nil)
+		go newWorker(log, svc, feed, stalwart.Mail{Client: client}, cfg.RetentionDays, stderr).Run(context.Background())
+	} else {
+		go retainLoop(svc, cfg.RetentionDays, stderr)
 	}
 	handler := (&api.Server{
 		Service:       svc,
@@ -131,7 +134,6 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		RetentionDays: cfg.RetentionDays,
 		Log:           stderr,
 	}).Handler()
-	go retainLoop(svc, cfg.RetentionDays, stderr)
 	writef(stdout, "listening on %s\n", *addr)
 	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if err := server.ListenAndServe(); err != nil {

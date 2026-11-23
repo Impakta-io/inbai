@@ -66,7 +66,10 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
-		go feed.Run(context.Background(), backend, nil)
+		go feed.RunWebhooks(context.Background(), nil)
+		go newWorker(log, svc, feed, backend, config.DefaultRetentionDays, stderr).Run(context.Background())
+	} else {
+		go retainLoop(svc, config.DefaultRetentionDays, stderr)
 	}
 	handler := (&api.Server{
 		Service:       svc,
@@ -80,7 +83,6 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		RetentionDays: config.DefaultRetentionDays,
 		Log:           stderr,
 	}).Handler()
-	go retainLoop(svc, config.DefaultRetentionDays, stderr)
 	writef(stdout, "listening on %s\n", addr)
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if err := server.ListenAndServe(); err != nil {

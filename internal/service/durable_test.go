@@ -5,9 +5,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -66,5 +68,76 @@ func TestGrantIsVisibleToAnotherProcess(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("audit %+v", rows)
+	}
+}
+
+func TestBulkJobQueuedForAnotherReplica(t *testing.T) {
+	dsn := os.Getenv("INBAI_TEST_DATABASE")
+	if dsn == "" {
+		t.Skip("INBAI_TEST_DATABASE is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(424242)`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock(424242)`) }()
+	db, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := pool.Exec(ctx, `TRUNCATE job_queue, bulk_job, idempotency`); err != nil {
+		t.Fatal(err)
+	}
+
+	first := New(&fakeMail{})
+	first.SetDB(db)
+	first.SetSyncLimit(1)
+
+	if _, err := first.Generate(ctx, Caller{Agent: "ada"}, GenerateRequest{
+		Prefix: "q", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, ""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("agent generate err %v", err)
+	}
+
+	got, err := first.Generate(ctx, Caller{Operator: true}, GenerateRequest{
+		Prefix: "q", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, "bulk-replica-key")
+	if err != nil || got.JobID == "" {
+		t.Fatalf("generate %+v err %v", got, err)
+	}
+
+	// Second replica claims the job from PostgreSQL and finishes it.
+	secondMail := &fakeMail{}
+	second := New(secondMail)
+	second.SetDB(db)
+	claimed, ok, err := db.ClaimJob(ctx, first.now().UTC().Add(time.Second), time.Minute)
+	if err != nil || !ok || claimed.Kind != "bulk.generate" || claimed.UniqueKey != got.JobID {
+		t.Fatalf("claim %+v ok %v err %v", claimed, ok, err)
+	}
+	var payload BulkPayload
+	if err := json.Unmarshal(claimed.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.RunBulkJob(ctx, payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AckJob(ctx, claimed.ID, first.now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := first.Job(got.JobID)
+	if err != nil || job.Status != "done" || job.Created != 2 || len(job.Inboxes) != 2 {
+		t.Fatalf("job %+v err %v", job, err)
 	}
 }

@@ -210,6 +210,25 @@ func (f *Feed) Run(ctx context.Context, watch mailbackend.Watcher, client *http.
 	}
 }
 
+// RunWebhooks claims and posts due webhook deliveries until the context ends.
+func (f *Feed) RunWebhooks(ctx context.Context, client *http.Client) {
+	post := time.NewTicker(time.Second)
+	defer post.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-post.C:
+			for range 20 {
+				ok, err := f.DeliverOnce(ctx, client)
+				if err != nil || !ok {
+					break
+				}
+			}
+		}
+	}
+}
+
 // Counters returns events appended and webhooks posted.
 func (f *Feed) Counters() (int64, int64) {
 	return f.appended.Load(), f.posted.Load()

@@ -62,6 +62,16 @@ type GenerateResult struct {
 	JobID   string
 }
 
+// BulkPayload is the work stored in job_queue for an asynchronous Generate call.
+type BulkPayload struct {
+	JobID    string `json:"jobId"`
+	Prefix   string `json:"prefix"`
+	Domain   string `json:"domain"`
+	DomainID string `json:"domainId"`
+	RoleID   string `json:"roleId"`
+	Count    int    `json:"count"`
+}
+
 func (s *Service) SyncLimit() int {
 	if s.syncLimit > 0 {
 		return s.syncLimit
@@ -130,14 +140,66 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	if err := s.putJob(ctx, job); err != nil {
 		return GenerateResult{}, err
 	}
+	if s.db != nil {
+		payload, err := json.Marshal(BulkPayload{
+			JobID:    id,
+			Prefix:   prefix,
+			Domain:   req.Domain,
+			DomainID: req.DomainID,
+			RoleID:   req.RoleID,
+			Count:    req.Count,
+		})
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		if _, _, err := s.db.Enqueue(ctx, "bulk.generate", id, payload, s.now().UTC()); err != nil {
+			return GenerateResult{}, err
+		}
+	}
 	result := GenerateResult{JobID: id}
 	if key != "" {
 		if err := s.rememberGenerate(ctx, key, result); err != nil {
 			return GenerateResult{}, err
 		}
 	}
-	go s.finishJob(job, specs, req.Domain)
+	if s.db == nil {
+		go s.finishJob(job, specs, req.Domain)
+	}
 	return result, nil
+}
+
+// RunBulkJob executes one queued bulk-create job and updates its status row.
+func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
+	specs := make([]mailbackend.InboxSpec, payload.Count)
+	for i := range specs {
+		specs[i] = mailbackend.InboxSpec{
+			DomainID: payload.DomainID,
+			RoleID:   payload.RoleID,
+			Local:    fmt.Sprintf("%s%05d", payload.Prefix, i),
+		}
+	}
+	made, err := s.createAll(ctx, specs, payload.Domain, nil)
+	if s.db == nil {
+		return err
+	}
+	row := store.JobRow{ID: payload.JobID, Total: payload.Count, Inboxes: []byte("[]")}
+	if err != nil {
+		row.Status = "failed"
+		row.Error = err.Error()
+		_ = s.db.UpdateJob(ctx, row)
+		return err
+	}
+	raw, encErr := json.Marshal(made)
+	if encErr != nil {
+		row.Status = "failed"
+		row.Error = encErr.Error()
+		_ = s.db.UpdateJob(ctx, row)
+		return encErr
+	}
+	row.Status = "done"
+	row.Created = len(made)
+	row.Inboxes = raw
+	return s.db.UpdateJob(ctx, row)
 }
 
 // Job returns a copy of a bulk-create job.

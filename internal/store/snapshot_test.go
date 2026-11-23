@@ -130,6 +130,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := db.Enqueue(ctx, "cursor.sweep", "singleton", []byte(`{}`), time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -201,6 +204,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Equal(key, []byte("signing-key")) {
 		t.Fatalf("signing key %q err %v", key, err)
 	}
+	claimed, ok, err := db.ClaimJob(ctx, time.Now().UTC().Add(2*time.Hour), time.Minute)
+	if err != nil || !ok || claimed.Kind != "cursor.sweep" || claimed.UniqueKey != "singleton" {
+		t.Fatalf("queue job %+v ok %v err %v", claimed, ok, err)
+	}
 }
 
 func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
@@ -208,7 +215,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.Allowlists != nil || decoded.SigningKey != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.Allowlists != nil || decoded.SigningKey != nil || decoded.Queue != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

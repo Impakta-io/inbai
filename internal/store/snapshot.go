@@ -106,6 +106,7 @@ type Snapshot struct {
 	Retention     []RetentionRow   `json:"retention"`
 	Allowlists    []AllowlistRow   `json:"allowlists"`
 	SigningKey    []byte           `json:"signingKey"`
+	Queue         []QueueJob       `json:"queue"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -301,6 +302,16 @@ func (s Snapshot) check() error {
 			return fmt.Errorf("allowlist %q is incomplete", row.Inbox)
 		}
 	}
+	seenQueue := map[int64]struct{}{}
+	for _, row := range s.Queue {
+		if row.ID <= 0 || row.Kind == "" {
+			return fmt.Errorf("queue job %d is incomplete", row.ID)
+		}
+		if _, dup := seenQueue[row.ID]; dup {
+			return fmt.Errorf("queue job %d is duplicated", row.ID)
+		}
+		seenQueue[row.ID] = struct{}{}
+	}
 	return nil
 }
 
@@ -322,5 +333,6 @@ func emptySnapshot() Snapshot {
 		Retention:     []RetentionRow{},
 		Allowlists:    []AllowlistRow{},
 		SigningKey:    []byte{},
+		Queue:         []QueueJob{},
 	}
 }
