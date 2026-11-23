@@ -65,6 +65,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Require Signed-off-by
         shell: bash
         run: |
@@ -76,5 +77,5 @@ jobs:
               echo "Missing Signed-off-by: $commit"
               missing=1
             fi
-          done < <(git rev-list "${{ github.event.pull_request.base.sha }}..HEAD")
+          done < <(git rev-list "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}")
           exit "$missing"
