@@ -1,4 +1,4 @@
-Status: partial — the event feed, signed webhooks, and the ingest hint exist when `INBAI_DATABASE_URL` is set. Suppression from hard bounces is not implemented.
+Status: partial — the event feed, signed webhooks, the ingest hint, and hard-bounce suppression exist when `INBAI_DATABASE_URL` is set.
 
 # Events
 
@@ -31,11 +31,16 @@ The response includes `secret` once. Each delivery is a POST of one event. The h
 
 Stalwart posts to `POST /v1/hooks/ingest` with `X-Inbai-Ingest` set to `INBAI_INGEST_SECRET`. The body is Stalwart's event list. `message-ingest` events are matched on `data.to`. The numeric `accountId` is not the JMAP account id. A slow sweep also asks for changes when no hint arrives.
 
+## Suppression
+
+A Stalwart `delivery.dsn-perm-fail` event is a hard bounce. `inbaid` stores the recipient and the `details` text, and a later send or reply to that address is rejected with 409 before quota is consumed. `delivery.dsn-temp-fail` and `delivery.failed` are temporary and do not suppress anyone. The address is matched case-insensitively. The first reason is kept.
+
+`GET /v1/suppressions` lists the addresses. Only an operator may call it. The list lives in the same PostgreSQL database as the event cursor, so it is still there after `inbaid` restarts.
+
 ## Operations
 
 `GET /healthz` answers when the process is up. `GET /readyz` pings PostgreSQL when the event database is configured. `GET /metrics` exposes `inbai_events_appended_total` and `inbai_webhooks_delivered_total`.
 
 ## Planned sections
 
-- A suppression list fed by hard bounces.
 - What an agent should do when a message body conflicts with an earlier instruction. The event itself is only an id and a kind.

@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,7 +39,6 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
 	records, err := second.Since(ctx, "inbox-a", 0, 10)
 	if err != nil || len(records) != 1 || records[0].MessageID != "m" {
 		t.Fatalf("records %+v err %v", records, err)
@@ -54,9 +54,22 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 	if _, ok, err = second.Claim(ctx, time.Now()); err != nil || ok {
 		t.Fatalf("second claim ok %v err %v", ok, err)
 	}
+	if err := second.Suppress(ctx, "Bad@example.com", "delivery.dsn-perm-fail: 550 user unknown"); err != nil {
+		t.Fatal(err)
+	}
+	second.Close()
+	third, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	reason, ok, err := third.Suppressed(ctx, "bad@example.com")
+	if err != nil || !ok || !strings.Contains(reason, "550") {
+		t.Fatalf("suppressed %q ok %v err %v", reason, ok, err)
+	}
 }
 
 func reset(ctx context.Context, db *Postgres) error {
-	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor`)
+	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression`)
 	return err
 }

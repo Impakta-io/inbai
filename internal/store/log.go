@@ -48,4 +48,13 @@ type Log interface {
 	Ack(context.Context, int64, time.Time) error
 	Retry(context.Context, int64, time.Time) error
 	Fail(context.Context, int64, time.Time) error
+	Suppress(context.Context, string, string) error
+	Suppressed(context.Context, string) (string, bool, error)
+	Suppressions(context.Context) ([]Suppression, error)
+}
+
+// Suppression is one recipient that must not be mailed again.
+type Suppression struct {
+	Address string `json:"address"`
+	Reason  string `json:"reason"`
 }

@@ -20,6 +20,7 @@ type Memory struct {
 	events     []Record
 	subs       map[string]Subscription
 	deliveries []memDelivery
+	blocked    map[string]string
 }
 
 type memCursor struct {
@@ -42,6 +43,7 @@ func (m *Memory) init() {
 		m.cursors = map[string]memCursor{}
 		m.byAddress = map[string]string{}
 		m.subs = map[string]Subscription{}
+		m.blocked = map[string]string{}
 	}
 }
 
@@ -205,4 +207,38 @@ func (m *Memory) finish(id int64, ok bool) error {
 		}
 	}
 	return nil
+}
+
+func (m *Memory) Suppress(_ context.Context, address, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" || !strings.Contains(address, "@") {
+		return nil
+	}
+	if _, exists := m.blocked[address]; exists {
+		return nil
+	}
+	m.blocked[address] = reason
+	return nil
+}
+
+func (m *Memory) Suppressed(_ context.Context, address string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	reason, ok := m.blocked[strings.ToLower(strings.TrimSpace(address))]
+	return reason, ok, nil
+}
+
+func (m *Memory) Suppressions(context.Context) ([]Suppression, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	out := make([]Suppression, 0, len(m.blocked))
+	for address, reason := range m.blocked {
+		out = append(out, Suppression{Address: address, Reason: reason})
+	}
+	return out, nil
 }
