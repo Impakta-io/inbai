@@ -34,9 +34,9 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	case "doctor":
 		return doctorCmd(args[1:], stdout, stderr)
 	case "inbox":
-		return inboxCmd(args[1:], stdout, stderr)
+		return inboxCmd(args[1:], stdout, stderr, getenv)
 	case "message":
-		return messageCmd(args[1:], stdout, stderr)
+		return messageCmd(args[1:], stdout, stderr, getenv)
 	case "-h", "--help", "help":
 		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message]\n")
 		return 0
@@ -122,10 +122,14 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		DomainID:          result.DomainID,
 		Inboxes:           existing.Inboxes,
 		APIKey:            result.APIKey,
+		APIURL:            config.DefaultAPIURL,
 		RetentionDays:     config.DefaultRetentionDays,
 	}
 	if existing.APIKey != "" {
 		cfg.APIKey = existing.APIKey
+	}
+	if existing.APIURL != "" {
+		cfg.APIURL = existing.APIURL
 	}
 	if err := writeConfig(path, cfg); err != nil {
 		writef(stderr, "write config: %s\n", err)

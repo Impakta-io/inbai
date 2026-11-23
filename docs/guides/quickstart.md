@@ -25,7 +25,17 @@ Publish the zone, then run `inbai doctor`. A healthy host exits 0. The Compose c
 
 ## Create an inbox
 
+Start the API, then create an address. The token is the one `inbaid serve` requires.
+
 ```sh
+export INBAI_OPERATOR_TOKEN='choose-a-token'
+inbaid serve
+```
+
+In another shell:
+
+```sh
+export INBAI_OPERATOR_TOKEN='choose-a-token'
 inbai inbox create alice
 inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
 inbai message list alice@example.com

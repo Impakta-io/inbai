@@ -7,6 +7,9 @@ package config
 // An operator can change or disable retention per server or per inbox.
 const DefaultRetentionDays = 30
 
+// DefaultAPIURL is where inbaid serve listens unless --addr is set.
+const DefaultAPIURL = "http://127.0.0.1:8787"
+
 // File is the operator config inbai init writes.
 // It holds the service API key, so the file mode is 0600.
 type File struct {
@@ -19,6 +22,7 @@ type File struct {
 	InboxRoleID       string            `json:"inboxRoleId"`
 	ServiceRoleID     string            `json:"serviceRoleId"`
 	APIKey            string            `json:"apiKey"`
+	APIURL            string            `json:"apiUrl,omitempty"`
 	RetentionDays     int               `json:"retentionDays"`
 	Inboxes           map[string]string `json:"inboxes,omitempty"`
 }

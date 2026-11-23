@@ -2,7 +2,7 @@ Status: current
 
 # Documentation
 
-The operator CLI can create an inbox and submit or list mail through Stalwart. `inbaid serve` exposes those operations over HTTP. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
+The operator CLI calls `inbaid` for inbox and message commands. `init`, `domain add`, and `doctor` talk to Stalwart. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
 
 ## Use cases
 
