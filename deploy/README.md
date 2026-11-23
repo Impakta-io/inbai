@@ -2,4 +2,4 @@ Status: current
 
 # Deploy
 
-Deployment files will live here. The Compose stack is not written yet. See [deploy/compose](compose/README.md).
+The single-host stack is in [compose](compose/README.md). It starts PostgreSQL and Stalwart. The `inbai` installer commands are not implemented yet.

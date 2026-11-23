@@ -20,6 +20,7 @@ The binaries are `bin/inbai` and `bin/inbaid`. Windows commands are in [developm
 
 ## Read next
 
+- [Use cases](docs/use-cases.md)
 - [Documentation index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md), including [work done with AI](docs/contributing/ai-assisted.md)

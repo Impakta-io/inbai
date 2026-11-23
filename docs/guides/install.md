@@ -1,8 +1,10 @@
-Status: planned — filled in when the Compose stack and `inbai init` exist.
+Status: partial — Compose can start PostgreSQL and Stalwart. `inbai init` is not implemented.
 
 # Install
 
-The supported server is one Linux host with Docker Engine, a public IPv4 address, and reverse DNS. macOS, Linux, and Windows run the CLI only. The install steps are not written yet because the stack is not in the repository.
+The supported server is one Linux host with Docker Engine, a public IPv4 address, and reverse DNS. macOS, Linux, and Windows run the CLI only.
+
+The stack file is [deploy/compose](../../deploy/compose/README.md). It does not yet install inbAI itself. `inbai init` is still to be written.
 
 ## Planned sections
 

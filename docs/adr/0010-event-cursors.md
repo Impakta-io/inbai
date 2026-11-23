@@ -2,7 +2,7 @@ Status: current
 
 # ADR 0010: Event cursors, with webhooks as hints
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-23
 
 ## Context
@@ -11,8 +11,10 @@ Agents need to learn about new mail, including agents that cannot accept inbound
 
 ## Decision
 
-The working plan is a JMAP state cursor per inbox, stored in PostgreSQL. A worker asks Stalwart for changes since that cursor and advances it in the same transaction as the recorded event. A Stalwart ingest webhook only prompts the worker to poll. Consumers receive signed webhooks or long-poll `GET /v1/events`. If the ingest event does not identify the recipient, the fallback is JMAP push.
+A JMAP state cursor per inbox, stored in PostgreSQL, is the record of what arrived. A worker asks Stalwart for changes since that cursor. A Stalwart `message-ingest` webhook only prompts the worker to poll. Consumers receive signed webhooks or long-poll `GET /v1/events`.
+
+The spike confirmed that a delivered message produces `message-ingest.ham`. The payload names the recipient in `to` and includes a numeric `accountId`. That number is not the JMAP account id returned when the account is created, so the recipient address is the key used to find the inbox. JMAP push is not required to identify the recipient.
 
 ## Consequences
 
-Stopping `inbaid` does not drop mail events. Delivery is at least once. The spike has to confirm what the ingest event contains before this record is accepted.
+Stopping `inbaid` does not drop mail events, because the cursor can be read later. Delivery to consumers is at least once. The webhook hint must be matched by recipient address, not by treating `accountId` as a JMAP id.

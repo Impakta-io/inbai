@@ -4,6 +4,10 @@ Status: current
 
 The server does not send or receive mail yet. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
 
+## Use cases
+
+- [Use cases](use-cases.md)
+
 ## Design
 
 - [Architecture](architecture.md)

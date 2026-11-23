@@ -85,10 +85,10 @@ The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Sta
 
 Only port 25 and port 443 are public. Stalwart's own client and admin listeners stay on the internal network.
 
-## Proposed, pending validation
+## Validated with Stalwart
 
-These choices are the working design. A spike still has to prove them, and a decision record will accept or replace each one.
+A spike against Stalwart 1.1.1 accepted three choices. The records are [0008](adr/0008-stalwart-postgresql-store.md), [0009](adr/0009-impersonating-service-account.md), and [0010](adr/0010-event-cursors.md).
 
-- Stalwart stores its own data in PostgreSQL, in a separate database on the same PostgreSQL service, so a later second mail node does not require a data migration. Blobs live on the local filesystem unless the operator sets S3-compatible storage.
-- `inbaid` uses one Stalwart service account with the `impersonate` permission to read and send for every inbox. The inbAI grant check is then the whole isolation boundary. The fallback is one credential per inbox, encrypted in PostgreSQL.
-- Incoming mail is learned from a per-inbox JMAP state cursor. A Stalwart `message-ingest` webhook is a hint to poll, not the record of what arrived. The fallback is JMAP push.
+- Stalwart stores its own data in PostgreSQL, in a separate database. The spike left message blobs in that same database.
+- `inbaid` uses one Stalwart service account with `impersonate`. Inbox accounts need `emailReceive`, and the service account must hold every permission it grants.
+- A `message-ingest` webhook is a hint. It names the recipient address in `to`. The numeric `accountId` in the payload is not the JMAP account id. The durable record is a per-inbox JMAP cursor.

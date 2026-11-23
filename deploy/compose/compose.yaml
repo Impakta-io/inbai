@@ -1,0 +1,37 @@
+name: inbai
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stalwart
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+      POSTGRES_DB: stalwart
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stalwart -d stalwart"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  stalwart:
+    image: stalwartlabs/stalwart:v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+      STALWART_RECOVERY_MODE: ${STALWART_RECOVERY_MODE:-0}
+      STALWART_RECOVERY_ADMIN: ${STALWART_RECOVERY_ADMIN:-}
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "25:25"
+      - "587:587"
+      - "443:443"
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - stalwart:/var/lib/stalwart
+
+volumes:
+  postgres:
+  stalwart:
