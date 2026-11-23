@@ -1,0 +1,338 @@
+// Copyright 2026 Impakta-io
+// SPDX-License-Identifier: Apache-2.0
+
+package stalwart
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+const (
+	inboxRoleDescription   = "inbAI inbox"
+	serviceRoleDescription = "inbAI service"
+	recoveryUser           = "admin"
+)
+
+// Input is the operator's choice for the first boot.
+type Input struct {
+	Domain           string
+	Hostname         string
+	OperatorPassword string
+	CreateAPIKey     bool
+}
+
+// Result is what the first boot created or found.
+type Result struct {
+	DomainID          string
+	Hostname          string
+	InboxRoleID       string
+	ServiceRoleID     string
+	ServiceAccountID  string
+	OperatorAccountID string
+	APIKey            string
+}
+
+var inboxPermissions = []string{
+	"authenticate",
+	"emailReceive",
+	"emailSend",
+	"jmapMailboxGet",
+	"jmapMailboxChanges",
+	"jmapMailboxQuery",
+	"jmapMailboxQueryChanges",
+	"jmapThreadGet",
+	"jmapThreadChanges",
+	"jmapEmailGet",
+	"jmapEmailChanges",
+	"jmapEmailQuery",
+	"jmapEmailQueryChanges",
+	"jmapEmailCreate",
+	"jmapEmailSubmissionGet",
+	"jmapEmailSubmissionChanges",
+	"jmapEmailSubmissionCreate",
+	"jmapIdentityGet",
+	"jmapIdentityChanges",
+}
+
+var servicePermissions = append(append([]string{}, inboxPermissions...),
+	"impersonate",
+	"sysAccountGet",
+	"sysAccountCreate",
+	"sysAccountUpdate",
+	"sysAccountQuery",
+	"sysApiKeyCreate",
+	"sysDomainGet",
+	"sysDomainCreate",
+	"sysDomainQuery",
+	"sysRoleGet",
+	"sysRoleQuery",
+)
+
+// Bootstrap creates the domain, the inbox and service roles, the operator,
+// and the service account. It is safe to run again.
+func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
+	if client == nil {
+		return Result{}, fmt.Errorf("missing stalwart client")
+	}
+	if strings.TrimSpace(in.Domain) == "" || !strings.Contains(in.Domain, ".") || strings.ContainsAny(in.Domain, " /\t") {
+		return Result{}, fmt.Errorf("domain %q is not a DNS name", in.Domain)
+	}
+	if in.OperatorPassword == "" {
+		return Result{}, fmt.Errorf("operator password is empty")
+	}
+	hostname := in.Hostname
+	if hostname == "" {
+		hostname = "mail." + in.Domain
+	}
+	if client.User == "" {
+		client.User = recoveryUser
+	}
+
+	domainID, err := ensureDomain(ctx, client, in.Domain)
+	if err != nil {
+		return Result{}, err
+	}
+	if _, err := client.invoke(ctx, "s", "x:SystemSettings/set", map[string]any{
+		"update": map[string]any{
+			"singleton": map[string]any{
+				"defaultHostname": hostname,
+				"defaultDomainId": domainID,
+			},
+		},
+	}); err != nil {
+		return Result{}, err
+	}
+	inboxRole, err := ensureRole(ctx, client, "inbox", inboxRoleDescription, permSet(inboxPermissions))
+	if err != nil {
+		return Result{}, err
+	}
+	serviceRole, err := ensureRole(ctx, client, "svc", serviceRoleDescription, permSet(servicePermissions))
+	if err != nil {
+		return Result{}, err
+	}
+	serviceSecret, err := randomSecret()
+	if err != nil {
+		return Result{}, err
+	}
+	operatorID, serviceID, err := ensureAccounts(ctx, client, domainID, serviceRole, in.OperatorPassword, serviceSecret)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{
+		DomainID:          domainID,
+		Hostname:          hostname,
+		InboxRoleID:       inboxRole,
+		ServiceRoleID:     serviceRole,
+		OperatorAccountID: operatorID,
+		ServiceAccountID:  serviceID,
+	}
+	if !in.CreateAPIKey {
+		return result, nil
+	}
+	raw, err := client.invoke(ctx, "k", "x:ApiKey/set", map[string]any{
+		"accountId": serviceID,
+		"create": map[string]any{
+			"k1": map[string]any{
+				"description": "inbAI",
+				"permissions": map[string]any{"@type": "Inherit"},
+				"allowedIps":  map[string]any{},
+			},
+		},
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	secret, err := createdSecret(raw, "k1")
+	if err != nil {
+		return Result{}, err
+	}
+	result.APIKey = secret
+	return result, nil
+}
+
+func ensureDomain(ctx context.Context, client *Client, name string) (string, error) {
+	raw, err := client.invoke(ctx, "d", "x:Domain/set", map[string]any{
+		"create": map[string]any{
+			"d1": map[string]any{
+				"name":                  name,
+				"certificateManagement": map[string]any{"@type": "Manual"},
+				"dkimManagement":        map[string]any{"@type": "Automatic"},
+				"dnsManagement":         map[string]any{"@type": "Manual"},
+				"subAddressing":         map[string]any{"@type": "Enabled"},
+			},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return createdID(raw, "d1")
+}
+
+func ensureRole(ctx context.Context, client *Client, createKey, description string, perms map[string]bool) (string, error) {
+	raw, err := client.invoke(ctx, "q", "x:Role/query", map[string]any{})
+	if err != nil {
+		return "", err
+	}
+	var query struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &query); err != nil {
+		return "", err
+	}
+	if len(query.IDs) > 0 {
+		got, err := client.invoke(ctx, "g", "x:Role/get", map[string]any{"ids": query.IDs})
+		if err != nil {
+			return "", err
+		}
+		var list struct {
+			List []struct {
+				ID          string `json:"id"`
+				Description string `json:"description"`
+			} `json:"list"`
+		}
+		if err := json.Unmarshal(got, &list); err != nil {
+			return "", err
+		}
+		for _, role := range list.List {
+			if role.Description == description {
+				return role.ID, nil
+			}
+		}
+	}
+	raw, err = client.invoke(ctx, "r", "x:Role/set", map[string]any{
+		"create": map[string]any{
+			createKey: map[string]any{
+				"description":         description,
+				"enabledPermissions":  perms,
+				"disabledPermissions": map[string]any{},
+				"roleIds":             map[string]any{},
+			},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return createdID(raw, createKey)
+}
+
+func ensureAccounts(ctx context.Context, client *Client, domainID, serviceRole, operatorPassword, servicePassword string) (string, string, error) {
+	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
+		"create": map[string]any{
+			"operator": account("operator", domainID, serviceRole, operatorPassword),
+			"svc":      account("service", domainID, serviceRole, servicePassword),
+		},
+	})
+	if err != nil {
+		return "", "", err
+	}
+	operatorID, err := createdID(raw, "operator")
+	if err != nil {
+		return "", "", err
+	}
+	serviceID, err := createdID(raw, "svc")
+	if err != nil {
+		return "", "", err
+	}
+	return operatorID, serviceID, nil
+}
+
+func account(name, domainID, roleID, secret string) map[string]any {
+	return map[string]any{
+		"@type":    "User",
+		"name":     name,
+		"domainId": domainID,
+		"credentials": map[string]any{
+			"0": map[string]any{"@type": "Password", "secret": secret},
+		},
+		"roles": map[string]any{
+			"@type":   "Custom",
+			"roleIds": map[string]bool{roleID: true},
+		},
+		"permissions":      map[string]any{"@type": "Inherit"},
+		"encryptionAtRest": map[string]any{"@type": "Disabled"},
+	}
+}
+
+func permSet(names []string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		out[name] = true
+	}
+	return out
+}
+
+type setResult struct {
+	Created map[string]struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+	} `json:"created"`
+	NotCreated map[string]struct {
+		Type        string `json:"type"`
+		Description string `json:"description"`
+		ObjectID    struct {
+			ID string `json:"id"`
+		} `json:"objectId"`
+	} `json:"notCreated"`
+}
+
+func createdID(raw json.RawMessage, key string) (string, error) {
+	item, err := lookupSetItem(raw, key)
+	if err != nil {
+		return "", err
+	}
+	if item.ID != "" {
+		return item.ID, nil
+	}
+	return "", fmt.Errorf("stalwart %s: missing id", key)
+}
+
+func createdSecret(raw json.RawMessage, key string) (string, error) {
+	item, err := lookupSetItem(raw, key)
+	if err != nil {
+		return "", err
+	}
+	if item.Secret == "" {
+		return "", fmt.Errorf("stalwart %s: missing secret", key)
+	}
+	return item.Secret, nil
+}
+
+type setItem struct {
+	ID     string
+	Secret string
+}
+
+func lookupSetItem(raw json.RawMessage, key string) (setItem, error) {
+	var body setResult
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return setItem{}, err
+	}
+	if created, ok := body.Created[key]; ok {
+		return setItem{ID: created.ID, Secret: created.Secret}, nil
+	}
+	missing, ok := body.NotCreated[key]
+	if !ok {
+		return setItem{}, fmt.Errorf("stalwart %s: missing result", key)
+	}
+	if missing.ObjectID.ID != "" {
+		return setItem{ID: missing.ObjectID.ID}, nil
+	}
+	detail := missing.Type
+	if missing.Description != "" {
+		detail = missing.Type + ": " + missing.Description
+	}
+	return setItem{}, fmt.Errorf("stalwart %s: %s", key, detail)
+}
+
+func randomSecret() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}

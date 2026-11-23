@@ -2,9 +2,7 @@ Status: current
 
 # Compose stack
 
-This stack is the start of the foundation. It runs PostgreSQL 16 and Stalwart 1.1.1, with Stalwart's data store in PostgreSQL. That layout was exercised in the spike recorded in [ADR 0008](../../docs/adr/0008-stalwart-postgresql-store.md).
-
-`inbai init` does not exist yet. Until it does, the first boot is manual.
+This stack runs PostgreSQL 16 and Stalwart, with Stalwart's data store in PostgreSQL. That layout was exercised in the spike recorded in [ADR 0008](../../docs/adr/0008-stalwart-postgresql-store.md).
 
 ## Start
 
@@ -17,18 +15,29 @@ export STALWART_RECOVERY_ADMIN="admin:${PG_PASSWORD}"
 docker compose up -d
 ```
 
-Recovery mode serves the management API on port 8080 inside the container and does not accept mail. Create the domain and the first administrator through that API, then start mail listeners:
+Recovery mode serves the management API on port 8080 inside the container. This file publishes that port on `127.0.0.1` only, so `inbai init` on the host can reach it. Do not publish port 8080 on a public address.
+
+```sh
+export INBAI_RECOVERY_PASSWORD="$PG_PASSWORD"
+inbai init --url http://127.0.0.1:8080 --domain example.com
+```
+
+`inbai init` creates the domain, an operator login `operator@example.com`, and a service account. The operator password is `INBAI_RECOVERY_PASSWORD`. The service API key is written to the config file and is not printed. Message retention defaults to 30 days.
+
+The operator account and the service account share the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes.
+
+Leave recovery mode before accepting mail:
 
 ```sh
 export STALWART_RECOVERY_MODE=0
 docker compose up -d
 ```
 
-Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates. Do not publish port 8080.
+Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates.
 
 ## What is not here yet
 
-- `inbai init`, `inbai domain add`, and `inbai doctor`
+- `inbai domain add` and `inbai doctor`
 - The inbAI server process
 - An authenticated outbound relay
 
