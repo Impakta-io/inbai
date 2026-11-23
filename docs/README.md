@@ -27,7 +27,7 @@ Install, domain setup, the CLI, troubleshooting, and the quickstart describe the
 
 ## Agents that use inbAI
 
-The REST guide and the agent overview describe the routes and client credentials that exist. The MCP, events, and untrusted-mail guides are still outlines.
+The REST guide, the agent overview, and the MCP guide describe the routes, client credentials, and tools that exist. The events guide is still an outline. Untrusted mail describes the external-content marker and leaves authentication results for later.
 
 - [Overview](agents/overview.md)
 - [MCP](agents/mcp.md)

@@ -1,8 +1,8 @@
-Status: planned — the situations below are the design. No agent can send or receive mail yet.
+Status: partial — an operator can provision an inbox, and an agent can authenticate and call the API or MCP. Live delivery to another server is not proven on this page.
 
 # Use cases
 
-inbAI is a control plane in front of a mail server. An operator provisions domains and inboxes. An agent uses the REST API or the MCP server. A grant decides what that agent may do. `inbai init` can bootstrap the mail server, and the operator CLI can create an inbox and submit or list mail. `inbaid serve` exposes those operations to an operator token. The MCP server is not implemented, and an agent still cannot authenticate.
+inbAI is a control plane in front of a mail server. An operator provisions domains and inboxes. An agent uses the REST API or the MCP server. A grant decides what that agent may do. `inbai init` can bootstrap the mail server, and the operator CLI can create an inbox and submit or list mail. `inbaid serve` exposes those operations to an operator token and to an agent access token. MCP is served at `/mcp` and by `inbai mcp serve`.
 
 ## One inbox per agent
 

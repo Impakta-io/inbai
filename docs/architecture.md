@@ -4,7 +4,7 @@ Status: current
 
 inbAI is a control plane in front of a mail server. It provisions domains and inboxes, holds agent identity and grants, enforces quotas, and delivers events. It does not implement SMTP, IMAP, or spam filtering.
 
-`inbai init` creates the Stalwart domain, operator, and service account described below. Inbox and message commands call `inbaid`, and `inbaid` calls the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet. An operator may use `INBAI_OPERATOR_TOKEN`. An agent uses an OAuth client credential, and the access token only names that agent. MCP is not implemented. The rest of this document is the design the remaining code will follow.
+`inbai init` creates the Stalwart domain, operator, and service account described below. Inbox and message commands call `inbaid`, and `inbaid` calls the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet. An operator may use `INBAI_OPERATOR_TOKEN`. An agent uses an OAuth client credential, and the access token only names that agent. MCP is served at `/mcp` and by `inbai mcp serve`. The rest of this document is the design the remaining code will follow.
 
 ## Components
 
@@ -60,7 +60,7 @@ Each inbox is one account in the mail server. The service layer talks to a `Mail
 
 Domain setup prints the zone file Stalwart computes, including MX, SPF, DKIM, and DMARC. `inbai domain add` does that and checks the MX and TXT records. `inbai doctor` also checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. Direct delivery is supported, and an authenticated SMTP relay is a first-class setting. Sending has quotas per inbox, per domain, and per workspace, a rate limit per recipient domain, a suppression list fed by hard bounces, and a way to suspend an agent.
 
-The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is untrusted input. Results will include SPF, DKIM, DMARC, and the spam verdict, and MCP results will mark message bodies as external content.
+The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is untrusted input. Results will include SPF, DKIM, DMARC, and the spam verdict. MCP results mark message bodies as external content.
 
 ## Events and jobs
 

@@ -6,7 +6,7 @@ Agents will be able to wait for mail without a public inbound port. The feed and
 
 ## Planned sections
 
-- Long-polling `GET /v1/events` and the `wait_for_message` MCP tool.
+- Long-polling `GET /v1/events`. `wait_for_message` already polls an inbox and is not this feed.
 - Registering a webhook, verifying its signature, and retry behavior.
 - Ordering per inbox, and why delivery is at least once.
 - What an agent should do when it sees the same message twice.

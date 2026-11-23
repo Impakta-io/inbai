@@ -1,0 +1,57 @@
+// Copyright 2026 Impakta-io
+// SPDX-License-Identifier: Apache-2.0
+
+package mcp
+
+import (
+	"context"
+	"time"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/service"
+)
+
+// ServiceBox calls the service layer for one caller.
+type ServiceBox struct {
+	Service *service.Service
+	Caller  service.Caller
+}
+
+func (s ServiceBox) List(ctx context.Context, inbox, query string) ([]mailbackend.Message, error) {
+	if query != "" {
+		return s.Service.Search(ctx, s.Caller, inbox, query)
+	}
+	return s.Service.List(ctx, s.Caller, inbox)
+}
+
+func (s ServiceBox) Get(ctx context.Context, inbox, messageID string) (mailbackend.Message, error) {
+	return s.Service.Get(ctx, s.Caller, inbox, messageID)
+}
+
+func (s ServiceBox) Send(ctx context.Context, inbox string, msg mailbackend.Outbound) error {
+	msg.AccountID = inbox
+	return s.Service.Deliver(ctx, s.Caller, msg, "")
+}
+
+func (s ServiceBox) Reply(ctx context.Context, inbox, messageID string, msg mailbackend.Outbound) error {
+	return s.Service.Reply(ctx, s.Caller, inbox, messageID, msg, "")
+}
+
+func (s ServiceBox) Delete(ctx context.Context, inbox, messageID string) error {
+	return s.Service.Delete(ctx, s.Caller, inbox, messageID)
+}
+
+func (s ServiceBox) Wait(ctx context.Context, inbox string, timeout time.Duration) ([]mailbackend.Message, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		messages, err := s.List(ctx, inbox, "")
+		if err != nil || len(messages) > 0 || !time.Now().Before(deadline) {
+			return messages, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
