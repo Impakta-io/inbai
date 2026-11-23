@@ -63,6 +63,21 @@ type JobSnap struct {
 	Inboxes json.RawMessage `json:"inboxes"`
 }
 
+// RetentionRow is the number of days one scope keeps mail. Zero disables deletion.
+type RetentionRow struct {
+	Scope string `json:"scope"`
+	Days  int    `json:"days"`
+}
+
+// AuditRow is one operator action. It does not contain secrets or message bodies.
+type AuditRow struct {
+	ID     int64     `json:"id"`
+	At     time.Time `json:"at"`
+	Actor  string    `json:"actor"`
+	Action string    `json:"action"`
+	Target string    `json:"target"`
+}
+
 // ClientRow is one hashed client credential. The plaintext secret is not stored.
 type ClientRow struct {
 	ID         string `json:"id"`
@@ -87,6 +102,11 @@ type Snapshot struct {
 	Jobs          []JobSnap        `json:"jobs"`
 	Clients       []ClientRow      `json:"clients"`
 	Suspensions   []string         `json:"suspensions"`
+	Audits        []AuditRow       `json:"audits"`
+	Retention     []RetentionRow   `json:"retention"`
+	Allowlists    []AllowlistRow   `json:"allowlists"`
+	SigningKey    []byte           `json:"signingKey"`
+	Queue         []QueueJob       `json:"queue"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -262,6 +282,36 @@ func (s Snapshot) check() error {
 			return fmt.Errorf("suspension is incomplete")
 		}
 	}
+	seenAudit := map[int64]struct{}{}
+	for _, row := range s.Audits {
+		if row.ID <= 0 || row.Actor == "" || row.Action == "" || row.Target == "" || row.At.IsZero() {
+			return fmt.Errorf("audit %d is incomplete", row.ID)
+		}
+		if _, dup := seenAudit[row.ID]; dup {
+			return fmt.Errorf("audit %d is duplicated", row.ID)
+		}
+		seenAudit[row.ID] = struct{}{}
+	}
+	for _, row := range s.Retention {
+		if row.Scope == "" || row.Days < 0 {
+			return fmt.Errorf("retention %q is incomplete", row.Scope)
+		}
+	}
+	for _, row := range s.Allowlists {
+		if row.Inbox == "" || len(row.Senders) == 0 {
+			return fmt.Errorf("allowlist %q is incomplete", row.Inbox)
+		}
+	}
+	seenQueue := map[int64]struct{}{}
+	for _, row := range s.Queue {
+		if row.ID <= 0 || row.Kind == "" {
+			return fmt.Errorf("queue job %d is incomplete", row.ID)
+		}
+		if _, dup := seenQueue[row.ID]; dup {
+			return fmt.Errorf("queue job %d is duplicated", row.ID)
+		}
+		seenQueue[row.ID] = struct{}{}
+	}
 	return nil
 }
 
@@ -279,5 +329,10 @@ func emptySnapshot() Snapshot {
 		Jobs:          []JobSnap{},
 		Clients:       []ClientRow{},
 		Suspensions:   []string{},
+		Audits:        []AuditRow{},
+		Retention:     []RetentionRow{},
+		Allowlists:    []AllowlistRow{},
+		SigningKey:    []byte{},
+		Queue:         []QueueJob{},
 	}
 }

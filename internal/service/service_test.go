@@ -57,6 +57,48 @@ func TestReadGrantAllowsOnlyThatInbox(t *testing.T) {
 	}
 }
 
+func TestAllowlistIsASignalOnTheMessage(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", From: "Ada <ada@example.com>", Text: "hi"}}}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if err := svc.SetAllowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a", []string{"ada@example.com"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("read grant set err %v", err)
+	}
+	svc.Allow("ada", "inbox-b", PermManage)
+	if err := svc.SetAllowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a", []string{"ada@example.com"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("other inbox set err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", []string{"not an address"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad sender err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", []string{"Example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed == nil || !*msg.SenderAllowed {
+		t.Fatalf("match %+v err %v", msg.SenderAllowed, err)
+	}
+	mail.messages[0].From = "other@elsewhere.test"
+	msg, err = svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed == nil || *msg.SenderAllowed {
+		t.Fatalf("miss %+v err %v", msg.SenderAllowed, err)
+	}
+	list, set, err := svc.Allowlist(context.Background(), Caller{Agent: "ada"}, "inbox-a")
+	if err != nil || !set || len(list) != 1 || list[0] != "example.com" {
+		t.Fatalf("list %+v set %v err %v", list, set, err)
+	}
+	if _, _, err := svc.Allowlist(context.Background(), Caller{Agent: "bea"}, "inbox-a"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("stranger read err %v", err)
+	}
+	if err := svc.SetAllowlist(context.Background(), Caller{Operator: true}, "inbox-a", nil); err != nil {
+		t.Fatal(err)
+	}
+	msg, err = svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m")
+	if err != nil || msg.SenderAllowed != nil {
+		t.Fatalf("cleared %+v err %v", msg.SenderAllowed, err)
+	}
+}
+
 func TestOperatorCanCreateAnInbox(t *testing.T) {
 	mail := &fakeMail{created: "id-1"}
 	svc := New(mail)
@@ -66,6 +108,34 @@ func TestOperatorCanCreateAnInbox(t *testing.T) {
 	}
 	if _, err := svc.CreateInbox(context.Background(), Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "bob"}, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("agent create err = %v", err)
+	}
+}
+
+func TestProvisionGrantCreatesAnInbox(t *testing.T) {
+	mail := &fakeMail{created: "id-2"}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if _, err := svc.CreateInbox(context.Background(), Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "bob"}, ""); !errors.Is(err, ErrForbidden) || mail.creates != 0 {
+		t.Fatalf("read grant created err %v calls %d", err, mail.creates)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermProvision); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("scope err %v", err)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "*", PermProvision); err != nil {
+		t.Fatal(err)
+	}
+	id, err := svc.CreateInbox(context.Background(), Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "ada"}, "")
+	if err != nil || id != "id-2" || mail.creates != 1 {
+		t.Fatalf("create %s calls %d err %v", id, mail.creates, err)
+	}
+	if _, err := svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-b", "m"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("provision read err %v", err)
+	}
+	got, err := svc.Generate(context.Background(), Caller{Agent: "ada"}, GenerateRequest{
+		Prefix: "p", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 1, Wait: true,
+	}, "")
+	if err != nil || len(got.Inboxes) != 1 || got.Inboxes[0].Address != "p00000@example.com" {
+		t.Fatalf("generate %+v err %v", got, err)
 	}
 }
 
@@ -89,6 +159,43 @@ func TestSendQuotaAndIdempotency(t *testing.T) {
 	}
 	if mail.sent != 1 {
 		t.Fatalf("quota still called the backend, sends = %d", mail.sent)
+	}
+}
+
+func TestWorkspaceQuotaAndRecipientDomainRateLimit(t *testing.T) {
+	mail := &fakeMail{}
+	svc := New(mail)
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	svc.SetSendLimits(10, 10, 3, 2)
+
+	// Two sends to target.test succeed; third in same minute hits recipient-domain rate limit.
+	m1 := mailbackend.Outbound{AccountID: "inbox-a", From: "a@dom1.test", To: "u1@target.test", Subject: "1"}
+	m2 := mailbackend.Outbound{AccountID: "inbox-b", From: "b@dom2.test", To: "u2@target.test", Subject: "2"}
+	m3 := mailbackend.Outbound{AccountID: "inbox-c", From: "c@dom3.test", To: "u3@target.test", Subject: "3"}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m2, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m3, ""); !errors.Is(err, ErrQuota) {
+		t.Fatalf("recipient rate limit err = %v", err)
+	}
+
+	// A different recipient domain still works in the same minute, consuming the 3rd workspace send.
+	mOther := mailbackend.Outbound{AccountID: "inbox-c", From: "c@dom3.test", To: "u@other.test", Subject: "other"}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, mOther, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advancing to the next minute clears recipient rate limit, but workspace daily quota (3) still blocks.
+	now = now.Add(time.Minute)
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, m3, ""); !errors.Is(err, ErrQuota) {
+		t.Fatalf("workspace daily quota err = %v", err)
+	}
+	if mail.sent != 3 {
+		t.Fatalf("backend sends = %d, want 3", mail.sent)
 	}
 }
 
@@ -231,12 +338,14 @@ func TestAttachmentRequiresTheReadGrant(t *testing.T) {
 
 type fakeMail struct {
 	created  string
+	creates  int
 	messages []mailbackend.Message
 	listed   bool
 	sent     int
 	sendErr  error
 	got      bool
 	deleted  bool
+	removed  []string
 	dir      bool
 	last     mailbackend.Outbound
 	batches  []int
@@ -245,6 +354,7 @@ type fakeMail struct {
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
+	f.creates++
 	return f.created, nil
 }
 
@@ -291,8 +401,9 @@ func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, er
 	return f.messages[0], nil
 }
 
-func (f *fakeMail) Delete(context.Context, string, string) error {
+func (f *fakeMail) Delete(_ context.Context, _, id string) error {
 	f.deleted = true
+	f.removed = append(f.removed, id)
 	return nil
 }
 
@@ -314,7 +425,9 @@ func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
 func TestRevokeRemovesTheGrant(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello"}}}
 	svc := New(mail)
-	svc.Allow("ada", "inbox-a", PermRead)
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Revoke(Caller{Agent: "ada"}, "ada", "inbox-a", PermRead); !errors.Is(err, ErrForbidden) || mail.listed {
 		t.Fatalf("agent revoke err %v listed %v", err, mail.listed)
 	}
@@ -323,6 +436,17 @@ func TestRevokeRemovesTheGrant(t *testing.T) {
 	}
 	if _, _, err := svc.List(context.Background(), Caller{Agent: "ada"}, "inbox-a", mailbackend.Page{}); !errors.Is(err, ErrForbidden) || mail.listed {
 		t.Fatalf("after revoke err %v listed %v", err, mail.listed)
+	}
+	rows, _, err := svc.Audit(context.Background(), Caller{Agent: "ada"}, 0, 0)
+	if !errors.Is(err, ErrForbidden) || len(rows) != 0 {
+		t.Fatalf("agent audit rows %d err %v", len(rows), err)
+	}
+	rows, _, err = svc.Audit(context.Background(), Caller{Operator: true}, 0, 0)
+	if err != nil || len(rows) != 2 || rows[0].Action != "grant" || rows[1].Action != "revoke" {
+		t.Fatalf("audit %+v err %v", rows, err)
+	}
+	if rows[0].Target != "ada inbox-a read" || rows[0].Actor != "operator" {
+		t.Fatalf("grant row %+v", rows[0])
 	}
 }
 

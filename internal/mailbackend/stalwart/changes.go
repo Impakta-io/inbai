@@ -25,13 +25,21 @@ func MailState(ctx context.Context, client *Client, accountID string) (string, e
 		return "", err
 	}
 	var query struct {
-		State string `json:"state"`
+		State      string `json:"state"`
+		QueryState string `json:"queryState"`
 	}
 	if err := json.Unmarshal(raw, &query); err != nil {
 		return "", err
 	}
 	if query.State == "" {
-		return "", fmt.Errorf("stalwart returned no email state")
+		query.State = query.QueryState
+	}
+	if query.State == "" {
+		snippet := string(raw)
+		if len(snippet) > 180 {
+			snippet = snippet[:180]
+		}
+		return "", fmt.Errorf("stalwart returned no email state: %s", snippet)
 	}
 	return query.State, nil
 }

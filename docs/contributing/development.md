@@ -32,6 +32,7 @@ Add `$(go env GOPATH)/bin` to `PATH` if the command is not found. The Makefile a
 go build -o bin/inbai.exe ./cmd/inbai
 go build -o bin/inbaid.exe ./cmd/inbaid
 go test ./...
+go run ./tools/reference -check
 go run ./tools/docscheck
 golangci-lint run ./...
 ```

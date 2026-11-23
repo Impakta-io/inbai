@@ -175,7 +175,22 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 		if !ok || len(got.literals) == 0 {
 			return fmt.Errorf("imap: message %s was not found", messageID)
 		}
-		message = mailbackend.Message{ID: messageID, Text: string(got.literals[0])}
+		text := string(got.literals[0])
+		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM)])")
+		if err != nil {
+			return err
+		}
+		auth := fetched(authItems)[uid]
+		header := ""
+		if len(auth.literals) > 0 {
+			header = string(auth.literals[0])
+		}
+		message = mailbackend.Message{
+			ID:             messageID,
+			Text:           text,
+			From:           headerField(header, "From"),
+			Authentication: mailbackend.AuthenticationOf(header, strings.Contains(auth.text, `\Junk`)),
+		}
 		return nil
 	})
 	return message, err
@@ -278,7 +293,7 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 			messages = []mailbackend.Message{}
 			return nil
 		}
-		items, err = s.command("UID", "FETCH", strings.Join(kept, ","), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+		items, err = s.command("UID", "FETCH", strings.Join(kept, ","), "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
 		if err != nil {
 			return err
 		}
@@ -291,7 +306,7 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 			if len(item.literals) > 0 {
 				header = item.literals[0]
 			}
-			messages = append(messages, mailbackend.Message{ID: id, Subject: subjectOf(header)})
+			messages = append(messages, mailbackend.Message{ID: id, Subject: subjectOf(header), ReceivedAt: internalDate(item.text)})
 		}
 		return nil
 	})
@@ -317,6 +332,17 @@ func (b *Backend) with(ctx context.Context, account string, fn func(*session) er
 	}
 	defer func() { _, _ = s.command("LOGOUT") }()
 	return fn(s)
+}
+
+func headerField(header, name string) string {
+	prefix := strings.ToLower(name) + ":"
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(strings.ToLower(line), prefix) {
+			return strings.TrimSpace(line[len(name)+1:])
+		}
+	}
+	return ""
 }
 
 func (b *Backend) login(account string) (Login, error) {

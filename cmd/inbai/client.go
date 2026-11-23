@@ -97,9 +97,80 @@ func (c apiClient) revoke(ctx context.Context, agent, inbox, permission string) 
 	return err
 }
 
-func (c apiClient) createInbox(ctx context.Context, local string) (apiInbox, error) {
+func (c apiClient) audit(ctx context.Context, after int64, limit int) ([]apiAudit, int64, error) {
+	query := url.Values{}
+	if after > 0 {
+		query.Set("after", strconv.FormatInt(after, 10))
+	}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/v1/audit"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var out struct {
+		Events []apiAudit `json:"events"`
+		Next   int64      `json:"next"`
+	}
+	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
+	return out.Events, out.Next, err
+}
+
+type apiRetention struct {
+	Days     int    `json:"days"`
+	Inbox    string `json:"inbox"`
+	Override bool   `json:"override"`
+}
+
+func (c apiClient) retention(ctx context.Context, inbox string) (apiRetention, error) {
+	path := "/v1/retention"
+	if inbox != "" {
+		path += "?inbox=" + url.QueryEscape(inbox)
+	}
+	var out apiRetention
+	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+func (c apiClient) setRetention(ctx context.Context, inbox string, days int) (apiRetention, error) {
+	var out apiRetention
+	_, err := c.call(ctx, http.MethodPut, "/v1/retention", map[string]any{"inbox": inbox, "days": days}, &out)
+	return out, err
+}
+
+func (c apiClient) runRetention(ctx context.Context) (int, error) {
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+	_, err := c.call(ctx, http.MethodPost, "/v1/retention/run", map[string]any{}, &out)
+	return out.Deleted, err
+}
+
+func (c apiClient) createInbox(ctx context.Context, local string, quotaBytes int64) (apiInbox, error) {
+	body := map[string]any{"localPart": local}
+	if quotaBytes > 0 {
+		body["quotaBytes"] = quotaBytes
+	}
 	var out apiInbox
-	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", map[string]string{"localPart": local}, &out)
+	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", body, &out)
+	return out, err
+}
+
+type apiStorageQuota struct {
+	LimitBytes int64 `json:"limitBytes"`
+	UsedBytes  int64 `json:"usedBytes"`
+}
+
+func (c apiClient) storageQuota(ctx context.Context, inbox string) (apiStorageQuota, error) {
+	var out apiStorageQuota
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", nil, &out)
+	return out, err
+}
+
+func (c apiClient) setStorageQuota(ctx context.Context, inbox string, limitBytes int64) (apiStorageQuota, error) {
+	var out apiStorageQuota
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", map[string]int64{"limitBytes": limitBytes}, &out)
 	return out, err
 }
 
@@ -230,6 +301,33 @@ type apiEvent struct {
 	ID        int64  `json:"id"`
 	MessageID string `json:"messageId"`
 	Kind      string `json:"kind"`
+}
+
+type apiAudit struct {
+	ID     int64  `json:"id"`
+	Actor  string `json:"actor"`
+	Action string `json:"action"`
+	Target string `json:"target"`
+}
+
+type apiAllowlist struct {
+	Senders []string `json:"senders"`
+	Set     bool     `json:"set"`
+}
+
+func (c apiClient) allowlist(ctx context.Context, inbox string) (apiAllowlist, error) {
+	var out apiAllowlist
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", nil, &out)
+	return out, err
+}
+
+func (c apiClient) setAllowlist(ctx context.Context, inbox string, senders []string) (apiAllowlist, error) {
+	if senders == nil {
+		senders = []string{}
+	}
+	var out apiAllowlist
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", map[string]any{"senders": senders}, &out)
+	return out, err
 }
 
 func (c apiClient) events(ctx context.Context, accountID string, after int64, timeout int) ([]apiEvent, error) {

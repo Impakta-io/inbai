@@ -28,6 +28,7 @@ On Windows, `make` may be missing. Use:
 go build -o bin/inbai.exe ./cmd/inbai
 go build -o bin/inbaid.exe ./cmd/inbaid
 go test ./...
+go run ./tools/reference -check
 go run ./tools/docscheck
 golangci-lint run ./...
 ```
@@ -54,6 +55,7 @@ A change is done when those commands pass, the diff is small enough for a person
 | `internal/version` | The version string both binaries print. |
 | `api/openapi.yaml` | The HTTP contract. Change this before the client or the handlers. |
 | `tools/docscheck` | Checks public Markdown. |
+| `tools/reference` | Writes the CLI and HTTP reference pages. |
 | `docs` | Documentation. A behavior change updates the doc in the same change. |
 
 Each `internal` package has a `doc.go` that states its job. Read it before editing the package.

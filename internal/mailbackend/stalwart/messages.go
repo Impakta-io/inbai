@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
@@ -29,7 +30,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":          accountID,
 		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments"},
+		"properties":         []string{"subject", "preview", "receivedAt", "from", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
 		"fetchAllBodyValues": true,
 	})
 	if err != nil {
@@ -98,9 +99,9 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 	if len(ids) == 0 {
 		return nil, "", nil
 	}
-	props := []string{"subject", "preview"}
+	props := []string{"subject", "preview", "receivedAt"}
 	if full {
-		props = []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues"}
+		props = []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues"}
 	}
 	raw, err = client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":  accountID,
@@ -117,12 +118,13 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 	var got struct {
 		List []struct {
-			ID         string   `json:"id"`
-			Subject    string   `json:"subject"`
-			Preview    string   `json:"preview"`
-			MessageID  []string `json:"messageId"`
-			InReplyTo  []string `json:"inReplyTo"`
-			References []string `json:"references"`
+			ID         string    `json:"id"`
+			Subject    string    `json:"subject"`
+			Preview    string    `json:"preview"`
+			MessageID  []string  `json:"messageId"`
+			InReplyTo  []string  `json:"inReplyTo"`
+			References []string  `json:"references"`
+			ReceivedAt time.Time `json:"receivedAt"`
 			TextBody   []struct {
 				PartID string `json:"partId"`
 			} `json:"textBody"`
@@ -135,6 +137,9 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Size   int    `json:"size"`
 				BlobID string `json:"blobId"`
 			} `json:"attachments"`
+			Keywords json.RawMessage `json:"keywords"`
+			Auth     json.RawMessage `json:"header:Authentication-Results:asText"`
+			From     json.RawMessage `json:"from"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -142,7 +147,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 	}
 	out := make([]Message, len(got.List))
 	for i, item := range got.List {
-		out[i] = Message{ID: item.ID, Subject: item.Subject, Preview: item.Preview}
+		out[i] = Message{ID: item.ID, Subject: item.Subject, Preview: item.Preview, ReceivedAt: item.ReceivedAt}
 		if !full {
 			continue
 		}
@@ -161,6 +166,41 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID,
 			})
 		}
+		out[i].From = fromEmail(item.From)
+		out[i].Authentication = mailbackend.AuthenticationOf(headerText(item.Auth), junkKeyword(item.Keywords))
 	}
 	return out, nil
+}
+
+func headerText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var many []string
+	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
+		return many[0]
+	}
+	return ""
+}
+
+func fromEmail(raw json.RawMessage) string {
+	var many []struct {
+		Email string `json:"email"`
+	}
+	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
+		return many[0].Email
+	}
+	return ""
+}
+
+func junkKeyword(raw json.RawMessage) bool {
+	var keywords map[string]bool
+	if json.Unmarshal(raw, &keywords) != nil {
+		return false
+	}
+	return keywords["$junk"]
 }

@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	inboxRoleDescription   = "inbAI inbox"
-	serviceRoleDescription = "inbAI service"
-	recoveryUser           = "admin"
+	inboxRoleDescription    = "inbAI inbox"
+	serviceRoleDescription  = "inbAI service"
+	operatorRoleDescription = "inbAI operator"
+	recoveryUser            = "admin"
 )
 
 // Input is the operator's choice for the first boot.
@@ -73,6 +74,17 @@ var servicePermissions = append(append([]string{}, inboxPermissions...),
 	"sysRoleQuery",
 )
 
+// The operator can change where outbound mail goes. The service account cannot.
+var operatorPermissions = append(append([]string{}, servicePermissions...),
+	"sysMtaRouteGet",
+	"sysMtaRouteQuery",
+	"sysMtaRouteCreate",
+	"sysMtaRouteUpdate",
+	"sysMtaRouteDestroy",
+	"sysMtaOutboundStrategyGet",
+	"sysMtaOutboundStrategyUpdate",
+)
+
 // Bootstrap creates the domain, the inbox and service roles, the operator,
 // and the service account. It is safe to run again.
 func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
@@ -115,11 +127,15 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	operatorRole, err := ensureRole(ctx, client, "op", operatorRoleDescription, permSet(operatorPermissions))
+	if err != nil {
+		return Result{}, err
+	}
 	serviceSecret, err := randomSecret()
 	if err != nil {
 		return Result{}, err
 	}
-	operatorID, serviceID, err := ensureAccounts(ctx, client, domainID, serviceRole, in.OperatorPassword, serviceSecret)
+	operatorID, serviceID, err := ensureAccounts(ctx, client, domainID, operatorRole, serviceRole, in.OperatorPassword, serviceSecret)
 	if err != nil {
 		return Result{}, err
 	}
@@ -220,10 +236,10 @@ func ensureRole(ctx context.Context, client *Client, createKey, description stri
 	return createdID(raw, createKey)
 }
 
-func ensureAccounts(ctx context.Context, client *Client, domainID, serviceRole, operatorPassword, servicePassword string) (string, string, error) {
+func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole, serviceRole, operatorPassword, servicePassword string) (string, string, error) {
 	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
 		"create": map[string]any{
-			"operator": account("operator", domainID, serviceRole, operatorPassword),
+			"operator": account("operator", domainID, operatorRole, operatorPassword),
 			"svc":      account("service", domainID, serviceRole, servicePassword),
 		},
 	})
@@ -237,6 +253,28 @@ func ensureAccounts(ctx context.Context, client *Client, domainID, serviceRole, 
 	serviceID, err := createdID(raw, "svc")
 	if err != nil {
 		return "", "", err
+	}
+	var body setResult
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return "", "", err
+	}
+	if _, existed := body.NotCreated["operator"]; existed {
+		updated, err := client.invoke(ctx, "u", "x:Account/set", map[string]any{
+			"update": map[string]any{
+				operatorID: map[string]any{
+					"roles": map[string]any{
+						"@type":   "Custom",
+						"roleIds": map[string]bool{operatorRole: true},
+					},
+				},
+			},
+		})
+		if err != nil {
+			return "", "", err
+		}
+		if err := updatedID(updated, operatorID); err != nil {
+			return "", "", err
+		}
 	}
 	return operatorID, serviceID, nil
 }
@@ -289,6 +327,30 @@ func createdID(raw json.RawMessage, key string) (string, error) {
 		return item.ID, nil
 	}
 	return "", fmt.Errorf("stalwart %s: missing id", key)
+}
+
+func updatedID(raw json.RawMessage, id string) error {
+	var body struct {
+		Updated    map[string]json.RawMessage `json:"updated"`
+		NotUpdated map[string]struct {
+			Type        string `json:"type"`
+			Description string `json:"description"`
+		} `json:"notUpdated"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	if missing, ok := body.NotUpdated[id]; ok {
+		detail := missing.Type
+		if missing.Description != "" {
+			detail = missing.Type + ": " + missing.Description
+		}
+		return fmt.Errorf("stalwart %s: %s", id, detail)
+	}
+	if _, ok := body.Updated[id]; !ok {
+		return fmt.Errorf("stalwart %s: missing update", id)
+	}
+	return nil
 }
 
 func createdSecret(raw json.RawMessage, key string) (string, error) {

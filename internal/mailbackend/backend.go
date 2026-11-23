@@ -3,13 +3,31 @@
 
 package mailbackend
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // InboxSpec is an address to create in a domain.
+// QuotaBytes sets the account disk storage quota in bytes when greater than zero.
 type InboxSpec struct {
-	DomainID string
-	RoleID   string
-	Local    string
+	DomainID   string
+	RoleID     string
+	Local      string
+	QuotaBytes int64
+}
+
+// StorageQuota is the disk storage cap and usage for one inbox, in bytes.
+// LimitBytes zero means no storage cap is set on the account.
+type StorageQuota struct {
+	LimitBytes int64 `json:"limitBytes"`
+	UsedBytes  int64 `json:"usedBytes"`
+}
+
+// QuotaBackend is implemented by mail backends that read and set per-inbox storage quotas.
+type QuotaBackend interface {
+	GetStorageQuota(ctx context.Context, accountID string) (StorageQuota, error)
+	SetStorageQuota(ctx context.Context, accountID string, limitBytes int64) error
 }
 
 // File is one attachment submitted with a message.
@@ -47,14 +65,18 @@ type Outbound struct {
 
 // Message is one message stored for an inbox.
 type Message struct {
-	ID          string       `json:"id"`
-	Subject     string       `json:"subject"`
-	Preview     string       `json:"preview"`
-	Text        string       `json:"text,omitempty"`
-	MessageID   []string     `json:"messageId,omitempty"`
-	InReplyTo   []string     `json:"inReplyTo,omitempty"`
-	References  []string     `json:"references,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	ID             string         `json:"id"`
+	Subject        string         `json:"subject"`
+	Preview        string         `json:"preview"`
+	Text           string         `json:"text,omitempty"`
+	MessageID      []string       `json:"messageId,omitempty"`
+	InReplyTo      []string       `json:"inReplyTo,omitempty"`
+	References     []string       `json:"references,omitempty"`
+	ReceivedAt     time.Time      `json:"receivedAt,omitempty"`
+	From           string         `json:"from,omitempty"`
+	Attachments    []Attachment   `json:"attachments,omitempty"`
+	Authentication Authentication `json:"authentication,omitempty"`
+	SenderAllowed  *bool          `json:"senderAllowed,omitempty"`
 }
 
 // Backend is how the service layer stores and sends mail.

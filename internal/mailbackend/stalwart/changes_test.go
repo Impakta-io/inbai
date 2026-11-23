@@ -19,7 +19,7 @@ func TestMailChangesUsesTheStoredState(t *testing.T) {
 			if args[0]["limit"] != float64(0) {
 				t.Errorf("limit %#v", args[0]["limit"])
 			}
-			writeMethods(w, []any{[]any{"Email/query", map[string]any{"ids": []any{}, "state": "s0"}, "t"}})
+			writeMethods(w, []any{[]any{"Email/query", map[string]any{"ids": []any{}, "queryState": "s0"}, "t"}})
 		case "Email/changes":
 			sawSince, _ = args[0]["sinceState"].(string)
 			writeMethods(w, []any{[]any{"Email/changes", map[string]any{

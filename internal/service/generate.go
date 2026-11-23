@@ -47,19 +47,31 @@ type Job struct {
 // GenerateRequest asks for many addresses in one domain.
 // Wait runs the work before returning. Otherwise a count above the sync limit becomes a job.
 type GenerateRequest struct {
-	Prefix   string
-	Domain   string
-	DomainID string
-	RoleID   string
-	Count    int
-	Wait     bool
-	Progress func(done, total int)
+	Prefix     string
+	Domain     string
+	DomainID   string
+	RoleID     string
+	Count      int
+	QuotaBytes int64
+	Wait       bool
+	Progress   func(done, total int)
 }
 
 // GenerateResult is either the finished addresses or a job id.
 type GenerateResult struct {
 	Inboxes []Inbox
 	JobID   string
+}
+
+// BulkPayload is the work stored in job_queue for an asynchronous Generate call.
+type BulkPayload struct {
+	JobID      string `json:"jobId"`
+	Prefix     string `json:"prefix"`
+	Domain     string `json:"domain"`
+	DomainID   string `json:"domainId"`
+	RoleID     string `json:"roleId"`
+	Count      int    `json:"count"`
+	QuotaBytes int64  `json:"quotaBytes,omitempty"`
 }
 
 func (s *Service) SyncLimit() int {
@@ -74,11 +86,12 @@ func (s *Service) SetSyncLimit(n int) {
 	s.syncLimit = n
 }
 
-// Generate creates count addresses. Only an operator may do that.
+// Generate creates count addresses. An operator may do that.
+// An agent may do that when it holds inbox:provision on *.
 // Local parts are prefix plus a zero-padded index, starting at 00000.
 func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateRequest, idemKey string) (GenerateResult, error) {
-	if !caller.Operator {
-		return GenerateResult{}, ErrForbidden
+	if err := s.permitProvision(ctx, caller); err != nil {
+		return GenerateResult{}, err
 	}
 	prefix := strings.ToLower(strings.TrimSpace(req.Prefix))
 	if prefix == "" || strings.ContainsAny(prefix, " @/\t") {
@@ -89,6 +102,13 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	}
 	if req.Domain == "" || req.DomainID == "" || req.RoleID == "" {
 		return GenerateResult{}, fmt.Errorf("%w: generate needs a domain and a role", ErrInvalid)
+	}
+	if req.QuotaBytes < 0 {
+		return GenerateResult{}, fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
+	}
+	quotaBytes := req.QuotaBytes
+	if quotaBytes == 0 {
+		quotaBytes = s.storageQuota
 	}
 	key := idempotencyKey(caller, prefix+"\n"+fmt.Sprint(req.Count), idemKey)
 	if key != "" {
@@ -103,9 +123,10 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	specs := make([]mailbackend.InboxSpec, req.Count)
 	for i := range specs {
 		specs[i] = mailbackend.InboxSpec{
-			DomainID: req.DomainID,
-			RoleID:   req.RoleID,
-			Local:    fmt.Sprintf("%s%05d", prefix, i),
+			DomainID:   req.DomainID,
+			RoleID:     req.RoleID,
+			Local:      fmt.Sprintf("%s%05d", prefix, i),
+			QuotaBytes: quotaBytes,
 		}
 	}
 	if req.Wait || req.Count <= s.SyncLimit() {
@@ -129,14 +150,72 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	if err := s.putJob(ctx, job); err != nil {
 		return GenerateResult{}, err
 	}
+	if s.db != nil {
+		payload, err := json.Marshal(BulkPayload{
+			JobID:      id,
+			Prefix:     prefix,
+			Domain:     req.Domain,
+			DomainID:   req.DomainID,
+			RoleID:     req.RoleID,
+			Count:      req.Count,
+			QuotaBytes: quotaBytes,
+		})
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		if _, _, err := s.db.Enqueue(ctx, "bulk.generate", id, payload, s.now().UTC()); err != nil {
+			return GenerateResult{}, err
+		}
+	}
 	result := GenerateResult{JobID: id}
 	if key != "" {
 		if err := s.rememberGenerate(ctx, key, result); err != nil {
 			return GenerateResult{}, err
 		}
 	}
-	go s.finishJob(job, specs, req.Domain)
+	if s.db == nil {
+		go s.finishJob(job, specs, req.Domain)
+	}
 	return result, nil
+}
+
+// RunBulkJob executes one queued bulk-create job and updates its status row.
+func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
+	quotaBytes := payload.QuotaBytes
+	if quotaBytes == 0 {
+		quotaBytes = s.storageQuota
+	}
+	specs := make([]mailbackend.InboxSpec, payload.Count)
+	for i := range specs {
+		specs[i] = mailbackend.InboxSpec{
+			DomainID:   payload.DomainID,
+			RoleID:     payload.RoleID,
+			Local:      fmt.Sprintf("%s%05d", payload.Prefix, i),
+			QuotaBytes: quotaBytes,
+		}
+	}
+	made, err := s.createAll(ctx, specs, payload.Domain, nil)
+	if s.db == nil {
+		return err
+	}
+	row := store.JobRow{ID: payload.JobID, Total: payload.Count, Inboxes: []byte("[]")}
+	if err != nil {
+		row.Status = "failed"
+		row.Error = err.Error()
+		_ = s.db.UpdateJob(ctx, row)
+		return err
+	}
+	raw, encErr := json.Marshal(made)
+	if encErr != nil {
+		row.Status = "failed"
+		row.Error = encErr.Error()
+		_ = s.db.UpdateJob(ctx, row)
+		return encErr
+	}
+	row.Status = "done"
+	row.Created = len(made)
+	row.Inboxes = raw
+	return s.db.UpdateJob(ctx, row)
 }
 
 // Job returns a copy of a bulk-create job.

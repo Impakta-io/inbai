@@ -1,4 +1,4 @@
-Status: partial — `inbai domain add` prints the zone file. `inbai doctor` checks it, including reverse DNS. The outbound relay is not implemented.
+Status: current — `inbai domain add` prints the zone file and checks MX and TXT. `inbai domain relay` sets an authenticated SMTP relay.
 
 # Domain setup
 
@@ -12,6 +12,14 @@ inbai domain add
 
 The zone file includes MX, SPF, DKIM, and DMARC, plus the client and certificate records Stalwart adds. The check covers MX and TXT records, which is where SPF, DKIM, and DMARC are published. Reverse DNS, port 25, TLS, and blocklists are checked by [`inbai doctor`](troubleshooting.md).
 
-## Planned sections
+## Outbound mail
 
-- Direct delivery and the optional authenticated SMTP relay.
+With no relay, Stalwart delivers mail for other domains to their MX hosts. `inbai domain relay` replaces that path with one authenticated SMTP server. Mail for a domain this server hosts still stays local.
+
+```sh
+export INBAI_OPERATOR_PASSWORD='the-operator-password'
+export INBAI_RELAY_PASSWORD='the-relay-password'
+inbai domain relay --host smtp.example.net --user mailer --port 587
+```
+
+`inbai domain relay --off` restores MX delivery. The command and the passwords are described in [CLI](cli.md). The Compose file does not run a relay. Point this command at a relay you operate.

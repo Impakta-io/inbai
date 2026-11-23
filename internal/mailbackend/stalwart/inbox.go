@@ -8,15 +8,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 // InboxInput names the account to create inside an existing domain.
 type InboxInput struct {
-	DomainID string
-	RoleID   string
-	Local    string
+	DomainID   string
+	RoleID     string
+	Local      string
+	QuotaBytes int64
 }
 
 // Delivery is one message submitted as an existing account.
@@ -33,14 +35,17 @@ type Delivery struct {
 
 // Message is one message in an inbox.
 type Message struct {
-	ID          string       `json:"id"`
-	Subject     string       `json:"subject"`
-	Preview     string       `json:"preview"`
-	Text        string       `json:"text,omitempty"`
-	MessageID   []string     `json:"messageId,omitempty"`
-	InReplyTo   []string     `json:"inReplyTo,omitempty"`
-	References  []string     `json:"references,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	ID             string                     `json:"id"`
+	Subject        string                     `json:"subject"`
+	Preview        string                     `json:"preview"`
+	Text           string                     `json:"text,omitempty"`
+	MessageID      []string                   `json:"messageId,omitempty"`
+	InReplyTo      []string                   `json:"inReplyTo,omitempty"`
+	References     []string                   `json:"references,omitempty"`
+	ReceivedAt     time.Time                  `json:"receivedAt,omitempty"`
+	From           string                     `json:"from,omitempty"`
+	Attachments    []Attachment               `json:"attachments,omitempty"`
+	Authentication mailbackend.Authentication `json:"authentication,omitempty"`
 }
 
 // Attachment is one file on a stored message.
@@ -69,7 +74,7 @@ func CreateInbox(ctx context.Context, client *Client, in InboxInput) (string, er
 	}
 	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
 		"create": map[string]any{
-			"a": account(local, in.DomainID, in.RoleID, secret),
+			"a": accountWithQuota(local, in.DomainID, in.RoleID, secret, in.QuotaBytes),
 		},
 	})
 	if err != nil {

@@ -43,18 +43,19 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 			writeMethod(w, name, "q", map[string]any{"ids": []string{}})
 		case "x:Role/set":
 			create := args["create"].(map[string]any)
+			var key string
 			var body map[string]any
-			for _, value := range create {
+			for createKey, value := range create {
+				key = createKey
 				body = value.(map[string]any)
 			}
 			roleCreates = append(roleCreates, body)
 			id := "inbox-role"
-			if strings.Contains(body["description"].(string), "service") {
+			switch body["description"].(string) {
+			case serviceRoleDescription:
 				id = "service-role"
-			}
-			key := "inbox"
-			if id == "service-role" {
-				key = "svc"
+			case operatorRoleDescription:
+				id = "operator-role"
 			}
 			writeMethod(w, name, "r", map[string]any{"created": map[string]any{key: map[string]any{"id": id}}})
 		case "x:Account/set":
@@ -64,6 +65,11 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 				if account["domainId"] != "dom" {
 					t.Errorf("%s domain %v", key, account["domainId"])
 				}
+			}
+			operatorRoles := create["operator"].(map[string]any)["roles"].(map[string]any)["roleIds"].(map[string]any)
+			serviceRoles := create["svc"].(map[string]any)["roles"].(map[string]any)["roleIds"].(map[string]any)
+			if operatorRoles["operator-role"] != true || serviceRoles["service-role"] != true || serviceRoles["operator-role"] == true {
+				t.Errorf("operator roles %v service roles %v", operatorRoles, serviceRoles)
 			}
 			writeMethod(w, name, "a", map[string]any{
 				"created": map[string]any{
@@ -106,13 +112,15 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 		"x:Role/set",
 		"x:Role/query",
 		"x:Role/set",
+		"x:Role/query",
+		"x:Role/set",
 		"x:Account/set",
 		"x:ApiKey/set",
 	}
 	if strings.Join(methods, ",") != strings.Join(want, ",") {
 		t.Fatalf("methods %v", methods)
 	}
-	if len(roleCreates) != 2 {
+	if len(roleCreates) != 3 {
 		t.Fatalf("roles %d", len(roleCreates))
 	}
 	for _, role := range roleCreates {
@@ -124,6 +132,13 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 	servicePerms := roleCreates[1]["enabledPermissions"].(map[string]any)
 	if servicePerms["impersonate"] != true || servicePerms["sysAccountCreate"] != true {
 		t.Errorf("service permissions %v", servicePerms)
+	}
+	if _, ok := servicePerms["sysMtaRouteCreate"]; ok {
+		t.Error("service role can change outbound routes")
+	}
+	operatorPerms := roleCreates[2]["enabledPermissions"].(map[string]any)
+	if operatorPerms["sysMtaRouteCreate"] != true || operatorPerms["sysMtaOutboundStrategyUpdate"] != true {
+		t.Errorf("operator permissions %v", operatorPerms)
 	}
 	inboxPerms := roleCreates[0]["enabledPermissions"].(map[string]any)
 	if _, ok := inboxPerms["impersonate"]; ok {
@@ -152,10 +167,20 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 				"list": []map[string]any{
 					{"id": "inbox-role", "description": inboxRoleDescription},
 					{"id": "service-role", "description": serviceRoleDescription},
+					{"id": "operator-role", "description": operatorRoleDescription},
 				},
 			})
 			_ = args
 		case "x:Account/set":
+			if _, update := args["update"]; update {
+				operator := args["update"].(map[string]any)["op"].(map[string]any)
+				roles := operator["roles"].(map[string]any)["roleIds"].(map[string]any)
+				if roles["operator-role"] != true {
+					t.Errorf("rerun roles %v", roles)
+				}
+				writeMethod(w, name, "u", map[string]any{"updated": map[string]any{"op": nil}})
+				return
+			}
 			writeMethod(w, name, "a", map[string]any{
 				"notCreated": map[string]any{
 					"operator": map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "op"}},

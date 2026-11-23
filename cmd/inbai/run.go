@@ -29,8 +29,10 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	switch args[0] {
 	case "init":
 		return initCmd(args[1:], stdout, stderr, getenv)
+	case "login":
+		return loginCmd(args[1:], stdout, stderr, getenv)
 	case "domain":
-		return domainCmd(args[1:], stdout, stderr)
+		return domainCmd(args[1:], stdout, stderr, getenv)
 	case "doctor":
 		return doctorCmd(args[1:], stdout, stderr)
 	case "inbox":
@@ -39,6 +41,10 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		return messageCmd(args[1:], stdout, stderr, getenv)
 	case "agent":
 		return agentCmd(args[1:], stdout, stderr, getenv)
+	case "audit":
+		return auditCmd(args[1:], stdout, stderr, getenv)
+	case "retention":
+		return retentionCmd(args[1:], stdout, stderr, getenv)
 	case "mcp":
 		return mcpCmd(args[1:], os.Stdin, stdout, stderr, getenv)
 	case "backup":
@@ -46,7 +52,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	case "restore":
 		return restoreCmd(args[1:], stdout, stderr, getenv)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message|agent|mcp|backup|restore]\n")
+		writef(stdout, "usage: inbai [version|init|login|domain|doctor|inbox|message|agent|audit|retention|mcp|backup|restore]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])
@@ -61,6 +67,10 @@ func writef(w io.Writer, format string, args ...any) {
 func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		writef(stderr, "usage: inbai init --domain name [--url url] [--hostname name] [--stalwart-url url] [--config path] [--json]\n")
+		fs.PrintDefaults()
+	}
 	url := fs.String("url", "http://127.0.0.1:8080", "Stalwart recovery API, reachable on the host")
 	domain := fs.String("domain", "", "DNS domain to create")
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")

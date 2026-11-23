@@ -4,6 +4,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -117,6 +118,21 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SuspendAgent(ctx, "ada"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AppendAudit(ctx, "operator", "grant", "ada inbox-a read"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveRetention(ctx, "server", 14); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveAllowlist(ctx, "inbox-a", []string{"example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.Enqueue(ctx, "cursor.sweep", "singleton", []byte(`{}`), time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -172,6 +188,26 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || !found || job.Status != "done" || job.Created != 1 {
 		t.Fatalf("job restored %+v found %v err %v", job, found, err)
 	}
+	audits, err := db.AuditSince(ctx, 0, 10)
+	if err != nil || len(audits) != 1 || audits[0].Action != "grant" || audits[0].Target != "ada inbox-a read" {
+		t.Fatalf("audit %+v err %v", audits, err)
+	}
+	days, ok, err := db.Retention(ctx, "server")
+	if err != nil || !ok || days != 14 {
+		t.Fatalf("retention %d ok %v err %v", days, ok, err)
+	}
+	senders, ok, err := db.Allowlist(ctx, "inbox-a")
+	if err != nil || !ok || len(senders) != 1 || senders[0] != "example.com" {
+		t.Fatalf("allowlist %+v ok %v err %v", senders, ok, err)
+	}
+	key, err := db.AdoptSigningKey(ctx, nil)
+	if err != nil || !bytes.Equal(key, []byte("signing-key")) {
+		t.Fatalf("signing key %q err %v", key, err)
+	}
+	claimed, ok, err := db.ClaimJob(ctx, time.Now().UTC().Add(2*time.Hour), time.Minute)
+	if err != nil || !ok || claimed.Kind != "cursor.sweep" || claimed.UniqueKey != "singleton" {
+		t.Fatalf("queue job %+v ok %v err %v", claimed, ok, err)
+	}
 }
 
 func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
@@ -179,7 +215,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.Allowlists != nil || decoded.SigningKey != nil || decoded.Queue != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

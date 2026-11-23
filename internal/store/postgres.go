@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,17 +15,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// WorkspaceID is the one workspace stored on every row. There is no workspace command.
+const WorkspaceID = "default"
+
 const schema = `
 CREATE TABLE IF NOT EXISTS inbox_cursor (
     inbox text PRIMARY KEY,
     address text NOT NULL DEFAULT '',
-    jmap_state text NOT NULL DEFAULT ''
+    jmap_state text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS mail_event (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     inbox text NOT NULL,
     message_id text NOT NULL,
-    kind text NOT NULL
+    kind text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS mail_event_inbox_id ON mail_event (inbox, id);
 CREATE TABLE IF NOT EXISTS webhook_subscription (
@@ -32,7 +38,8 @@ CREATE TABLE IF NOT EXISTS webhook_subscription (
     agent text NOT NULL,
     inbox text NOT NULL,
     url text NOT NULL,
-    secret text NOT NULL
+    secret text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS webhook_delivery (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -41,28 +48,33 @@ CREATE TABLE IF NOT EXISTS webhook_delivery (
     attempt int NOT NULL DEFAULT 0,
     next_at timestamptz NOT NULL DEFAULT now(),
     done_at timestamptz,
-    failed_at timestamptz
+    failed_at timestamptz,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS webhook_delivery_due ON webhook_delivery (next_at)
     WHERE done_at IS NULL AND failed_at IS NULL;
 CREATE TABLE IF NOT EXISTS suppression (
     address text PRIMARY KEY,
-    reason text NOT NULL
+    reason text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS access_grant (
     agent text NOT NULL,
     inbox text NOT NULL,
     permission text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default',
     PRIMARY KEY (agent, inbox, permission)
 );
 CREATE TABLE IF NOT EXISTS quota_counter (
     bucket text PRIMARY KEY,
-    used int NOT NULL
+    used int NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS idempotency (
     kind text NOT NULL,
     key text NOT NULL,
     payload text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default',
     PRIMARY KEY (kind, key)
 );
 CREATE TABLE IF NOT EXISTS bulk_job (
@@ -71,17 +83,60 @@ CREATE TABLE IF NOT EXISTS bulk_job (
     total int NOT NULL,
     created int NOT NULL DEFAULT 0,
     error text NOT NULL DEFAULT '',
-    inboxes jsonb NOT NULL DEFAULT '[]'
+    inboxes jsonb NOT NULL DEFAULT '[]',
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS agent_credential (
     id text PRIMARY KEY,
     agent text NOT NULL,
     secret_hash bytea NOT NULL,
-    operator boolean NOT NULL DEFAULT false
+    operator boolean NOT NULL DEFAULT false,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS agent_suspension (
-    agent text PRIMARY KEY
+    agent text PRIMARY KEY,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
+CREATE TABLE IF NOT EXISTS audit_event (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    at timestamptz NOT NULL DEFAULT now(),
+    actor text NOT NULL,
+    action text NOT NULL,
+    target text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
+);
+CREATE TABLE IF NOT EXISTS retention_policy (
+    scope text PRIMARY KEY,
+    days int NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
+);
+CREATE TABLE IF NOT EXISTS sender_allowlist (
+    inbox text PRIMARY KEY,
+    senders jsonb NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
+);
+CREATE TABLE IF NOT EXISTS signing_key (
+    id int PRIMARY KEY,
+    secret bytea NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default',
+    CONSTRAINT signing_key_singleton CHECK (id = 1)
+);
+CREATE TABLE IF NOT EXISTS job_queue (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind text NOT NULL,
+    payload jsonb NOT NULL DEFAULT '{}',
+    unique_key text NOT NULL DEFAULT '',
+    attempt int NOT NULL DEFAULT 0,
+    next_at timestamptz NOT NULL DEFAULT now(),
+    done_at timestamptz,
+    failed_at timestamptz,
+    last_error text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default'
+);
+CREATE INDEX IF NOT EXISTS job_queue_due ON job_queue (next_at)
+    WHERE done_at IS NULL AND failed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS job_queue_unique_open ON job_queue (kind, unique_key)
+    WHERE unique_key <> '' AND done_at IS NULL AND failed_at IS NULL;
 `
 
 // Postgres is the event log that survives an inbaid restart.
@@ -103,7 +158,43 @@ func Open(ctx context.Context, dsn string) (*Postgres, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := ensureWorkspace(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &Postgres{pool: pool}, nil
+}
+
+var workspaceTables = []string{
+	"inbox_cursor",
+	"mail_event",
+	"webhook_subscription",
+	"webhook_delivery",
+	"suppression",
+	"access_grant",
+	"quota_counter",
+	"idempotency",
+	"bulk_job",
+	"agent_credential",
+	"agent_suspension",
+	"audit_event",
+	"retention_policy",
+	"sender_allowlist",
+	"signing_key",
+	"job_queue",
+}
+
+func ensureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, table := range workspaceTables {
+		stmt := fmt.Sprintf(
+			`ALTER TABLE %s ADD COLUMN IF NOT EXISTS workspace_id text NOT NULL DEFAULT '%s'`,
+			table, WorkspaceID,
+		)
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close releases the pool.
@@ -413,6 +504,21 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 	if err := readGrants(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
+	if err := readAudit(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
+	if err := readRetention(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
+	if err := readAllowlist(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
+	if err := readSigningKey(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
+	if err := readQueue(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -465,6 +571,21 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		}
 	}
 	if err := writeGrants(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeAudit(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeRetention(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeAllowlist(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeSigningKey(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeQueue(ctx, tx, snap); err != nil {
 		return err
 	}
 	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
@@ -608,6 +729,72 @@ func readGrants(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
 		return err
 	}
 	rows.Close()
+	return nil
+}
+
+func readAudit(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
+	rows, err := tx.Query(ctx, `SELECT id, at, actor, action, target FROM audit_event ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row AuditRow
+		if err := rows.Scan(&row.ID, &row.At, &row.Actor, &row.Action, &row.Target); err != nil {
+			return err
+		}
+		snap.Audits = append(snap.Audits, row)
+	}
+	return rows.Err()
+}
+
+func writeAudit(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
+	if snap.Audits == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE audit_event`); err != nil {
+		return err
+	}
+	var max int64
+	for _, row := range snap.Audits {
+		if _, err := tx.Exec(ctx, `INSERT INTO audit_event (id, at, actor, action, target) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5)`, row.ID, row.At, row.Actor, row.Action, row.Target); err != nil {
+			return err
+		}
+		if row.ID > max {
+			max = row.ID
+		}
+	}
+	return setIdentity(ctx, tx, "audit_event", "id", max)
+}
+
+func readRetention(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
+	rows, err := tx.Query(ctx, `SELECT scope, days FROM retention_policy ORDER BY scope`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row RetentionRow
+		if err := rows.Scan(&row.Scope, &row.Days); err != nil {
+			return err
+		}
+		snap.Retention = append(snap.Retention, row)
+	}
+	return rows.Err()
+}
+
+func writeRetention(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
+	if snap.Retention == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE retention_policy`); err != nil {
+		return err
+	}
+	for _, row := range snap.Retention {
+		if _, err := tx.Exec(ctx, `INSERT INTO retention_policy (scope, days) VALUES ($1, $2)`, row.Scope, row.Days); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -25,14 +25,16 @@ import (
 
 // Server is the REST transport. It authenticates the caller and calls the service layer.
 type Server struct {
-	Service      *service.Service
-	Directory    *auth.Directory
-	Token        string
-	Issuer       string
-	Domain       string
-	DomainID     string
-	RoleID       string
-	IngestSecret string
+	Service       *service.Service
+	Directory     *auth.Directory
+	Token         string
+	Issuer        string
+	Domain        string
+	DomainID      string
+	RoleID        string
+	IngestSecret  string
+	RetentionDays int
+	Log           io.Writer
 }
 
 type callerKey struct{}
@@ -57,9 +59,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
 	mux.HandleFunc("DELETE /v1/grants/{agent}/{inbox}/{permission}", s.revokeGrant)
+	mux.HandleFunc("GET /v1/audit", s.audit)
+	mux.HandleFunc("GET /v1/retention", s.getRetention)
+	mux.HandleFunc("PUT /v1/retention", s.putRetention)
+	mux.HandleFunc("POST /v1/retention/run", s.runRetention)
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
+	mux.HandleFunc("GET /v1/inboxes/{id}/allowlist", s.getAllowlist)
+	mux.HandleFunc("PUT /v1/inboxes/{id}/allowlist", s.putAllowlist)
+	mux.HandleFunc("GET /v1/inboxes/{id}/quota", s.getQuota)
+	mux.HandleFunc("PUT /v1/inboxes/{id}/quota", s.putQuota)
 	mux.HandleFunc("POST /v1/inboxes/generate", s.generateInboxes)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
@@ -68,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}/attachments/{blobId}", s.attachment)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}/messages/{messageId}", s.deleteMessage)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages/{messageId}/reply", s.replyMessage)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.logged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth/token" || r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/metrics" || r.URL.Path == "/v1/hooks/ingest" || strings.HasPrefix(r.URL.Path, "/.well-known/") {
 			public.ServeHTTP(w, r)
 			return
@@ -78,7 +88,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, caller)))
-	})
+	}))
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +205,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, secret, err := s.Service.ProvisionAgent(s.requestCaller(r), s.identities(), body.Name)
-	if err != nil {
+	if err != nil && secret == "" {
 		writeServiceError(w, err)
 		return
 	}
@@ -237,18 +247,89 @@ func (s *Server) revokeGrant(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
+	var after int64
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "after must be an integer")
+			return
+		}
+		after = value
+	}
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > mailbackend.MaxLimit {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "limit must be from 1 to 100")
+			return
+		}
+		limit = value
+	}
+	rows, next, err := s.Service.Audit(r.Context(), s.requestCaller(r), after, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	body := map[string]any{"events": rows}
+	if next != 0 {
+		body["next"] = next
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (s *Server) getRetention(w http.ResponseWriter, r *http.Request) {
+	inbox := r.URL.Query().Get("inbox")
+	days, set, err := s.Service.RetentionDays(s.requestCaller(r), inbox)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if !set && inbox == "" {
+		days = s.RetentionDays
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"days": days, "inbox": inbox, "override": set})
+}
+
+func (s *Server) putRetention(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Days  *int   `json:"days"`
+		Inbox string `json:"inbox"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Days == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "days is required")
+		return
+	}
+	if err := s.Service.SetRetention(s.requestCaller(r), body.Inbox, *body.Days); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"days": *body.Days, "inbox": body.Inbox, "override": true})
+}
+
+func (s *Server) runRetention(w http.ResponseWriter, r *http.Request) {
+	deleted, err := s.Service.Sweep(r.Context(), s.requestCaller(r), s.RetentionDays)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+}
+
 func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		LocalPart string `json:"localPart"`
+		LocalPart  string `json:"localPart"`
+		QuotaBytes int64  `json:"quotaBytes"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
 		return
 	}
 	id, err := s.Service.CreateInbox(r.Context(), s.requestCaller(r), mailbackend.InboxSpec{
-		DomainID: s.DomainID,
-		RoleID:   s.RoleID,
-		Local:    body.LocalPart,
+		DomainID:   s.DomainID,
+		RoleID:     s.RoleID,
+		Local:      body.LocalPart,
+		QuotaBytes: body.QuotaBytes,
 	}, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)
@@ -292,6 +373,64 @@ func (s *Server) deleteInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getAllowlist(w http.ResponseWriter, r *http.Request) {
+	senders, set, err := s.Service.Allowlist(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"senders": senders, "set": set})
+}
+
+func (s *Server) putAllowlist(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Senders *[]string `json:"senders"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Senders == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "senders is required")
+		return
+	}
+	if err := s.Service.SetAllowlist(r.Context(), s.requestCaller(r), r.PathValue("id"), *body.Senders); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	senders, set, err := s.Service.Allowlist(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"senders": senders, "set": set})
+}
+
+func (s *Server) getQuota(w http.ResponseWriter, r *http.Request) {
+	q, err := s.Service.GetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) putQuota(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		LimitBytes *int64 `json:"limitBytes"`
+	}
+	if err := readJSON(r, &body); err != nil || body.LimitBytes == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "limitBytes is required")
+		return
+	}
+	if err := s.Service.SetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"), *body.LimitBytes); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	q, err := s.Service.GetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
 }
 
 func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +773,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusServiceUnavailable, "Event store unavailable", err.Error())
 	case errors.Is(err, service.ErrSuppressed):
 		writeProblem(w, http.StatusConflict, "Suppressed", err.Error())
+	case errors.Is(err, service.ErrUnsupported):
+		writeProblem(w, http.StatusNotImplemented, "Not implemented", err.Error())
 	default:
 		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
 	}

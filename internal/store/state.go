@@ -31,24 +31,39 @@ SELECT EXISTS(SELECT 1 FROM access_grant WHERE agent = $1 AND inbox = $2 AND per
 	return ok, err
 }
 
+// BucketLimit pairs a counter bucket key with its maximum allowed count.
+type BucketLimit struct {
+	Key   string
+	Limit int
+}
+
 // Consume adds one to both counters when each is still under its limit.
 // A rejected consume leaves both counters unchanged.
 func (p *Postgres) Consume(ctx context.Context, inboxKey, domainKey string, inboxLimit, domainLimit int) (bool, error) {
-	if inboxLimit <= 0 || domainLimit <= 0 {
-		return false, nil
+	return p.ConsumeBuckets(ctx, []BucketLimit{
+		{Key: inboxKey, Limit: inboxLimit},
+		{Key: domainKey, Limit: domainLimit},
+	})
+}
+
+// ConsumeBuckets atomically adds one to every bucket when all are under their limits.
+// If any bucket is at or over its limit, none of the buckets change.
+func (p *Postgres) ConsumeBuckets(ctx context.Context, buckets []BucketLimit) (bool, error) {
+	for _, b := range buckets {
+		if b.Limit <= 0 {
+			return false, nil
+		}
 	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	ok, err := bump(ctx, tx, inboxKey, inboxLimit)
-	if err != nil || !ok {
-		return false, err
-	}
-	ok, err = bump(ctx, tx, domainKey, domainLimit)
-	if err != nil || !ok {
-		return false, err
+	for _, b := range buckets {
+		ok, err := bump(ctx, tx, b.Key, b.Limit)
+		if err != nil || !ok {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
@@ -71,8 +86,16 @@ RETURNING used`, key, limit).Scan(&used)
 
 // Refund removes one use from each counter. A missing counter stays missing.
 func (p *Postgres) Refund(ctx context.Context, inboxKey, domainKey string) error {
+	return p.RefundBuckets(ctx, []string{inboxKey, domainKey})
+}
+
+// RefundBuckets removes one use from every listed counter.
+func (p *Postgres) RefundBuckets(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
 	_, err := p.pool.Exec(ctx, `
-UPDATE quota_counter SET used = GREATEST(used - 1, 0) WHERE bucket = $1 OR bucket = $2`, inboxKey, domainKey)
+UPDATE quota_counter SET used = GREATEST(used - 1, 0) WHERE bucket = ANY($1)`, keys)
 	return err
 }
 
@@ -162,9 +185,71 @@ INSERT INTO agent_suspension (agent) VALUES ($1) ON CONFLICT DO NOTHING`, agent)
 	return err
 }
 
+// AppendAudit records one operator action. The row does not store secrets.
+func (p *Postgres) AppendAudit(ctx context.Context, actor, action, target string) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO audit_event (actor, action, target) VALUES ($1, $2, $3)`, actor, action, target)
+	return err
+}
+
+// AuditSince returns actions with an id greater than after, in order.
+// limit is the page size. The caller asks for one extra row when it needs to know that another page remains.
+func (p *Postgres) AuditSince(ctx context.Context, after int64, limit int) ([]AuditRow, error) {
+	rows, err := p.pool.Query(ctx, `
+SELECT id, at, actor, action, target FROM audit_event WHERE id > $1 ORDER BY id LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditRow
+	for rows.Next() {
+		var row AuditRow
+		if err := rows.Scan(&row.ID, &row.At, &row.Actor, &row.Action, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // AgentSuspended reports whether SuspendAgent has been recorded.
 func (p *Postgres) AgentSuspended(ctx context.Context, agent string) (bool, error) {
 	var ok bool
 	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_suspension WHERE agent = $1)`, agent).Scan(&ok)
 	return ok, err
+}
+
+// SaveRetention stores how many days a scope keeps mail. Zero disables deletion.
+func (p *Postgres) SaveRetention(ctx context.Context, scope string, days int) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO retention_policy (scope, days) VALUES ($1, $2)
+ON CONFLICT (scope) DO UPDATE SET days = EXCLUDED.days`, scope, days)
+	return err
+}
+
+// Retention returns the stored days. ok is false when the scope has no row.
+func (p *Postgres) Retention(ctx context.Context, scope string) (int, bool, error) {
+	var days int
+	err := p.pool.QueryRow(ctx, `SELECT days FROM retention_policy WHERE scope = $1`, scope).Scan(&days)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	return days, err == nil, err
+}
+
+// ListRetention returns every stored retention row.
+func (p *Postgres) ListRetention(ctx context.Context) ([]RetentionRow, error) {
+	rows, err := p.pool.Query(ctx, `SELECT scope, days FROM retention_policy ORDER BY scope`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RetentionRow
+	for rows.Next() {
+		var row RetentionRow
+		if err := rows.Scan(&row.Scope, &row.Days); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }

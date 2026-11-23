@@ -4,7 +4,7 @@ Status: partial — `inbai backup` and `inbai restore` copy the inbAI database. 
 
 inbAI state and mail live in different places. A backup of one does not include the other.
 
-The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs. `inbai backup` writes those tables to one file. The file does not contain message bodies. A file written before grants were stored leaves the grant, credential, quota, idempotency, and job tables as they are.
+The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the job queue, the suppression list, grants, client credentials, send quotas, idempotency keys, bulk jobs, the audit log, retention periods, sender allowlists, and the signing key. `inbai backup` writes those tables to one file. The file does not contain message bodies. A file written before grants were stored leaves the grant, credential, quota, idempotency, and job tables as they are. A file written before the audit log leaves that table as it is. A file written before retention periods were stored leaves that table as it is. A file written before sender allowlists were stored leaves that table as it is. A file written before the signing key was stored leaves that row as it is. A file written before the job queue was stored leaves that table as it is.
 
 Stalwart holds messages and attachments in its own database and volume. Copy those with the tools that administer Stalwart. inbAI does not read Stalwart's tables.
 
@@ -19,7 +19,7 @@ inbai backup --file inbai.json
 
 On the Compose network that URL reaches the `inbai` database. The Compose file does not publish port 5432, so run the command where that host name resolves.
 
-The file mode is `0600`. It contains webhook secrets and hashed client secrets. Keep it with the same care as the database password.
+The file mode is `0600`. It contains webhook secrets, hashed client secrets, and the signing key. Keep it with the same care as the database password.
 
 For the Compose stack in [deploy/compose](../../deploy/compose/README.md), the Stalwart database is the `stalwart` database in the same Postgres service, and the message volume is the `stalwart` volume. Dump that database with `pg_dump` and archive the volume. Do this in the same window as `inbai backup`.
 

@@ -75,8 +75,9 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stderr, "config is missing a service API key. Run inbai init first.\n")
 		return 2
 	}
+	cfg, insecure := serverMail(cfg, getenv)
 	client := &stalwart.Client{BaseURL: cfg.StalwartURL, APIKey: cfg.APIKey}
-	if strings.HasPrefix(cfg.StalwartURL, "http://") || loopback(cfg.StalwartURL) {
+	if insecure {
 		client.HTTP = insecureHTTP()
 	}
 	if cfg.DomainID == "" {
@@ -88,42 +89,54 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			return 1
 		}
 	}
-	signingKey := []byte(getenv("INBAI_SIGNING_KEY"))
-	if len(signingKey) == 0 {
-		var err error
-		signingKey, err = randomKey()
-		if err != nil {
-			writef(stderr, "signing key: %s\n", err)
-			return 1
-		}
-		writef(stdout, "Signing key, shown once: %x\n", signingKey)
-	}
-	svc := service.New(stalwart.Mail{Client: client})
-	issuer := "http://" + *addr
-	directory := auth.NewDirectory(signingKey, issuer)
+	var log *store.Postgres
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		log, err := store.Open(ctx, dsn)
+		log, err = store.Open(ctx, dsn)
 		cancel()
 		if err != nil {
 			writef(stderr, "database: %s\n", err)
 			return 1
 		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	signingKey, showKey, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
+	cancel()
+	if err != nil {
+		writef(stderr, "signing key: %s\n", err)
+		return 1
+	}
+	if showKey {
+		writef(stdout, "Signing key, shown once: %x\n", signingKey)
+	}
+	svc := service.New(stalwart.Mail{Client: client})
+	if err := applySendLimits(svc, getenv); err != nil {
+		writef(stderr, "send limits: %s\n", err)
+		return 2
+	}
+	issuer := "http://" + *addr
+	directory := auth.NewDirectory(signingKey, issuer)
+	if log != nil {
 		svc.SetDB(log)
 		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
-		go feed.Run(context.Background(), stalwart.Mail{Client: client}, nil)
+		go feed.RunWebhooks(context.Background(), nil)
+		go newWorker(log, svc, feed, stalwart.Mail{Client: client}, cfg.RetentionDays, stderr).Run(context.Background())
+	} else {
+		go retainLoop(svc, cfg.RetentionDays, stderr)
 	}
 	handler := (&api.Server{
-		Service:      svc,
-		Directory:    directory,
-		Token:        token,
-		Issuer:       issuer,
-		Domain:       cfg.Domain,
-		DomainID:     cfg.DomainID,
-		RoleID:       cfg.InboxRoleID,
-		IngestSecret: getenv("INBAI_INGEST_SECRET"),
+		Service:       svc,
+		Directory:     directory,
+		Token:         token,
+		Issuer:        issuer,
+		Domain:        cfg.Domain,
+		DomainID:      cfg.DomainID,
+		RoleID:        cfg.InboxRoleID,
+		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
+		RetentionDays: cfg.RetentionDays,
+		Log:           stderr,
 	}).Handler()
 	writef(stdout, "listening on %s\n", *addr)
 	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
@@ -132,6 +145,36 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		return 1
 	}
 	return 0
+}
+
+func retainLoop(svc *service.Service, days int, stderr io.Writer) {
+	sweep := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if _, err := svc.Sweep(ctx, service.Caller{Operator: true}, days); err != nil {
+			writef(stderr, "retention: %s\n", err)
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(time.Hour)
+	for range ticker.C {
+		sweep()
+	}
+}
+
+func serverMail(cfg config.File, getenv func(string) string) (config.File, bool) {
+	if getenv != nil {
+		if raw := strings.TrimSpace(getenv("INBAI_STALWART_URL")); raw != "" {
+			cfg.StalwartURL = raw
+		}
+		if getenv("INBAI_TLS_INSECURE") == "1" {
+			return cfg, true
+		}
+	}
+	if strings.HasPrefix(cfg.StalwartURL, "http://") || loopback(cfg.StalwartURL) {
+		return cfg, true
+	}
+	return cfg, false
 }
 
 func configPathOf(explicit string) (string, error) {

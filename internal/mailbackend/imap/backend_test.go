@@ -70,6 +70,9 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 				say(write, "%s OK\r\n", tag)
 			case cmd == "UID SEARCH ALL" || strings.HasPrefix(cmd, "UID SEARCH TEXT"):
 				say(write, "* SEARCH 8\r\n%s OK\r\n", tag)
+			case strings.Contains(cmd, "AUTHENTICATION-RESULTS"):
+				header := "Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=fail\r\nFrom: Ada <ada@example.com>\r\n"
+				say(write, "* 1 FETCH (UID 8 FLAGS (\\Junk) BODY[HEADER.FIELDS (AUTHENTICATION-RESULTS)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
 			case strings.HasPrefix(cmd, "UID FETCH") && strings.Contains(cmd, "HEADER"):
 				header := "Subject: Hello\r\n\r\n"
 				say(write, "* 1 FETCH (UID 8 BODY[HEADER.FIELDS (SUBJECT)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
@@ -102,7 +105,7 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 		t.Fatalf("search %+v err %v", found, err)
 	}
 	message, err := backend.Get(ctx, "ada", "8")
-	if err != nil || message.Text != "body" {
+	if err != nil || message.Text != "body" || message.From != "Ada <ada@example.com>" || message.Authentication.SPF != "pass" || message.Authentication.DMARC != "fail" || message.Authentication.Spam != "spam" {
 		t.Fatalf("get %+v err %v", message, err)
 	}
 	if err := backend.Delete(ctx, "ada", "8"); err != nil {
