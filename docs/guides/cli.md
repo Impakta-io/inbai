@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, message send, list, get, reply, and delete, and `mcp serve` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, message send, list, get, reply, and delete, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -52,6 +52,10 @@ Delivery to another server still depends on the DNS records from `domain add` an
 ## mcp serve
 
 `inbai mcp serve` speaks MCP on stdin and stdout. It exchanges `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET` for an access token, or uses `INBAI_ACCESS_TOKEN` or `INBAI_OPERATOR_TOKEN` when one of those is already set. The tools and the HTTP endpoint are described in [MCP](../agents/mcp.md).
+
+## backup and restore
+
+`inbai backup --file path` writes the inbAI database. `inbai restore --file path` replaces that database with the file. Both require `INBAI_DATABASE_URL`. The file has no message bodies. The procedure for the Stalwart copy is in [backup](backup.md).
 
 ## Planned sections
 

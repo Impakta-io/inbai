@@ -283,3 +283,185 @@ func (p *Postgres) Suppressions(ctx context.Context) ([]Suppression, error) {
 	}
 	return out, rows.Err()
 }
+
+// Export copies the inbAI tables in one transaction. Message bodies are not included.
+func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	snap := emptySnapshot()
+	rows, err := tx.Query(ctx, `SELECT inbox, address, jmap_state FROM inbox_cursor ORDER BY inbox`)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for rows.Next() {
+		var cur CursorRow
+		if err := rows.Scan(&cur.Inbox, &cur.Address, &cur.State); err != nil {
+			rows.Close()
+			return Snapshot{}, err
+		}
+		snap.Cursors = append(snap.Cursors, cur)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT id, inbox, message_id, kind FROM mail_event ORDER BY id`)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for rows.Next() {
+		var event Record
+		if err := rows.Scan(&event.ID, &event.Inbox, &event.MessageID, &event.Kind); err != nil {
+			rows.Close()
+			return Snapshot{}, err
+		}
+		snap.Events = append(snap.Events, event)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT id, agent, inbox, url, secret FROM webhook_subscription ORDER BY id`)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(&sub.ID, &sub.Agent, &sub.Inbox, &sub.URL, &sub.Secret); err != nil {
+			rows.Close()
+			return Snapshot{}, err
+		}
+		snap.Subscriptions = append(snap.Subscriptions, sub)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT id, subscription_id, event_id, attempt, next_at, done_at IS NOT NULL, failed_at IS NOT NULL FROM webhook_delivery ORDER BY id`)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for rows.Next() {
+		var item DeliveryRow
+		if err := rows.Scan(&item.ID, &item.SubscriptionID, &item.EventID, &item.Attempt, &item.Next, &item.Done, &item.Failed); err != nil {
+			rows.Close()
+			return Snapshot{}, err
+		}
+		snap.Deliveries = append(snap.Deliveries, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+	rows, err = tx.Query(ctx, `SELECT address, reason FROM suppression ORDER BY address`)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for rows.Next() {
+		var item Suppression
+		if err := rows.Scan(&item.Address, &item.Reason); err != nil {
+			rows.Close()
+			return Snapshot{}, err
+		}
+		snap.Suppressions = append(snap.Suppressions, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Snapshot{}, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	return snap, nil
+}
+
+// Import replaces the inbAI tables with the snapshot.
+func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
+	if err := snap.check(); err != nil {
+		return err
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression`); err != nil {
+		return err
+	}
+	for _, cur := range snap.Cursors {
+		if _, err := tx.Exec(ctx, `INSERT INTO inbox_cursor (inbox, address, jmap_state) VALUES ($1, $2, $3)`, cur.Inbox, strings.ToLower(strings.TrimSpace(cur.Address)), cur.State); err != nil {
+			return err
+		}
+	}
+	for _, event := range snap.Events {
+		if _, err := tx.Exec(ctx, `INSERT INTO mail_event (id, inbox, message_id, kind) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4)`, event.ID, event.Inbox, event.MessageID, event.Kind); err != nil {
+			return err
+		}
+	}
+	for _, sub := range snap.Subscriptions {
+		if _, err := tx.Exec(ctx, `INSERT INTO webhook_subscription (id, agent, inbox, url, secret) VALUES ($1, $2, $3, $4, $5)`, sub.ID, sub.Agent, sub.Inbox, sub.URL, sub.Secret); err != nil {
+			return err
+		}
+	}
+	for _, item := range snap.Deliveries {
+		var done, failed any
+		if item.Done {
+			done = item.Next
+		}
+		if item.Failed {
+			failed = item.Next
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO webhook_delivery (id, subscription_id, event_id, attempt, next_at, done_at, failed_at) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6, $7)`, item.ID, item.SubscriptionID, item.EventID, item.Attempt, item.Next, done, failed); err != nil {
+			return err
+		}
+	}
+	for _, item := range snap.Suppressions {
+		if _, err := tx.Exec(ctx, `INSERT INTO suppression (address, reason) VALUES ($1, $2)`, strings.ToLower(strings.TrimSpace(item.Address)), item.Reason); err != nil {
+			return err
+		}
+	}
+	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
+		return err
+	}
+	if err := setIdentity(ctx, tx, "webhook_delivery", "id", maxDelivery(snap.Deliveries)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func maxID(events []Record) int64 {
+	var max int64
+	for _, event := range events {
+		if event.ID > max {
+			max = event.ID
+		}
+	}
+	return max
+}
+
+func maxDelivery(items []DeliveryRow) int64 {
+	var max int64
+	for _, item := range items {
+		if item.ID > max {
+			max = item.ID
+		}
+	}
+	return max
+}
+
+func setIdentity(ctx context.Context, tx pgx.Tx, table, column string, max int64) error {
+	called := max > 0
+	if max == 0 {
+		max = 1
+	}
+	_, err := tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence($1, $2), $3, $4)`, table, column, max, called)
+	return err
+}
