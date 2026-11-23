@@ -31,6 +31,7 @@ func domainCmd(args []string, stdout, stderr io.Writer) int {
 	domain := fs.String("domain", "", "domain to publish (default is the domain in the config file)")
 	configPath := fs.String("config", "", "config file written by inbai init")
 	tlsInsecure := fs.Bool("tls-insecure", false, "skip TLS verification for a server that is not on localhost")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -79,8 +80,17 @@ func domainCmd(args []string, stdout, stderr io.Writer) int {
 	if !strings.HasSuffix(zone, "\n") {
 		zone += "\n"
 	}
+	findings := stalwart.Check(ctx, records, lookupDNS)
+	if *asJSON {
+		checks := make([]map[string]string, len(findings))
+		for i, finding := range findings {
+			checks[i] = map[string]string{"name": finding.Name, "type": finding.Type, "status": finding.Status}
+		}
+		emit(stdout, true, "", map[string]any{"zone": zone, "checks": checks})
+		return 0
+	}
 	writef(stdout, "%s\n", zone)
-	for _, finding := range stalwart.Check(ctx, records, lookupDNS) {
+	for _, finding := range findings {
 		writef(stdout, "%s %s: %s\n", finding.Name, finding.Type, finding.Status)
 	}
 	return 0
