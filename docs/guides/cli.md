@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, `inbox create`, `inbox generate`, `message send`, and `message list` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create and generate, and message send, list, get, reply, and delete are implemented. The other commands are not.
 
 # CLI
 
@@ -27,7 +27,7 @@ Running init again reuses the domain, the roles, and the accounts. It keeps the 
 
 ## inbox create
 
-`inbai inbox create <local-part>` creates one address in the domain from the config file. The local part is lowercased. The service account impersonates the new inbox, so the command does not print a mailbox password. The address and its Stalwart account id are written into the config file.
+`inbai inbox create <local-part>` asks `inbaid` to create one address. Set `INBAI_OPERATOR_TOKEN` to the same value `inbaid serve` uses. The command uses `apiUrl` from the config file, or `http://127.0.0.1:8787`. The address and account id are written into the config file. `--json` prints the API response instead of a sentence.
 
 ```sh
 inbai inbox create alice
@@ -35,22 +35,23 @@ inbai inbox create alice
 
 That creates `alice@example.com` when the config domain is `example.com`.
 
-`inbai inbox generate --count 10` creates `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. The command prints progress after each batch and records every address in the config file. A count above 10000 is rejected. On `inbaid`, a count above 50 is returned as a job instead of waiting in the request.
+`inbai inbox generate --count 10` asks `inbaid` to create `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. When the server returns a job, the command polls it and prints progress. It records every address in the config file.
 
 ## message send and message list
 
-`inbai message send` submits one plain-text message as an address created with `inbox create`. `--attach` adds one file. `inbai message list` prints the subject and preview of messages in that inbox.
+`inbai message send` submits one plain-text message as an address created with `inbox create`. `--attach` adds one file. `inbai message list` prints the subject and preview. `--query` searches message text. `inbai message get` prints one message, `inbai message reply` answers it, and `inbai message delete` removes it. `--json` prints the API document.
 
 ```sh
 inbai message send --from alice@example.com --to bob@example.com --subject hello --body 'hello'
 inbai message list alice@example.com
+inbai message get alice@example.com <message-id>
 ```
 
-Delivery to another server still depends on the DNS records from `domain add` and on Stalwart accepting the message. These commands do not print JSON.
+Delivery to another server still depends on the DNS records from `domain add` and on Stalwart accepting the message. `inbaid serve` must be running.
 
 ## Planned sections
 
-- Global flags, including JSON output for scripts.
+- JSON output for `init`, `domain`, and `doctor`.
 - `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
 - `inbox list` and `inbox delete`.

@@ -4,7 +4,7 @@ Status: current
 
 inbAI is a control plane in front of a mail server. It provisions domains and inboxes, holds agent identity and grants, enforces quotas, and delivers events. It does not implement SMTP, IMAP, or spam filtering.
 
-`inbai init` creates the Stalwart domain, operator, and service account described below. `inbai inbox create`, `inbai message send`, and `inbai message list` call the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet, and an operator is the only caller the CLI uses. `inbaid serve` is the HTTP transport for create, list, and send. MCP is not implemented. The rest of this document is the design the remaining code will follow.
+`inbai init` creates the Stalwart domain, operator, and service account described below. Inbox and message commands call `inbaid`, and `inbaid` calls the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet. The HTTP caller is an operator token. MCP is not implemented. The rest of this document is the design the remaining code will follow.
 
 ## Components
 
@@ -40,7 +40,7 @@ flowchart LR
   internet --> stalwart
 ```
 
-- `inbai` is the operator CLI. Bootstrap and the mail commands talk to Stalwart through the service layer until `inbaid` serves the REST API. After that, the CLI is a client of the API.
+- `inbai` is the operator CLI. `init`, `domain add`, and `doctor` talk to Stalwart. Inbox and message commands call the REST API on `inbaid`.
 - `inbaid` is the server. REST and MCP are transports over one service layer.
 - The service layer is the only place that checks grants.
 - PostgreSQL holds inbAI state and the job queue. Stalwart holds messages.
