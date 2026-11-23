@@ -40,6 +40,10 @@ golangci-lint run ./...
 
 `bin/inbai` prints `inbai 0.0.0-dev`. `bin/inbaid` prints `inbaid 0.0.0-dev`. There are no subcommands yet.
 
+## Branches
+
+Start from the latest `main`. Create a branch named `<type>/<summary>` before the first commit. `type` is `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `spike`. `summary` is two to five lowercase words joined by hyphens. Push that branch and open a pull request. GitHub rejects a push to `main`.
+
 ## Where a change goes
 
 Read [AGENTS.md](../../AGENTS.md). It maps each directory to the job it owns.

@@ -15,6 +15,12 @@ AI assistance is optional. It is never required. Work done with AI and work done
 
 Security problems go through [SECURITY.md](SECURITY.md), not a public issue.
 
+## Branches
+
+Do not commit on `main`. GitHub rejects a push to `main`. Create a branch named `<type>/<summary>` and open a pull request into `main`.
+
+`type` is one of `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `spike`. `summary` is two to five lowercase words joined by hyphens, as in `feat/inbox-create`. Coding agents follow the same rule. The steps are in [AGENTS.md](AGENTS.md).
+
 ## What every contribution needs
 
 - It solves a problem described in an issue or in the pull request.
