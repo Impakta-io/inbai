@@ -42,7 +42,7 @@ golangci-lint run ./...
 
 ## Branches
 
-Start from the latest `main`. Create a branch named `<type>/<summary>` before the first commit. `type` is `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `spike`. `summary` is two to five lowercase words joined by hyphens. Push that branch and open a pull request. Do not push commits to `main`.
+Start from the latest `main`. Create a branch named `<type>/<summary>` before the first commit. `type` is `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `spike`. `summary` is two to five lowercase words joined by hyphens. Push that branch and open a pull request. GitHub rejects a push to `main`.
 
 ## Where a change goes
 

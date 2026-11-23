@@ -59,7 +59,7 @@ Each `internal` package has a `doc.go` that states its job. Read it before editi
 
 ## Branches and pull requests
 
-Do not commit on `main`. Do not push to `main`. Every change is a branch and a pull request into `main`.
+Do not commit on `main`. Do not push to `main`. GitHub rejects a push to `main`. Every change is a branch and a pull request into `main`.
 
 Name the branch `<type>/<summary>`.
 
