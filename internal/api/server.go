@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
+	mux.HandleFunc("DELETE /v1/grants/{agent}/{inbox}/{permission}", s.revokeGrant)
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
@@ -225,6 +226,15 @@ func (s *Server) createGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"agent": body.Agent, "inbox": body.Inbox, "permission": body.Permission})
+}
+
+func (s *Server) revokeGrant(w http.ResponseWriter, r *http.Request) {
+	err := s.Service.Revoke(s.requestCaller(r), r.PathValue("agent"), r.PathValue("inbox"), service.Permission(r.PathValue("permission")))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {

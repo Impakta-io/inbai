@@ -18,7 +18,11 @@ ON CONFLICT DO NOTHING`, agent, inbox, permission)
 	return err
 }
 
-// HasGrant reports whether that permission is stored.
+// DeleteGrant removes one permission. A missing grant is not an error.
+func (p *Postgres) DeleteGrant(ctx context.Context, agent, inbox, permission string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM access_grant WHERE agent = $1 AND inbox = $2 AND permission = $3`, agent, inbox, permission)
+	return err
+}
 func (p *Postgres) HasGrant(ctx context.Context, agent, inbox, permission string) (bool, error) {
 	var ok bool
 	err := p.pool.QueryRow(ctx, `
