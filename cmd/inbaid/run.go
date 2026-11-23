@@ -75,8 +75,9 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stderr, "config is missing a service API key. Run inbai init first.\n")
 		return 2
 	}
+	cfg, insecure := serverMail(cfg, getenv)
 	client := &stalwart.Client{BaseURL: cfg.StalwartURL, APIKey: cfg.APIKey}
-	if strings.HasPrefix(cfg.StalwartURL, "http://") || loopback(cfg.StalwartURL) {
+	if insecure {
 		client.HTTP = insecureHTTP()
 	}
 	if cfg.DomainID == "" {
@@ -149,6 +150,21 @@ func retainLoop(svc *service.Service, days int, stderr io.Writer) {
 	for range ticker.C {
 		sweep()
 	}
+}
+
+func serverMail(cfg config.File, getenv func(string) string) (config.File, bool) {
+	if getenv != nil {
+		if raw := strings.TrimSpace(getenv("INBAI_STALWART_URL")); raw != "" {
+			cfg.StalwartURL = raw
+		}
+		if getenv("INBAI_TLS_INSECURE") == "1" {
+			return cfg, true
+		}
+	}
+	if strings.HasPrefix(cfg.StalwartURL, "http://") || loopback(cfg.StalwartURL) {
+		return cfg, true
+	}
+	return cfg, false
 }
 
 func configPathOf(explicit string) (string, error) {

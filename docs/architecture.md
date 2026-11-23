@@ -81,7 +81,7 @@ MCP tools are defined once and served two ways: Streamable HTTP at `/mcp` on `in
 - Stalwart is reached only through `MailBackend`.
 - Nothing in inbAI depends on a Stalwart Enterprise feature.
 
-The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Stalwart. More `inbaid` replicas can sit behind a load balancer without a code change. Several Stalwart nodes can share PostgreSQL and object storage later. That clustered layout is not part of the first release.
+The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Stalwart. The Compose file starts all three. More `inbaid` replicas can sit behind a load balancer without a code change. Several Stalwart nodes can share PostgreSQL and object storage later. That clustered layout is not part of the first release.
 
 Only port 25 and port 443 are public. Stalwart's own client and admin listeners stay on the internal network.
 

@@ -2,7 +2,7 @@ Status: partial — `TestOneInboxOnStalwart` creates an address, delivers a mess
 
 # Integration tests
 
-`TestOneInboxOnStalwart` starts the Compose stack, runs `inbai init`, leaves recovery mode, and then uses `inbaid` to create `alice@inbai.test`, send a message to that address, and read the body back.
+`TestOneInboxOnStalwart` starts the Compose stack, including `inbaid`, runs `inbai init`, leaves recovery mode, and then creates `alice@inbai.test`, sends a message to that address, and reads the body back.
 
 ```sh
 INBAI_INTEGRATION=1 go test ./test/integration -count=1 -timeout 10m

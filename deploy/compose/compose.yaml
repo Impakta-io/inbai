@@ -33,6 +33,23 @@ services:
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - stalwart:/var/lib/stalwart
+  inbaid:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      INBAI_OPERATOR_TOKEN: ${INBAI_OPERATOR_TOKEN:?set INBAI_OPERATOR_TOKEN}
+      INBAI_DATABASE_URL: postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable
+      INBAI_STALWART_URL: https://stalwart
+      INBAI_TLS_INSECURE: "1"
+      INBAI_SIGNING_KEY: ${INBAI_SIGNING_KEY:-}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ${INBAI_CONFIG_DIR:?set INBAI_CONFIG_DIR to the directory that contains config.json}:/config:ro
 
 volumes:
   postgres:

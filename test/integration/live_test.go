@@ -28,13 +28,16 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	root := repoRoot(t)
 	bin := t.TempDir()
 	build(t, root, bin)
-	cfg := filepath.Join(t.TempDir(), "config.json")
+	cfgDir := t.TempDir()
+	cfg := filepath.Join(cfgDir, "config.json")
 	password := secret()
 	compose := filepath.Join(root, "deploy", "compose")
 	env := []string{
 		"PG_PASSWORD=" + password,
 		"STALWART_RECOVERY_MODE=1",
 		"STALWART_RECOVERY_ADMIN=admin:" + password,
+		"INBAI_OPERATOR_TOKEN=integration-token",
+		"INBAI_CONFIG_DIR=" + cfgDir,
 	}
 	t.Cleanup(func() {
 		_, _ = command(t, compose, env, "docker", "compose", "-p", "inbai-live", "down", "-v", "--remove-orphans")
@@ -53,21 +56,6 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	env[1] = "STALWART_RECOVERY_MODE=0"
 	must(t, compose, env, "docker", "compose", "-p", "inbai-live", "up", "-d", "--force-recreate", "stalwart")
 	waitURL(t, "https://127.0.0.1/jmap/", true)
-
-	server := exec.Command(filepath.Join(bin, "inbaid"), "serve", "--config", cfg, "--addr", "127.0.0.1:8787")
-	server.Env = append(os.Environ(), "INBAI_OPERATOR_TOKEN=integration-token")
-	var serverOut strings.Builder
-	server.Stdout = &serverOut
-	server.Stderr = &serverOut
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if server.Process != nil {
-			_ = server.Process.Kill()
-			_, _ = server.Process.Wait()
-		}
-	})
 	waitURL(t, "http://127.0.0.1:8787/healthz", false)
 
 	cli := []string{"INBAI_OPERATOR_TOKEN=integration-token"}
@@ -91,7 +79,7 @@ func TestOneInboxOnStalwart(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("inbox stayed empty\n%s", serverOut.String())
+			t.Fatal("inbox stayed empty")
 		}
 		time.Sleep(time.Second)
 	}

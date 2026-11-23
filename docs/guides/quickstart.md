@@ -25,14 +25,7 @@ Publish the zone, then run `inbai doctor`. A healthy host exits 0. The Compose c
 
 ## Create an inbox
 
-Start the API, then create an address. The token is the one `inbaid serve` requires.
-
-```sh
-export INBAI_OPERATOR_TOKEN='choose-a-token'
-inbaid serve
-```
-
-In another shell:
+The Compose service listens on `127.0.0.1:8787` after init writes `config.json` and Stalwart leaves recovery mode. The token is the one passed to Compose as `INBAI_OPERATOR_TOKEN`.
 
 ```sh
 export INBAI_OPERATOR_TOKEN='choose-a-token'
