@@ -29,8 +29,10 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	switch args[0] {
 	case "init":
 		return initCmd(args[1:], stdout, stderr, getenv)
+	case "domain":
+		return domainCmd(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init]\n")
+		writef(stdout, "usage: inbai [version|init|domain]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])
@@ -70,12 +72,12 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	}
 	path := *configPath
 	if path == "" {
-		dir, err := os.UserConfigDir()
+		var err error
+		path, err = configFilePath("")
 		if err != nil {
 			writef(stderr, "config directory: %s\n", err)
 			return 1
 		}
-		path = filepath.Join(dir, "inbai", "config.json")
 	}
 	existing, err := readConfig(path)
 	if err != nil {
@@ -131,6 +133,17 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	writef(stdout, "Wrote %s\n", path)
 	writef(stdout, "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail.\n")
 	return 0
+}
+
+func configFilePath(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "inbai", "config.json"), nil
 }
 
 func readConfig(path string) (config.File, error) {

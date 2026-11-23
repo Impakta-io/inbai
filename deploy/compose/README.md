@@ -26,18 +26,19 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 The operator account and the service account share the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes.
 
-Leave recovery mode before accepting mail:
+Leave recovery mode, then print the DNS records:
 
 ```sh
 export STALWART_RECOVERY_MODE=0
 docker compose up -d
+inbai domain add
 ```
 
-Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates.
+Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates, so `domain add` skips certificate verification when the stored URL is localhost. Copy the printed zone file into DNS. Run `inbai domain add` again to see which MX and TXT records are published.
 
 ## What is not here yet
 
-- `inbai domain add` and `inbai doctor`
+- `inbai doctor`
 - The inbAI server process
 - An authenticated outbound relay
 
