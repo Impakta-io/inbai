@@ -69,6 +69,34 @@ func TestOperatorCanCreateAnInbox(t *testing.T) {
 	}
 }
 
+func TestProvisionGrantCreatesAnInbox(t *testing.T) {
+	mail := &fakeMail{created: "id-2"}
+	svc := New(mail)
+	svc.Allow("ada", "inbox-a", PermRead)
+	if _, err := svc.CreateInbox(context.Background(), Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "bob"}, ""); !errors.Is(err, ErrForbidden) || mail.creates != 0 {
+		t.Fatalf("read grant created err %v calls %d", err, mail.creates)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermProvision); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("scope err %v", err)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "*", PermProvision); err != nil {
+		t.Fatal(err)
+	}
+	id, err := svc.CreateInbox(context.Background(), Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "ada"}, "")
+	if err != nil || id != "id-2" || mail.creates != 1 {
+		t.Fatalf("create %s calls %d err %v", id, mail.creates, err)
+	}
+	if _, err := svc.Get(context.Background(), Caller{Agent: "ada"}, "inbox-b", "m"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("provision read err %v", err)
+	}
+	got, err := svc.Generate(context.Background(), Caller{Agent: "ada"}, GenerateRequest{
+		Prefix: "p", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 1, Wait: true,
+	}, "")
+	if err != nil || len(got.Inboxes) != 1 || got.Inboxes[0].Address != "p00000@example.com" {
+		t.Fatalf("generate %+v err %v", got, err)
+	}
+}
+
 func TestSendQuotaAndIdempotency(t *testing.T) {
 	mail := &fakeMail{}
 	svc := New(mail)
@@ -231,6 +259,7 @@ func TestAttachmentRequiresTheReadGrant(t *testing.T) {
 
 type fakeMail struct {
 	created  string
+	creates  int
 	messages []mailbackend.Message
 	listed   bool
 	sent     int
@@ -246,6 +275,7 @@ type fakeMail struct {
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
+	f.creates++
 	return f.created, nil
 }
 

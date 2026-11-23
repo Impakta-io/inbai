@@ -74,11 +74,12 @@ func (s *Service) SetSyncLimit(n int) {
 	s.syncLimit = n
 }
 
-// Generate creates count addresses. Only an operator may do that.
+// Generate creates count addresses. An operator may do that.
+// An agent may do that when it holds inbox:provision on *.
 // Local parts are prefix plus a zero-padded index, starting at 00000.
 func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateRequest, idemKey string) (GenerateResult, error) {
-	if !caller.Operator {
-		return GenerateResult{}, ErrForbidden
+	if err := s.permitProvision(ctx, caller); err != nil {
+		return GenerateResult{}, err
 	}
 	prefix := strings.ToLower(strings.TrimSpace(req.Prefix))
 	if prefix == "" || strings.ContainsAny(prefix, " @/\t") {

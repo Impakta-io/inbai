@@ -20,11 +20,15 @@ import (
 type Permission string
 
 const (
-	PermRead   Permission = "read"
-	PermSend   Permission = "send"
-	PermReply  Permission = "reply"
-	PermDelete Permission = "delete"
-	PermManage Permission = "manage"
+	PermRead      Permission = "read"
+	PermSend      Permission = "send"
+	PermReply     Permission = "reply"
+	PermDelete    Permission = "delete"
+	PermManage    Permission = "manage"
+	PermProvision Permission = "inbox:provision"
+
+	// provisionScope is the inbox id for a grant that creates inboxes.
+	provisionScope = "*"
 )
 
 // ErrForbidden is returned when the caller has no grant for the action.
@@ -127,6 +131,9 @@ func (s *Service) Grant(caller Caller, agent, inbox string, perm Permission) err
 	if agent == "" || inbox == "" || !knownPermission(perm) {
 		return fmt.Errorf("%w: grant needs an agent, an inbox, and a permission", ErrInvalid)
 	}
+	if err := grantScope(perm, inbox); err != nil {
+		return err
+	}
 	if s.db != nil {
 		if err := s.db.SaveGrant(context.Background(), agent, inbox, string(perm)); err != nil {
 			return err
@@ -145,6 +152,9 @@ func (s *Service) Revoke(caller Caller, agent, inbox string, perm Permission) er
 	}
 	if agent == "" || inbox == "" || !knownPermission(perm) {
 		return fmt.Errorf("%w: revoke needs an agent, an inbox, and a permission", ErrInvalid)
+	}
+	if err := grantScope(perm, inbox); err != nil {
+		return err
 	}
 	if s.db != nil {
 		if err := s.db.DeleteGrant(context.Background(), agent, inbox, string(perm)); err != nil {
@@ -197,11 +207,28 @@ func (s *Service) SuspendAgent(caller Caller, identities Identities, agent strin
 
 func knownPermission(perm Permission) bool {
 	switch perm {
-	case PermRead, PermSend, PermReply, PermDelete, PermManage:
+	case PermRead, PermSend, PermReply, PermDelete, PermManage, PermProvision:
 		return true
 	default:
 		return false
 	}
+}
+
+func grantScope(perm Permission, inbox string) error {
+	if perm == PermProvision && inbox != provisionScope {
+		return fmt.Errorf("%w: inbox:provision is granted on *", ErrInvalid)
+	}
+	if perm != PermProvision && inbox == provisionScope {
+		return fmt.Errorf("%w: * is only for inbox:provision", ErrInvalid)
+	}
+	return nil
+}
+
+func (s *Service) permitProvision(ctx context.Context, caller Caller) error {
+	if caller.Operator {
+		return nil
+	}
+	return s.permit(ctx, caller, provisionScope, PermProvision)
 }
 
 func (s *Service) record(ctx context.Context, caller Caller, action, target string) error {
@@ -260,11 +287,12 @@ func (s *Service) Audit(ctx context.Context, caller Caller, after int64, limit i
 	return rows, next, nil
 }
 
-// CreateInbox creates an address. Only an operator may do that.
+// CreateInbox creates an address. An operator may do that.
+// An agent may do that when it holds inbox:provision on *.
 // idemKey is the Idempotency-Key. A repeat of a completed key returns the same account id.
 func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbackend.InboxSpec, idemKey string) (string, error) {
-	if !caller.Operator {
-		return "", ErrForbidden
+	if err := s.permitProvision(ctx, caller); err != nil {
+		return "", err
 	}
 	key := idempotencyKey(caller, spec.Local, idemKey)
 	if key != "" {
