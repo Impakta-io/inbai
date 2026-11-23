@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -48,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /mcp", s.mcp)
 	mux.HandleFunc("GET /mcp", s.mcp)
 	mux.HandleFunc("GET /v1/events", s.events)
+	mux.HandleFunc("GET /v1/suppressions", s.suppressions)
 	mux.HandleFunc("POST /v1/webhooks", s.createWebhook)
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
@@ -442,7 +444,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		Events []struct {
 			Type string `json:"type"`
 			Data struct {
-				To []string `json:"to"`
+				To      json.RawMessage `json:"to"`
+				Details string          `json:"details"`
 			} `json:"data"`
 		} `json:"events"`
 	}
@@ -450,18 +453,44 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
 		return
 	}
-	var recipients []string
+	notices := make([]service.Notice, 0, len(body.Events))
 	for _, event := range body.Events {
-		if strings.HasPrefix(event.Type, "message-ingest") {
-			recipients = append(recipients, event.Data.To...)
-		}
+		notices = append(notices, service.Notice{Type: event.Type, To: recipientList(event.Data.To), Details: event.Data.Details})
 	}
-	synced, err := s.Service.Ingest(r.Context(), recipients)
+	synced, suppressed, err := s.Service.Observe(r.Context(), notices)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int{"synced": synced})
+	writeJSON(w, http.StatusAccepted, map[string]int{"synced": synced, "suppressed": suppressed})
+}
+
+func (s *Server) suppressions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Service.Suppressions(r.Context(), s.requestCaller(r))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suppressions": list})
+}
+
+func recipientList(raw json.RawMessage) []string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	if raw[0] == '"' {
+		var one string
+		if json.Unmarshal(raw, &one) == nil && strings.TrimSpace(one) != "" {
+			return []string{one}
+		}
+		return nil
+	}
+	var many []string
+	if json.Unmarshal(raw, &many) == nil {
+		return many
+	}
+	return nil
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -506,6 +535,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusNotFound, "Not found", err.Error())
 	case errors.Is(err, service.ErrUnavailable):
 		writeProblem(w, http.StatusServiceUnavailable, "Event store unavailable", err.Error())
+	case errors.Is(err, service.ErrSuppressed):
+		writeProblem(w, http.StatusConflict, "Suppressed", err.Error())
 	default:
 		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
 	}

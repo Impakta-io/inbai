@@ -32,6 +32,9 @@ var ErrForbidden = errors.New("forbidden")
 // ErrQuota is returned when the inbox or the domain has used its daily send quota.
 var ErrQuota = errors.New("send quota exceeded")
 
+// ErrSuppressed is returned when the recipient is on the hard-bounce list.
+var ErrSuppressed = errors.New("recipient is suppressed")
+
 const (
 	defaultInboxDaily  = 50
 	defaultDomainDaily = 500
@@ -180,6 +183,15 @@ func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Ou
 }
 
 func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbound) error {
+	if s.feed != nil {
+		reason, suppressed, err := s.feed.Suppressed(ctx, msg.To)
+		if err != nil {
+			return err
+		}
+		if suppressed {
+			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
+		}
+	}
 	if err := s.consume(msg); err != nil {
 		return err
 	}

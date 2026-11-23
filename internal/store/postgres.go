@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS webhook_delivery (
 );
 CREATE INDEX IF NOT EXISTS webhook_delivery_due ON webhook_delivery (next_at)
     WHERE done_at IS NULL AND failed_at IS NULL;
+CREATE TABLE IF NOT EXISTS suppression (
+    address text PRIMARY KEY,
+    reason text NOT NULL
+);
 `
 
 // Postgres is the event log that survives an inbaid restart.
@@ -240,4 +244,42 @@ func (p *Postgres) Retry(ctx context.Context, id int64, next time.Time) error {
 func (p *Postgres) Fail(ctx context.Context, id int64, now time.Time) error {
 	_, err := p.pool.Exec(ctx, `UPDATE webhook_delivery SET failed_at = $2 WHERE id = $1`, id, now)
 	return err
+}
+
+func (p *Postgres) Suppress(ctx context.Context, address, reason string) error {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" || !strings.Contains(address, "@") {
+		return nil
+	}
+	_, err := p.pool.Exec(ctx, `INSERT INTO suppression (address, reason) VALUES ($1, $2) ON CONFLICT (address) DO NOTHING`, address, reason)
+	return err
+}
+
+func (p *Postgres) Suppressed(ctx context.Context, address string) (string, bool, error) {
+	var reason string
+	err := p.pool.QueryRow(ctx, `SELECT reason FROM suppression WHERE address = $1`, strings.ToLower(strings.TrimSpace(address))).Scan(&reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return reason, true, nil
+}
+
+func (p *Postgres) Suppressions(ctx context.Context) ([]Suppression, error) {
+	rows, err := p.pool.Query(ctx, `SELECT address, reason FROM suppression ORDER BY address`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Suppression
+	for rows.Next() {
+		var item Suppression
+		if err := rows.Scan(&item.Address, &item.Reason); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }

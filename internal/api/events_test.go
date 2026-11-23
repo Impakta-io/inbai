@@ -51,6 +51,32 @@ func TestIngestHintFeedsTheCursor(t *testing.T) {
 	if hook.StatusCode != http.StatusCreated || !strings.Contains(readBody(t, hook), `"secret"`) {
 		t.Fatalf("webhook %d", hook.StatusCode)
 	}
+
+	bounce, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/hooks/ingest", strings.NewReader(`{"events":[{"type":"delivery.dsn-temp-fail","data":{"to":"soft@example.com","details":"451 later"}},{"type":"delivery.dsn-perm-fail","data":{"to":"bad@example.com","details":"550 user unknown"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounce.Header.Set("Content-Type", "application/json")
+	bounce.Header.Set("X-Inbai-Ingest", "hint")
+	res, err = http.DefaultClient.Do(bounce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusAccepted || !strings.Contains(readBody(t, res), `"suppressed":1`) {
+		t.Fatalf("bounce %d", res.StatusCode)
+	}
+	denied := call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages", "operator-token", `{"from":"alice@example.com","to":"bad@example.com","subject":"hi","text":"hi"}`, "")
+	if denied.StatusCode != http.StatusConflict || mail.sent != 0 {
+		t.Fatalf("suppressed send %d sent %d", denied.StatusCode, mail.sent)
+	}
+	allowed := call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages", "operator-token", `{"from":"alice@example.com","to":"soft@example.com","subject":"hi","text":"hi"}`, "")
+	if allowed.StatusCode != http.StatusAccepted || mail.sent != 1 {
+		t.Fatalf("soft send %d sent %d", allowed.StatusCode, mail.sent)
+	}
+	list := call(t, srv.URL, http.MethodGet, "/v1/suppressions", "operator-token", "", "")
+	if list.StatusCode != http.StatusOK || !strings.Contains(readBody(t, list), "bad@example.com") {
+		t.Fatalf("list %d", list.StatusCode)
+	}
 }
 
 func TestHealthAndAMissingEventStore(t *testing.T) {

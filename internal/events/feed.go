@@ -215,6 +215,21 @@ func (f *Feed) Counters() (int64, int64) {
 	return f.appended.Load(), f.posted.Load()
 }
 
+// Suppress records a recipient that must not be mailed again. The first reason is kept.
+func (f *Feed) Suppress(ctx context.Context, address, reason string) error {
+	return f.log.Suppress(ctx, address, reason)
+}
+
+// Suppressed reports whether an address is on the suppression list.
+func (f *Feed) Suppressed(ctx context.Context, address string) (string, bool, error) {
+	return f.log.Suppressed(ctx, address)
+}
+
+// Suppressions returns the list.
+func (f *Feed) Suppressions(ctx context.Context) ([]store.Suppression, error) {
+	return f.log.Suppressions(ctx)
+}
+
 func randomID() (string, error) {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {

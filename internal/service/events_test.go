@@ -116,3 +116,32 @@ func TestEventsWaitUntilTheDeadline(t *testing.T) {
 		t.Fatalf("wait %v %+v after %s", err, records, time.Since(start))
 	}
 }
+
+func TestHardBounceSuppressesTheRecipient(t *testing.T) {
+	log := &store.Memory{}
+	mail := &fakeMail{}
+	svc := New(mail)
+	svc.SetQuota(1, 500)
+	svc.SetFeed(events.New(log))
+	_, suppressed, err := svc.Observe(context.Background(), []Notice{
+		{Type: "delivery.dsn-temp-fail", To: []string{"soft@example.com"}, Details: "451 try later"},
+		{Type: "delivery.failed", To: []string{"soft@example.com"}},
+		{Type: "delivery.dsn-perm-fail", To: []string{"Bad@example.com"}, Details: "550 user unknown"},
+	})
+	if err != nil || suppressed != 1 {
+		t.Fatalf("suppressed %d err %v", suppressed, err)
+	}
+	err = svc.Deliver(context.Background(), Caller{Operator: true}, mailbackend.Outbound{AccountID: "a", From: "a@example.com", To: "bad@example.com", Subject: "hi"}, "")
+	if !errors.Is(err, ErrSuppressed) || mail.sent != 0 {
+		t.Fatalf("send %v sent %d", err, mail.sent)
+	}
+	if err := svc.Deliver(context.Background(), Caller{Operator: true}, mailbackend.Outbound{AccountID: "a", From: "a@example.com", To: "soft@example.com", Subject: "hi"}, ""); err != nil || mail.sent != 1 {
+		t.Fatalf("soft send %v sent %d", err, mail.sent)
+	}
+	restarted := New(&fakeMail{})
+	restarted.SetFeed(events.New(log))
+	err = restarted.Deliver(context.Background(), Caller{Operator: true}, mailbackend.Outbound{AccountID: "a", From: "a@example.com", To: "bad@example.com", Subject: "again"}, "")
+	if !errors.Is(err, ErrSuppressed) {
+		t.Fatalf("after restart %v", err)
+	}
+}
