@@ -28,3 +28,36 @@ func TestServeRequiresOperatorToken(t *testing.T) {
 		t.Fatalf("exit %d stderr %s", code, stderr.String())
 	}
 }
+
+func TestIMAPServeRequiresDomainAndAccounts(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"serve"}, &stdout, &stderr, func(key string) string {
+		switch key {
+		case "INBAI_OPERATOR_TOKEN":
+			return "token"
+		case "INBAI_MAIL":
+			return "imap"
+		default:
+			return ""
+		}
+	})
+	if code != 2 || !strings.Contains(stderr.String(), "INBAI_DOMAIN") {
+		t.Fatalf("domain exit %d stderr %s", code, stderr.String())
+	}
+	stderr.Reset()
+	code = run([]string{"serve"}, &stdout, &stderr, func(key string) string {
+		switch key {
+		case "INBAI_OPERATOR_TOKEN":
+			return "token"
+		case "INBAI_MAIL":
+			return "imap"
+		case "INBAI_DOMAIN":
+			return "example.com"
+		default:
+			return ""
+		}
+	})
+	if code != 2 || !strings.Contains(stderr.String(), "account file") {
+		t.Fatalf("accounts exit %d stderr %s", code, stderr.String())
+	}
+}
