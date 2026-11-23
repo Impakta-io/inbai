@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "inbai": {
+      "command": "inbai",
+      "args": ["mcp", "serve"],
+      "env": {
+        "INBAI_CLIENT_ID": "THE_ID",
+        "INBAI_CLIENT_SECRET": "THE_SECRET"
+      }
+    }
+  }
+}
