@@ -49,6 +49,8 @@ const (
 	DefaultWorkspaceDaily = 5000
 	// DefaultRecipientPerMinute is the default per-minute send rate limit per recipient domain.
 	DefaultRecipientPerMinute = 30
+	// DefaultStorageQuotaBytes is the default per-inbox disk storage cap (100 MiB).
+	DefaultStorageQuotaBytes int64 = 100 * 1024 * 1024
 )
 
 // Caller is who is asking. An operator is the human running the CLI.
@@ -72,6 +74,7 @@ type Service struct {
 	domainDaily        int
 	workspaceDaily     int
 	recipientPerMinute int
+	storageQuota       int64
 	now                func() time.Time
 	syncLimit          int
 
@@ -99,6 +102,7 @@ func New(mail mailbackend.Backend) *Service {
 		domainDaily:        DefaultDomainDaily,
 		workspaceDaily:     DefaultWorkspaceDaily,
 		recipientPerMinute: DefaultRecipientPerMinute,
+		storageQuota:       DefaultStorageQuotaBytes,
 		now:                time.Now,
 		sent:               map[string]int{},
 		sentID:             map[string]struct{}{},
@@ -314,6 +318,12 @@ func (s *Service) Audit(ctx context.Context, caller Caller, after int64, limit i
 func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbackend.InboxSpec, idemKey string) (string, error) {
 	if err := s.permitProvision(ctx, caller); err != nil {
 		return "", err
+	}
+	if spec.QuotaBytes < 0 {
+		return "", fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
+	}
+	if spec.QuotaBytes == 0 && s.storageQuota > 0 {
+		spec.QuotaBytes = s.storageQuota
 	}
 	key := idempotencyKey(caller, spec.Local, idemKey)
 	if key != "" {

@@ -15,9 +15,10 @@ import (
 
 // InboxInput names the account to create inside an existing domain.
 type InboxInput struct {
-	DomainID string
-	RoleID   string
-	Local    string
+	DomainID   string
+	RoleID     string
+	Local      string
+	QuotaBytes int64
 }
 
 // Delivery is one message submitted as an existing account.
@@ -73,7 +74,7 @@ func CreateInbox(ctx context.Context, client *Client, in InboxInput) (string, er
 	}
 	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
 		"create": map[string]any{
-			"a": account(local, in.DomainID, in.RoleID, secret),
+			"a": accountWithQuota(local, in.DomainID, in.RoleID, secret, in.QuotaBytes),
 		},
 	})
 	if err != nil {

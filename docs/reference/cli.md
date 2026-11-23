@@ -16,15 +16,18 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai domain [add|relay]`
 - `usage: inbai domain relay --host name --user name [--port n] [--config path] [--json]`
 - `usage: inbai domain relay --off [--config path] [--json]`
-- `usage: inbai inbox [create|generate|list|delete|allowlist]`
+- `usage: inbai inbox [create|generate|list|delete|allowlist|quota]`
 - `usage: inbai inbox allowlist [get|set|clear]`
 - `usage: inbai inbox allowlist clear [--config path] [--json] <inbox-id>`
 - `usage: inbai inbox allowlist get [--config path] [--json] <inbox-id>`
 - `usage: inbai inbox allowlist set [--config path] [--json] <inbox-id> <sender> [<sender>...]`
-- `usage: inbai inbox create <local-part>`
+- `usage: inbai inbox create [--quota-bytes n] <local-part>`
 - `usage: inbai inbox delete <address>`
 - `usage: inbai inbox generate --count <n> [--prefix <text>]`
 - `usage: inbai inbox list [--limit n] [--cursor token] [--config path] [--json]`
+- `usage: inbai inbox quota [get|set]`
+- `usage: inbai inbox quota get [--config path] [--json] <inbox-id>`
+- `usage: inbai inbox quota set [--config path] [--json] <inbox-id> <limit-bytes>`
 - `usage: inbai init --domain name [--url url] [--hostname name] [--stalwart-url url] [--config path] [--json]`
 - `usage: inbai mcp serve [--config path]`
 - `usage: inbai message [send|list|get|reply|delete|attachment]`

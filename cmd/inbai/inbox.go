@@ -19,7 +19,7 @@ import (
 
 func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist|quota]\n")
 		return 2
 	}
 	switch args[0] {
@@ -31,20 +31,23 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 		return inboxDelete(args[1:], stdout, stderr, getenv)
 	case "allowlist":
 		return inboxAllowlist(args[1:], stdout, stderr, getenv)
+	case "quota":
+		return inboxQuota(args[1:], stdout, stderr, getenv)
 	case "create":
 	default:
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist]\n")
+		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist|quota]\n")
 		return 2
 	}
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
 	asJSON := fs.Bool("json", false, "print JSON")
+	quotaBytes := fs.Int64("quota-bytes", 0, "optional per-inbox disk storage cap in bytes")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
-		writef(stderr, "usage: inbai inbox create <local-part>\n")
+	if fs.NArg() != 1 || *quotaBytes < 0 {
+		writef(stderr, "usage: inbai inbox create [--quota-bytes n] <local-part>\n")
 		return 2
 	}
 	local := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
@@ -54,7 +57,7 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	created, err := client.createInbox(ctx, local)
+	created, err := client.createInbox(ctx, local, *quotaBytes)
 	if err != nil {
 		writef(stderr, "inbox create: %s\n", err)
 		return 1

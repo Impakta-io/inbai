@@ -68,6 +68,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
 	mux.HandleFunc("GET /v1/inboxes/{id}/allowlist", s.getAllowlist)
 	mux.HandleFunc("PUT /v1/inboxes/{id}/allowlist", s.putAllowlist)
+	mux.HandleFunc("GET /v1/inboxes/{id}/quota", s.getQuota)
+	mux.HandleFunc("PUT /v1/inboxes/{id}/quota", s.putQuota)
 	mux.HandleFunc("POST /v1/inboxes/generate", s.generateInboxes)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
@@ -316,16 +318,18 @@ func (s *Server) runRetention(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		LocalPart string `json:"localPart"`
+		LocalPart  string `json:"localPart"`
+		QuotaBytes int64  `json:"quotaBytes"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
 		return
 	}
 	id, err := s.Service.CreateInbox(r.Context(), s.requestCaller(r), mailbackend.InboxSpec{
-		DomainID: s.DomainID,
-		RoleID:   s.RoleID,
-		Local:    body.LocalPart,
+		DomainID:   s.DomainID,
+		RoleID:     s.RoleID,
+		Local:      body.LocalPart,
+		QuotaBytes: body.QuotaBytes,
 	}, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)
@@ -398,6 +402,35 @@ func (s *Server) putAllowlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"senders": senders, "set": set})
+}
+
+func (s *Server) getQuota(w http.ResponseWriter, r *http.Request) {
+	q, err := s.Service.GetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) putQuota(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		LimitBytes *int64 `json:"limitBytes"`
+	}
+	if err := readJSON(r, &body); err != nil || body.LimitBytes == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "limitBytes is required")
+		return
+	}
+	if err := s.Service.SetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"), *body.LimitBytes); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	q, err := s.Service.GetStorageQuota(r.Context(), s.requestCaller(r), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
 }
 
 func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
@@ -740,6 +773,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusServiceUnavailable, "Event store unavailable", err.Error())
 	case errors.Is(err, service.ErrSuppressed):
 		writeProblem(w, http.StatusConflict, "Suppressed", err.Error())
+	case errors.Is(err, service.ErrUnsupported):
+		writeProblem(w, http.StatusNotImplemented, "Not implemented", err.Error())
 	default:
 		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
 	}

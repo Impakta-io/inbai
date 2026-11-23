@@ -15,15 +15,23 @@ type Mail struct {
 }
 
 func (m Mail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (string, error) {
-	return CreateInbox(ctx, m.Client, InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local})
+	return CreateInbox(ctx, m.Client, InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local, QuotaBytes: spec.QuotaBytes})
 }
 
 func (m Mail) CreateInboxes(ctx context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
 	in := make([]InboxInput, len(specs))
 	for i, spec := range specs {
-		in[i] = InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local}
+		in[i] = InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local, QuotaBytes: spec.QuotaBytes}
 	}
 	return CreateInboxes(ctx, m.Client, in)
+}
+
+func (m Mail) GetStorageQuota(ctx context.Context, accountID string) (mailbackend.StorageQuota, error) {
+	return GetStorageQuota(ctx, m.Client, accountID)
+}
+
+func (m Mail) SetStorageQuota(ctx context.Context, accountID string, limitBytes int64) error {
+	return SetStorageQuota(ctx, m.Client, accountID, limitBytes)
 }
 
 func (m Mail) Deliver(ctx context.Context, msg mailbackend.Outbound) error {

@@ -31,7 +31,12 @@ func applySendLimits(svc *service.Service, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	storage, err := parseInt64Limit(getenv, "INBAI_STORAGE_QUOTA_BYTES", service.DefaultStorageQuotaBytes)
+	if err != nil {
+		return err
+	}
 	svc.SetSendLimits(inbox, domain, workspace, rcpt)
+	svc.SetDefaultStorageQuota(storage)
 	return nil
 }
 
@@ -41,6 +46,18 @@ func parseLimit(getenv func(string) string, name string, fallback int) (int, err
 		return fallback, nil
 	}
 	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return n, nil
+}
+
+func parseInt64Limit(getenv func(string) string, name string, fallback int64) (int64, error) {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || n < 0 {
 		return 0, fmt.Errorf("%s must be a non-negative integer", name)
 	}

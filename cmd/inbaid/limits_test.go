@@ -38,4 +38,12 @@ func TestApplySendLimitsFromEnv(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected error for negative rate limit")
 	}
+	if err := applySendLimits(svc, func(k string) string {
+		if k == "INBAI_STORAGE_QUOTA_BYTES" {
+			return "-10"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("expected error for negative storage quota")
+	}
 }

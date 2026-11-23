@@ -147,9 +147,30 @@ func (c apiClient) runRetention(ctx context.Context) (int, error) {
 	return out.Deleted, err
 }
 
-func (c apiClient) createInbox(ctx context.Context, local string) (apiInbox, error) {
+func (c apiClient) createInbox(ctx context.Context, local string, quotaBytes int64) (apiInbox, error) {
+	body := map[string]any{"localPart": local}
+	if quotaBytes > 0 {
+		body["quotaBytes"] = quotaBytes
+	}
 	var out apiInbox
-	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", map[string]string{"localPart": local}, &out)
+	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", body, &out)
+	return out, err
+}
+
+type apiStorageQuota struct {
+	LimitBytes int64 `json:"limitBytes"`
+	UsedBytes  int64 `json:"usedBytes"`
+}
+
+func (c apiClient) storageQuota(ctx context.Context, inbox string) (apiStorageQuota, error) {
+	var out apiStorageQuota
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", nil, &out)
+	return out, err
+}
+
+func (c apiClient) setStorageQuota(ctx context.Context, inbox string, limitBytes int64) (apiStorageQuota, error) {
+	var out apiStorageQuota
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", map[string]int64{"limitBytes": limitBytes}, &out)
 	return out, err
 }
 

@@ -312,6 +312,58 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/quota:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getStorageQuota
+      summary: Read the disk storage quota and usage for one inbox.
+      responses:
+        "200":
+          description: Storage quota
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageQuota"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "501":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setStorageQuota
+      summary: Set or clear the disk storage quota for one inbox. Limit zero clears the cap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [limitBytes]
+              properties:
+                limitBytes:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageQuota"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "501":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes/generate:
     post:
       operationId: generateInboxes
@@ -725,6 +777,22 @@ components:
       properties:
         localPart:
           type: string
+        quotaBytes:
+          type: integer
+          minimum: 0
+          description: Optional per-inbox disk storage cap in bytes. Defaults to the server default (100 MiB).
+    StorageQuota:
+      type: object
+      required: [limitBytes, usedBytes]
+      properties:
+        limitBytes:
+          type: integer
+          minimum: 0
+          description: Disk storage cap in bytes. Zero means no storage cap is set.
+        usedBytes:
+          type: integer
+          minimum: 0
+          description: Disk storage currently used in bytes.
     Allowlist:
       type: object
       required: [senders]

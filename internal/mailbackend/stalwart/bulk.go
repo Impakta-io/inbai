@@ -52,7 +52,7 @@ func createBatch(ctx context.Context, client *Client, specs []InboxInput) ([]str
 			return nil, err
 		}
 		keys[i] = fmt.Sprintf("u%d", i)
-		create[keys[i]] = account(local, spec.DomainID, spec.RoleID, secret)
+		create[keys[i]] = accountWithQuota(local, spec.DomainID, spec.RoleID, secret, spec.QuotaBytes)
 	}
 	raw, err := client.invoke(ctx, "b", "x:Account/set", map[string]any{"create": create})
 	if err != nil {

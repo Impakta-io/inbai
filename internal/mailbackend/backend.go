@@ -9,10 +9,25 @@ import (
 )
 
 // InboxSpec is an address to create in a domain.
+// QuotaBytes sets the account disk storage quota in bytes when greater than zero.
 type InboxSpec struct {
-	DomainID string
-	RoleID   string
-	Local    string
+	DomainID   string
+	RoleID     string
+	Local      string
+	QuotaBytes int64
+}
+
+// StorageQuota is the disk storage cap and usage for one inbox, in bytes.
+// LimitBytes zero means no storage cap is set on the account.
+type StorageQuota struct {
+	LimitBytes int64 `json:"limitBytes"`
+	UsedBytes  int64 `json:"usedBytes"`
+}
+
+// QuotaBackend is implemented by mail backends that read and set per-inbox storage quotas.
+type QuotaBackend interface {
+	GetStorageQuota(ctx context.Context, accountID string) (StorageQuota, error)
+	SetStorageQuota(ctx context.Context, accountID string, limitBytes int64) error
 }
 
 // File is one attachment submitted with a message.
