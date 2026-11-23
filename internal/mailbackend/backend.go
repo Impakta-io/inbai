@@ -23,9 +23,9 @@ type Outbound struct {
 
 // Message is one message stored for an inbox.
 type Message struct {
-	ID      string
-	Subject string
-	Preview string
+	ID      string `json:"id"`
+	Subject string `json:"subject"`
+	Preview string `json:"preview"`
 }
 
 // Backend is how the service layer stores and sends mail.

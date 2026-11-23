@@ -4,7 +4,7 @@ Status: current
 
 inbAI is a control plane in front of a mail server. It provisions domains and inboxes, holds agent identity and grants, enforces quotas, and delivers events. It does not implement SMTP, IMAP, or spam filtering.
 
-`inbai init` creates the Stalwart domain, operator, and service account described below. `inbai inbox create`, `inbai message send`, and `inbai message list` call the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet, and an operator is the only caller the CLI uses. `inbaid` still only prints its version. The API and MCP transports are not implemented. The rest of this document is the design the remaining code will follow.
+`inbai init` creates the Stalwart domain, operator, and service account described below. `inbai inbox create`, `inbai message send`, and `inbai message list` call the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet, and an operator is the only caller the CLI uses. `inbaid serve` is the HTTP transport for create, list, and send. MCP is not implemented. The rest of this document is the design the remaining code will follow.
 
 ## Components
 
@@ -70,7 +70,7 @@ Message retention defaults to 30 days. An operator can change or disable it per 
 
 ## API
 
-`api/openapi.yaml` is the contract. Routes live under `/v1`. Lists use cursor pagination. Create and send requests accept an `Idempotency-Key`. Errors use one JSON problem shape. The file in the repository is a skeleton, and the server does not serve the API yet.
+`api/openapi.yaml` is the contract. `inbaid serve` listens on `127.0.0.1:8787` and serves `POST /v1/inboxes`, `GET /v1/inboxes/{id}/messages`, and `POST /v1/inboxes/{id}/messages`. The caller presents `INBAI_OPERATOR_TOKEN` as a bearer token. Create and send accept an `Idempotency-Key`. A completed key returns the first result and does not send again. The default send quota is 50 messages per inbox per day and 500 per domain per day. Errors use RFC 9457 problem details. Quota and idempotency keys are kept in the server process until PostgreSQL is wired. Agent OAuth, cursor pagination, attachments, search, reply, and delete are not implemented.
 
 MCP tools are defined once and served two ways: Streamable HTTP at `/mcp` on `inbaid`, and stdio from `inbai mcp serve`. The HTTP transport has no protocol-level session, so it works behind a load balancer.
 

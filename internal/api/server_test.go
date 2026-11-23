@@ -1,0 +1,127 @@
+// Copyright 2026 Impakta-io
+// SPDX-License-Identifier: Apache-2.0
+
+package api
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/service"
+)
+
+func TestCreateListAndSend(t *testing.T) {
+	mail := &fakeMail{id: "alice-id", messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body"}}}
+	srv := httptest.NewServer((&Server{
+		Service:  service.New(mail),
+		Token:    "operator-token",
+		Domain:   "example.com",
+		DomainID: "dom",
+		RoleID:   "role",
+	}).Handler())
+	defer srv.Close()
+
+	if res := call(t, srv.URL, http.MethodPost, "/v1/inboxes", "nope", `{"localPart":"alice"}`, ""); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	res := call(t, srv.URL, http.MethodPost, "/v1/inboxes", "operator-token", `{"localPart":"alice"}`, "create-1")
+	if res.StatusCode != http.StatusCreated || !strings.Contains(readBody(t, res), `"address":"alice@example.com"`) {
+		body := ""
+		if res.Body != nil {
+			body = readBody(t, res)
+		}
+		t.Fatalf("create %d %s", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages", "operator-token", `{"from":"alice@example.com","to":"bob@example.com","subject":"hello","text":"body"}`, "send-1")
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("send %d %s", res.StatusCode, readBody(t, res))
+	}
+	res = call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages", "operator-token", `{"from":"alice@example.com","to":"bob@example.com","subject":"hello","text":"body"}`, "send-1")
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("replay %d %s", res.StatusCode, readBody(t, res))
+	}
+	if mail.sent != 1 {
+		t.Fatalf("sends %d, want the repeat of the same key to be skipped", mail.sent)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages", "operator-token", "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(readBody(t, res), `"subject":"hello"`) {
+		t.Fatalf("list %d", res.StatusCode)
+	}
+}
+
+func TestQuotaIsAProblem(t *testing.T) {
+	mail := &fakeMail{id: "alice-id"}
+	svc := service.New(mail)
+	svc.SetQuota(1, 500)
+	handler := (&Server{Service: svc, Token: "operator-token", Domain: "example.com"}).Handler()
+	body := `{"from":"alice@example.com","to":"bob@example.com","subject":"hi","text":"x"}`
+	first := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inboxes/alice-id/messages", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer operator-token")
+	handler.ServeHTTP(first, req)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first %d %s", first.Code, first.Body.String())
+	}
+	second := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/inboxes/alice-id/messages", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer operator-token")
+	handler.ServeHTTP(second, req)
+	if second.Code != http.StatusTooManyRequests || !strings.Contains(second.Body.String(), "send quota exceeded") {
+		t.Fatalf("quota %d %s", second.Code, second.Body.String())
+	}
+}
+
+func call(t *testing.T, base, method, path, token, body, idem string) *http.Response {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, base+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if idem != "" {
+		req.Header.Set("Idempotency-Key", idem)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func readBody(t *testing.T, res *http.Response) string {
+	t.Helper()
+	defer func() { _ = res.Body.Close() }()
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+type fakeMail struct {
+	id       string
+	messages []mailbackend.Message
+	sent     int
+}
+
+func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
+	return f.id, nil
+}
+
+func (f *fakeMail) Deliver(context.Context, mailbackend.Outbound) error {
+	f.sent++
+	return nil
+}
+
+func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
+	return f.messages, nil
+}

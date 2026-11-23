@@ -2,7 +2,7 @@ Status: current
 
 # Documentation
 
-`inbaid` does not serve the API yet. The operator CLI can create an inbox and submit or list mail through Stalwart. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
+The operator CLI can create an inbox and submit or list mail through Stalwart. `inbaid serve` exposes those operations over HTTP. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
 
 ## Use cases
 
@@ -27,7 +27,7 @@ Install, domain setup, the CLI, troubleshooting, and the quickstart describe the
 
 ## Agents that use inbAI
 
-These guides are outlines until the API and MCP server exist.
+The REST guide describes the routes `inbaid serve` implements. The other agent guides are outlines until MCP and the event feed exist.
 
 - [Overview](agents/overview.md)
 - [MCP](agents/mcp.md)

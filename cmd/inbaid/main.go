@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command inbaid is the control-plane server.
-// This build only prints its version.
 package main
 
 import (
-	"fmt"
 	"os"
-
-	"github.com/Impakta-io/inbai/internal/version"
 )
 
 func main() {
-	fmt.Println(version.String(version.Server))
-	os.Exit(0)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
 }
