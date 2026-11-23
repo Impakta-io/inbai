@@ -38,4 +38,4 @@ curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
 
 Permissions are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another. `POST /v1/agents/ada/suspend` stops the agent on the next call.
 
-The REST routes are in [REST](rest.md). The same mail operations are available over MCP. See [MCP](mcp.md). Message bodies returned by MCP are marked as external content. See [Untrusted mail](untrusted-mail.md).
+The REST routes are in [REST](rest.md). The same mail operations are available over MCP. See [MCP](mcp.md). Config files for common agent frameworks are in [examples](../../examples/README.md). Message bodies returned by MCP are marked as external content. See [Untrusted mail](untrusted-mail.md).
