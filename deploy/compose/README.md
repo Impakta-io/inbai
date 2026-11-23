@@ -38,7 +38,6 @@ Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart gener
 
 ## What is not here yet
 
-- `inbai doctor`
 - The inbAI server process
 - An authenticated outbound relay
 
