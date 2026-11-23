@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Impakta-io/inbai/internal/store"
 )
 
 const tokenTTL = 10 * time.Minute
@@ -28,6 +31,7 @@ type Directory struct {
 	audience string
 	now      func() time.Time
 
+	db        *store.Postgres
 	mu        sync.Mutex
 	clients   map[string]storedClient
 	suspended map[string]bool
@@ -58,6 +62,11 @@ func NewDirectory(key []byte, audience string) *Directory {
 	}
 }
 
+// SetDB stores client credentials and suspensions in PostgreSQL.
+func (d *Directory) SetDB(db *store.Postgres) {
+	d.db = db
+}
+
 // Create issues a client id and a secret. The secret is returned once.
 // The stored value is a hash. agent is the token subject.
 func (d *Directory) Create(agent string, operator bool) (string, string, error) {
@@ -73,6 +82,12 @@ func (d *Directory) Create(agent string, operator bool) (string, string, error) 
 		return "", "", err
 	}
 	sum := sha256.Sum256([]byte(secret))
+	if d.db != nil {
+		if err := d.db.SaveClient(context.Background(), id, agent, sum[:], operator); err != nil {
+			return "", "", err
+		}
+		return id, secret, nil
+	}
 	d.mu.Lock()
 	d.clients[id] = storedClient{hash: sum[:], agent: agent, operator: operator}
 	d.mu.Unlock()
@@ -82,11 +97,21 @@ func (d *Directory) Create(agent string, operator bool) (string, string, error) 
 // Exchange checks a client secret and returns a signed bearer token.
 func (d *Directory) Exchange(id, secret string) (string, int, error) {
 	sum := sha256.Sum256([]byte(secret))
-	d.mu.Lock()
-	client, ok := d.clients[id]
-	suspended := d.suspended[client.agent]
-	d.mu.Unlock()
-	if !ok || !hmac.Equal(sum[:], client.hash) || suspended {
+	var client storedClient
+	var ok bool
+	if d.db != nil {
+		agent, hash, operator, found, err := d.db.Client(context.Background(), id)
+		if err != nil {
+			return "", 0, err
+		}
+		client = storedClient{hash: hash, agent: agent, operator: operator}
+		ok = found
+	} else {
+		d.mu.Lock()
+		client, ok = d.clients[id]
+		d.mu.Unlock()
+	}
+	if !ok || !hmac.Equal(sum[:], client.hash) || d.Suspended(client.agent) {
 		return "", 0, ErrRejected
 	}
 	token, err := d.sign(claims{
@@ -103,6 +128,10 @@ func (d *Directory) Exchange(id, secret string) (string, int, error) {
 
 // Suspend stops an agent from exchanging a secret or using an existing token.
 func (d *Directory) Suspend(agent string) {
+	if d.db != nil {
+		_ = d.db.SuspendAgent(context.Background(), agent)
+		return
+	}
 	d.mu.Lock()
 	d.suspended[agent] = true
 	d.mu.Unlock()
@@ -110,6 +139,10 @@ func (d *Directory) Suspend(agent string) {
 
 // Suspended reports whether the agent is stopped.
 func (d *Directory) Suspended(agent string) bool {
+	if d.db != nil {
+		ok, err := d.db.AgentSuspended(context.Background(), agent)
+		return err == nil && ok
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.suspended[agent]

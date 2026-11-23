@@ -1,0 +1,166 @@
+// Copyright 2026 Impakta-io
+// SPDX-License-Identifier: Apache-2.0
+
+package store
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// SaveGrant records one permission. A repeat is the same grant.
+func (p *Postgres) SaveGrant(ctx context.Context, agent, inbox, permission string) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO access_grant (agent, inbox, permission) VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING`, agent, inbox, permission)
+	return err
+}
+
+// HasGrant reports whether that permission is stored.
+func (p *Postgres) HasGrant(ctx context.Context, agent, inbox, permission string) (bool, error) {
+	var ok bool
+	err := p.pool.QueryRow(ctx, `
+SELECT EXISTS(SELECT 1 FROM access_grant WHERE agent = $1 AND inbox = $2 AND permission = $3)`,
+		agent, inbox, permission).Scan(&ok)
+	return ok, err
+}
+
+// Consume adds one to both counters when each is still under its limit.
+// A rejected consume leaves both counters unchanged.
+func (p *Postgres) Consume(ctx context.Context, inboxKey, domainKey string, inboxLimit, domainLimit int) (bool, error) {
+	if inboxLimit <= 0 || domainLimit <= 0 {
+		return false, nil
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	ok, err := bump(ctx, tx, inboxKey, inboxLimit)
+	if err != nil || !ok {
+		return false, err
+	}
+	ok, err = bump(ctx, tx, domainKey, domainLimit)
+	if err != nil || !ok {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func bump(ctx context.Context, tx pgx.Tx, key string, limit int) (bool, error) {
+	var used int
+	err := tx.QueryRow(ctx, `
+INSERT INTO quota_counter (bucket, used) VALUES ($1, 1)
+ON CONFLICT (bucket) DO UPDATE SET used = quota_counter.used + 1
+WHERE quota_counter.used < $2
+RETURNING used`, key, limit).Scan(&used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Refund removes one use from each counter. A missing counter stays missing.
+func (p *Postgres) Refund(ctx context.Context, inboxKey, domainKey string) error {
+	_, err := p.pool.Exec(ctx, `
+UPDATE quota_counter SET used = GREATEST(used - 1, 0) WHERE bucket = $1 OR bucket = $2`, inboxKey, domainKey)
+	return err
+}
+
+// SaveIdempotency stores the first result for a key. A repeat does not replace it.
+func (p *Postgres) SaveIdempotency(ctx context.Context, kind, key, payload string) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO idempotency (kind, key, payload) VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING`, kind, key, payload)
+	return err
+}
+
+// Idempotency returns the stored payload. ok is false when the key is new.
+func (p *Postgres) Idempotency(ctx context.Context, kind, key string) (string, bool, error) {
+	var payload string
+	err := p.pool.QueryRow(ctx, `SELECT payload FROM idempotency WHERE kind = $1 AND key = $2`, kind, key).Scan(&payload)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return payload, err == nil, err
+}
+
+// JobRow is one bulk-create job stored for another process to read.
+type JobRow struct {
+	ID      string
+	Status  string
+	Total   int
+	Created int
+	Error   string
+	Inboxes []byte
+}
+
+// SaveJob inserts a job. The inboxes value is JSON.
+func (p *Postgres) SaveJob(ctx context.Context, row JobRow) error {
+	if row.Inboxes == nil {
+		row.Inboxes = []byte("[]")
+	}
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO bulk_job (id, status, total, created, error, inboxes)
+VALUES ($1, $2, $3, $4, $5, $6)`, row.ID, row.Status, row.Total, row.Created, row.Error, row.Inboxes)
+	return err
+}
+
+// UpdateJob replaces the status of a job that was already saved.
+func (p *Postgres) UpdateJob(ctx context.Context, row JobRow) error {
+	if row.Inboxes == nil {
+		row.Inboxes = []byte("[]")
+	}
+	_, err := p.pool.Exec(ctx, `
+UPDATE bulk_job SET status = $2, created = $3, error = $4, inboxes = $5 WHERE id = $1`,
+		row.ID, row.Status, row.Created, row.Error, row.Inboxes)
+	return err
+}
+
+// Job reads one job. ok is false when the id is unknown.
+func (p *Postgres) Job(ctx context.Context, id string) (JobRow, bool, error) {
+	var row JobRow
+	err := p.pool.QueryRow(ctx, `
+SELECT id, status, total, created, error, inboxes FROM bulk_job WHERE id = $1`, id).
+		Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return JobRow{}, false, nil
+	}
+	return row, err == nil, err
+}
+
+// SaveClient stores a hashed client secret. The plaintext secret is not stored.
+func (p *Postgres) SaveClient(ctx context.Context, id, agent string, hash []byte, operator bool) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO agent_credential (id, agent, secret_hash, operator) VALUES ($1, $2, $3, $4)`, id, agent, hash, operator)
+	return err
+}
+
+// Client returns one credential. ok is false when the id is unknown.
+func (p *Postgres) Client(ctx context.Context, id string) (agent string, hash []byte, operator bool, ok bool, err error) {
+	err = p.pool.QueryRow(ctx, `
+SELECT agent, secret_hash, operator FROM agent_credential WHERE id = $1`, id).Scan(&agent, &hash, &operator)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, false, false, nil
+	}
+	return agent, hash, operator, err == nil, err
+}
+
+// SuspendAgent records that the agent may no longer exchange a secret or use a token.
+func (p *Postgres) SuspendAgent(ctx context.Context, agent string) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO agent_suspension (agent) VALUES ($1) ON CONFLICT DO NOTHING`, agent)
+	return err
+}
+
+// AgentSuspended reports whether SuspendAgent has been recorded.
+func (p *Postgres) AgentSuspended(ctx context.Context, agent string) (bool, error) {
+	var ok bool
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_suspension WHERE agent = $1)`, agent).Scan(&ok)
+	return ok, err
+}

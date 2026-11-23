@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
@@ -17,6 +19,7 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 		t.Skip("INBAI_TEST_DATABASE is not set")
 	}
 	ctx := context.Background()
+	lockTestDB(t, dsn)
 	first, err := Open(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +73,23 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 }
 
 func reset(ctx context.Context, db *Postgres) error {
-	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression`)
+	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression, access_grant, quota_counter, idempotency, bulk_job, agent_credential, agent_suspension`)
 	return err
+}
+
+func lockTestDB(t *testing.T, dsn string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(424242)`); err != nil {
+		_ = conn.Close(ctx)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock(424242)`)
+		_ = conn.Close(context.Background())
+	})
 }
