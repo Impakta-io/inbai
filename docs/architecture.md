@@ -66,7 +66,7 @@ The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is
 
 `GET /v1/events` long-polls an ordered, at-least-once feed for one inbox. `POST /v1/webhooks` registers a consumer. Deliveries are signed with `X-Inbai-Signature` and retried with backoff. The record is a JMAP state cursor in PostgreSQL, opened with `INBAI_DATABASE_URL`. `POST /v1/hooks/ingest` accepts a Stalwart `message-ingest` hint and matches the recipient address. A `delivery.dsn-perm-fail` event suppresses that recipient, and a later send is rejected before quota is consumed. Temporary delivery failures are not recorded. Stopping `inbaid` does not drop events, suppressions, grants, quota counters, idempotency keys, jobs, client credentials, or audit events that have been written. Without the database URL the event routes answer 503, and grants, quotas, idempotency keys, jobs, credentials, and the audit log stay in that process. `/healthz`, `/readyz`, and `/metrics` are served on the same listener.
 
-Message retention defaults to 30 days. An operator can change or disable it per server or per inbox.
+Message retention defaults to 30 days. `inbai retention` reads or changes that period for the server or one inbox. Zero keeps mail. `inbaid` deletes a message once it is older than the period. A message with no received time is kept. With `INBAI_DATABASE_URL` set, the period is in PostgreSQL. Without it, the period stays in that process and the config file still holds the server value.
 
 ## API
 

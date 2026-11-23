@@ -153,6 +153,50 @@ paths:
           description: Actions in order
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/retention:
+    get:
+      operationId: getRetention
+      summary: Read how many days the server or one inbox keeps mail. Zero keeps mail.
+      parameters:
+        - name: inbox
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The stored period, or the server default when no row is stored.
+        "403":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setRetention
+      summary: Set how many days the server or one inbox keeps mail. Zero keeps mail.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [days]
+              properties:
+                days:
+                  type: integer
+                  minimum: 0
+                inbox:
+                  type: string
+      responses:
+        "200":
+          description: Stored
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/retention/run:
+    post:
+      operationId: runRetention
+      summary: Delete mail older than the retention period. A message with no received time is kept.
+      responses:
+        "200":
+          description: Count of deleted messages
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes:
     post:
       operationId: createInbox
@@ -683,6 +727,9 @@ components:
           type: string
         preview:
           type: string
+        receivedAt:
+          type: string
+          format: date-time
         text:
           type: string
         messageId:

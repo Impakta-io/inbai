@@ -120,6 +120,7 @@ func toMessage(message Message) mailbackend.Message {
 		MessageID:   message.MessageID,
 		InReplyTo:   message.InReplyTo,
 		References:  message.References,
+		ReceivedAt:  message.ReceivedAt,
 		Attachments: files,
 	}
 }

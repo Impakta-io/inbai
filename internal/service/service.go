@@ -69,6 +69,7 @@ type Service struct {
 	createdID map[string]string
 	jobs      map[string]*Job
 	generated map[string]GenerateResult
+	keep      map[string]int
 	feed      *events.Feed
 	db        *store.Postgres
 	audit     []store.AuditRow

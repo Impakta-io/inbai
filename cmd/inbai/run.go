@@ -41,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		return agentCmd(args[1:], stdout, stderr, getenv)
 	case "audit":
 		return auditCmd(args[1:], stdout, stderr, getenv)
+	case "retention":
+		return retentionCmd(args[1:], stdout, stderr, getenv)
 	case "mcp":
 		return mcpCmd(args[1:], os.Stdin, stdout, stderr, getenv)
 	case "backup":
@@ -48,7 +50,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	case "restore":
 		return restoreCmd(args[1:], stdout, stderr, getenv)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message|agent|audit|mcp|backup|restore]\n")
+		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message|agent|audit|retention|mcp|backup|restore]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])

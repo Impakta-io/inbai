@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
@@ -29,7 +30,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":          accountID,
 		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments"},
+		"properties":         []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments"},
 		"fetchAllBodyValues": true,
 	})
 	if err != nil {
@@ -98,9 +99,9 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 	if len(ids) == 0 {
 		return nil, "", nil
 	}
-	props := []string{"subject", "preview"}
+	props := []string{"subject", "preview", "receivedAt"}
 	if full {
-		props = []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues"}
+		props = []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues"}
 	}
 	raw, err = client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":  accountID,
@@ -117,12 +118,13 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 	var got struct {
 		List []struct {
-			ID         string   `json:"id"`
-			Subject    string   `json:"subject"`
-			Preview    string   `json:"preview"`
-			MessageID  []string `json:"messageId"`
-			InReplyTo  []string `json:"inReplyTo"`
-			References []string `json:"references"`
+			ID         string    `json:"id"`
+			Subject    string    `json:"subject"`
+			Preview    string    `json:"preview"`
+			MessageID  []string  `json:"messageId"`
+			InReplyTo  []string  `json:"inReplyTo"`
+			References []string  `json:"references"`
+			ReceivedAt time.Time `json:"receivedAt"`
 			TextBody   []struct {
 				PartID string `json:"partId"`
 			} `json:"textBody"`
@@ -142,7 +144,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 	}
 	out := make([]Message, len(got.List))
 	for i, item := range got.List {
-		out[i] = Message{ID: item.ID, Subject: item.Subject, Preview: item.Preview}
+		out[i] = Message{ID: item.ID, Subject: item.Subject, Preview: item.Preview, ReceivedAt: item.ReceivedAt}
 		if !full {
 			continue
 		}

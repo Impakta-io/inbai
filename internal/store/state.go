@@ -194,3 +194,39 @@ func (p *Postgres) AgentSuspended(ctx context.Context, agent string) (bool, erro
 	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_suspension WHERE agent = $1)`, agent).Scan(&ok)
 	return ok, err
 }
+
+// SaveRetention stores how many days a scope keeps mail. Zero disables deletion.
+func (p *Postgres) SaveRetention(ctx context.Context, scope string, days int) error {
+	_, err := p.pool.Exec(ctx, `
+INSERT INTO retention_policy (scope, days) VALUES ($1, $2)
+ON CONFLICT (scope) DO UPDATE SET days = EXCLUDED.days`, scope, days)
+	return err
+}
+
+// Retention returns the stored days. ok is false when the scope has no row.
+func (p *Postgres) Retention(ctx context.Context, scope string) (int, bool, error) {
+	var days int
+	err := p.pool.QueryRow(ctx, `SELECT days FROM retention_policy WHERE scope = $1`, scope).Scan(&days)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	return days, err == nil, err
+}
+
+// ListRetention returns every stored retention row.
+func (p *Postgres) ListRetention(ctx context.Context) ([]RetentionRow, error) {
+	rows, err := p.pool.Query(ctx, `SELECT scope, days FROM retention_policy ORDER BY scope`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RetentionRow
+	for rows.Next() {
+		var row RetentionRow
+		if err := rows.Scan(&row.Scope, &row.Days); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}

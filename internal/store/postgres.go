@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS audit_event (
     action text NOT NULL,
     target text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS retention_policy (
+    scope text PRIMARY KEY,
+    days int NOT NULL
+);
 `
 
 // Postgres is the event log that survives an inbaid restart.
@@ -423,6 +427,9 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 	if err := readAudit(ctx, tx, &snap); err != nil {
 		return Snapshot{}, err
 	}
+	if err := readRetention(ctx, tx, &snap); err != nil {
+		return Snapshot{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -478,6 +485,9 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		return err
 	}
 	if err := writeAudit(ctx, tx, snap); err != nil {
+		return err
+	}
+	if err := writeRetention(ctx, tx, snap); err != nil {
 		return err
 	}
 	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
@@ -657,6 +667,37 @@ func writeAudit(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
 		}
 	}
 	return setIdentity(ctx, tx, "audit_event", "id", max)
+}
+
+func readRetention(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
+	rows, err := tx.Query(ctx, `SELECT scope, days FROM retention_policy ORDER BY scope`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row RetentionRow
+		if err := rows.Scan(&row.Scope, &row.Days); err != nil {
+			return err
+		}
+		snap.Retention = append(snap.Retention, row)
+	}
+	return rows.Err()
+}
+
+func writeRetention(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
+	if snap.Retention == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `TRUNCATE retention_policy`); err != nil {
+		return err
+	}
+	for _, row := range snap.Retention {
+		if _, err := tx.Exec(ctx, `INSERT INTO retention_policy (scope, days) VALUES ($1, $2)`, row.Scope, row.Days); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeGrants(ctx context.Context, tx pgx.Tx, snap Snapshot) error {

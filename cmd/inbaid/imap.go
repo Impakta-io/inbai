@@ -13,6 +13,7 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/api"
 	"github.com/Impakta-io/inbai/internal/auth"
+	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend/imap"
 	"github.com/Impakta-io/inbai/internal/service"
@@ -64,15 +65,17 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		go feed.Run(context.Background(), backend, nil)
 	}
 	handler := (&api.Server{
-		Service:      svc,
-		Directory:    directory,
-		Token:        getenv("INBAI_OPERATOR_TOKEN"),
-		Issuer:       "http://" + addr,
-		Domain:       domain,
-		DomainID:     "external",
-		RoleID:       "external",
-		IngestSecret: getenv("INBAI_INGEST_SECRET"),
+		Service:       svc,
+		Directory:     directory,
+		Token:         getenv("INBAI_OPERATOR_TOKEN"),
+		Issuer:        "http://" + addr,
+		Domain:        domain,
+		DomainID:      "external",
+		RoleID:        "external",
+		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
+		RetentionDays: config.DefaultRetentionDays,
 	}).Handler()
+	go retainLoop(svc, config.DefaultRetentionDays, stderr)
 	writef(stdout, "listening on %s\n", addr)
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if err := server.ListenAndServe(); err != nil {

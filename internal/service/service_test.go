@@ -237,6 +237,7 @@ type fakeMail struct {
 	sendErr  error
 	got      bool
 	deleted  bool
+	removed  []string
 	dir      bool
 	last     mailbackend.Outbound
 	batches  []int
@@ -291,8 +292,9 @@ func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, er
 	return f.messages[0], nil
 }
 
-func (f *fakeMail) Delete(context.Context, string, string) error {
+func (f *fakeMail) Delete(_ context.Context, _, id string) error {
 	f.deleted = true
+	f.removed = append(f.removed, id)
 	return nil
 }
 

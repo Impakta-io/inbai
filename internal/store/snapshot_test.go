@@ -120,6 +120,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.AppendAudit(ctx, "operator", "grant", "ada inbox-a read"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SaveRetention(ctx, "server", 14); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +182,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || len(audits) != 1 || audits[0].Action != "grant" || audits[0].Target != "ada inbox-a read" {
 		t.Fatalf("audit %+v err %v", audits, err)
 	}
+	days, ok, err := db.Retention(ctx, "server")
+	if err != nil || !ok || days != 14 {
+		t.Fatalf("retention %d ok %v err %v", days, ok, err)
+	}
 }
 
 func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
@@ -186,7 +193,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

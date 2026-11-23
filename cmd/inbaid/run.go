@@ -116,15 +116,17 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		go feed.Run(context.Background(), stalwart.Mail{Client: client}, nil)
 	}
 	handler := (&api.Server{
-		Service:      svc,
-		Directory:    directory,
-		Token:        token,
-		Issuer:       issuer,
-		Domain:       cfg.Domain,
-		DomainID:     cfg.DomainID,
-		RoleID:       cfg.InboxRoleID,
-		IngestSecret: getenv("INBAI_INGEST_SECRET"),
+		Service:       svc,
+		Directory:     directory,
+		Token:         token,
+		Issuer:        issuer,
+		Domain:        cfg.Domain,
+		DomainID:      cfg.DomainID,
+		RoleID:        cfg.InboxRoleID,
+		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
+		RetentionDays: cfg.RetentionDays,
 	}).Handler()
+	go retainLoop(svc, cfg.RetentionDays, stderr)
 	writef(stdout, "listening on %s\n", *addr)
 	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if err := server.ListenAndServe(); err != nil {
@@ -132,6 +134,21 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		return 1
 	}
 	return 0
+}
+
+func retainLoop(svc *service.Service, days int, stderr io.Writer) {
+	sweep := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if _, err := svc.Sweep(ctx, service.Caller{Operator: true}, days); err != nil {
+			writef(stderr, "retention: %s\n", err)
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(time.Hour)
+	for range ticker.C {
+		sweep()
+	}
 }
 
 func configPathOf(explicit string) (string, error) {

@@ -25,14 +25,15 @@ import (
 
 // Server is the REST transport. It authenticates the caller and calls the service layer.
 type Server struct {
-	Service      *service.Service
-	Directory    *auth.Directory
-	Token        string
-	Issuer       string
-	Domain       string
-	DomainID     string
-	RoleID       string
-	IngestSecret string
+	Service       *service.Service
+	Directory     *auth.Directory
+	Token         string
+	Issuer        string
+	Domain        string
+	DomainID      string
+	RoleID        string
+	IngestSecret  string
+	RetentionDays int
 }
 
 type callerKey struct{}
@@ -58,6 +59,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
 	mux.HandleFunc("DELETE /v1/grants/{agent}/{inbox}/{permission}", s.revokeGrant)
 	mux.HandleFunc("GET /v1/audit", s.audit)
+	mux.HandleFunc("GET /v1/retention", s.getRetention)
+	mux.HandleFunc("PUT /v1/retention", s.putRetention)
+	mux.HandleFunc("POST /v1/retention/run", s.runRetention)
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes", s.listInboxes)
 	mux.HandleFunc("DELETE /v1/inboxes/{id}", s.deleteInbox)
@@ -267,6 +271,44 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
 		body["next"] = next
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+func (s *Server) getRetention(w http.ResponseWriter, r *http.Request) {
+	inbox := r.URL.Query().Get("inbox")
+	days, set, err := s.Service.RetentionDays(s.requestCaller(r), inbox)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if !set && inbox == "" {
+		days = s.RetentionDays
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"days": days, "inbox": inbox, "override": set})
+}
+
+func (s *Server) putRetention(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Days  *int   `json:"days"`
+		Inbox string `json:"inbox"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Days == nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "days is required")
+		return
+	}
+	if err := s.Service.SetRetention(s.requestCaller(r), body.Inbox, *body.Days); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"days": *body.Days, "inbox": body.Inbox, "override": true})
+}
+
+func (s *Server) runRetention(w http.ResponseWriter, r *http.Request) {
+	deleted, err := s.Service.Sweep(r.Context(), s.requestCaller(r), s.RetentionDays)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
 }
 
 func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type item struct {
@@ -160,6 +161,25 @@ func subjectOf(header []byte) string {
 		}
 	}
 	return ""
+}
+
+func internalDate(text string) time.Time {
+	fields := strings.Fields(text)
+	for i, field := range fields {
+		if !strings.EqualFold(field, "INTERNALDATE") || i+1 >= len(fields) {
+			continue
+		}
+		raw := strings.Trim(fields[i+1], "\"")
+		if i+2 < len(fields) && i+3 < len(fields) {
+			raw = strings.Trim(fields[i+1], "\"") + " " + fields[i+2] + " " + strings.Trim(fields[i+3], "\"")
+		}
+		parsed, err := time.Parse("02-Jan-2006 15:04:05 -0700", raw)
+		if err != nil {
+			return time.Time{}
+		}
+		return parsed.UTC()
+	}
+	return time.Time{}
 }
 
 func formatState(validity, next int) string {

@@ -278,7 +278,7 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 			messages = []mailbackend.Message{}
 			return nil
 		}
-		items, err = s.command("UID", "FETCH", strings.Join(kept, ","), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+		items, err = s.command("UID", "FETCH", strings.Join(kept, ","), "(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
 		if err != nil {
 			return err
 		}
@@ -291,7 +291,7 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 			if len(item.literals) > 0 {
 				header = item.literals[0]
 			}
-			messages = append(messages, mailbackend.Message{ID: id, Subject: subjectOf(header)})
+			messages = append(messages, mailbackend.Message{ID: id, Subject: subjectOf(header), ReceivedAt: internalDate(item.text)})
 		}
 		return nil
 	})

@@ -3,7 +3,10 @@
 
 package mailbackend
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // InboxSpec is an address to create in a domain.
 type InboxSpec struct {
@@ -54,6 +57,7 @@ type Message struct {
 	MessageID   []string     `json:"messageId,omitempty"`
 	InReplyTo   []string     `json:"inReplyTo,omitempty"`
 	References  []string     `json:"references,omitempty"`
+	ReceivedAt  time.Time    `json:"receivedAt,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 

@@ -117,6 +117,36 @@ func (c apiClient) audit(ctx context.Context, after int64, limit int) ([]apiAudi
 	return out.Events, out.Next, err
 }
 
+type apiRetention struct {
+	Days     int    `json:"days"`
+	Inbox    string `json:"inbox"`
+	Override bool   `json:"override"`
+}
+
+func (c apiClient) retention(ctx context.Context, inbox string) (apiRetention, error) {
+	path := "/v1/retention"
+	if inbox != "" {
+		path += "?inbox=" + url.QueryEscape(inbox)
+	}
+	var out apiRetention
+	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+func (c apiClient) setRetention(ctx context.Context, inbox string, days int) (apiRetention, error) {
+	var out apiRetention
+	_, err := c.call(ctx, http.MethodPut, "/v1/retention", map[string]any{"inbox": inbox, "days": days}, &out)
+	return out, err
+}
+
+func (c apiClient) runRetention(ctx context.Context) (int, error) {
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+	_, err := c.call(ctx, http.MethodPost, "/v1/retention/run", map[string]any{}, &out)
+	return out.Deleted, err
+}
+
 func (c apiClient) createInbox(ctx context.Context, local string) (apiInbox, error) {
 	var out apiInbox
 	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes", map[string]string{"localPart": local}, &out)

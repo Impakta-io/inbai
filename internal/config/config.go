@@ -3,8 +3,8 @@
 
 package config
 
-// DefaultRetentionDays is the retention period inbai init reports.
-// An operator can change or disable retention per server or per inbox.
+// DefaultRetentionDays is the retention period inbai init writes.
+// Zero keeps mail. The server deletes a message once it is older than the period.
 const DefaultRetentionDays = 30
 
 // DefaultAPIURL is where inbaid serve listens unless --addr is set.

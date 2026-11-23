@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: partial — `init`, `domain add`, `doctor`, inbox create, list, generate, and delete, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `retention`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
 
 # CLI
 
@@ -58,6 +58,10 @@ Delivery to another server still depends on the DNS records from `domain add` an
 ## audit
 
 `inbai audit` prints actions that created an agent, granted or revoked a permission, suspended an agent, or created or deleted an inbox. `--after` asks for rows after an id. `--limit` sets the page size. A line that starts with `next` is the id to pass back. `--json` prints the API response. The command uses the operator token. A secret is not written in the log.
+
+## retention
+
+`inbai retention` prints how many days the server keeps mail. `--days 14` changes that and writes it into the config file. `--days 0` keeps mail. `--inbox <id> --days 7` sets one inbox and leaves the server period alone. `inbai retention run` deletes mail older than the period now. `inbaid` also does that about once an hour. A message with no received time is kept. `--json` prints the API response. The commands use the operator token.
 
 ## mcp serve
 

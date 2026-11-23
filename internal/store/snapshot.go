@@ -63,6 +63,12 @@ type JobSnap struct {
 	Inboxes json.RawMessage `json:"inboxes"`
 }
 
+// RetentionRow is the number of days one scope keeps mail. Zero disables deletion.
+type RetentionRow struct {
+	Scope string `json:"scope"`
+	Days  int    `json:"days"`
+}
+
 // AuditRow is one operator action. It does not contain secrets or message bodies.
 type AuditRow struct {
 	ID     int64     `json:"id"`
@@ -97,6 +103,7 @@ type Snapshot struct {
 	Clients       []ClientRow      `json:"clients"`
 	Suspensions   []string         `json:"suspensions"`
 	Audits        []AuditRow       `json:"audits"`
+	Retention     []RetentionRow   `json:"retention"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -282,6 +289,11 @@ func (s Snapshot) check() error {
 		}
 		seenAudit[row.ID] = struct{}{}
 	}
+	for _, row := range s.Retention {
+		if row.Scope == "" || row.Days < 0 {
+			return fmt.Errorf("retention %q is incomplete", row.Scope)
+		}
+	}
 	return nil
 }
 
@@ -300,5 +312,6 @@ func emptySnapshot() Snapshot {
 		Clients:       []ClientRow{},
 		Suspensions:   []string{},
 		Audits:        []AuditRow{},
+		Retention:     []RetentionRow{},
 	}
 }

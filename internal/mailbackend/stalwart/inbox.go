@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
@@ -40,6 +41,7 @@ type Message struct {
 	MessageID   []string     `json:"messageId,omitempty"`
 	InReplyTo   []string     `json:"inReplyTo,omitempty"`
 	References  []string     `json:"references,omitempty"`
+	ReceivedAt  time.Time    `json:"receivedAt,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
