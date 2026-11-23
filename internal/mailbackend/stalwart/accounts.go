@@ -11,54 +11,67 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
-// ListInboxes returns every account, paging the query until it is exhausted.
-func ListInboxes(ctx context.Context, client *Client) ([]mailAccount, error) {
+// ListInboxes returns one page of accounts. The next cursor is the last id when another page remains.
+func ListInboxes(ctx context.Context, client *Client, page mailbackend.Page) ([]mailAccount, string, error) {
 	if client == nil {
-		return nil, fmt.Errorf("missing stalwart client")
+		return nil, "", fmt.Errorf("missing stalwart client")
 	}
-	var out []mailAccount
-	for position := 0; ; position += 200 {
-		raw, err := client.invoke(ctx, "q", "x:Account/query", map[string]any{
-			"position": position,
-			"limit":    200,
-		})
-		if err != nil {
-			return nil, err
-		}
-		var query struct {
-			IDs []string `json:"ids"`
-		}
-		if err := json.Unmarshal(raw, &query); err != nil {
-			return nil, err
-		}
-		if len(query.IDs) == 0 {
-			return out, nil
-		}
-		raw, err = client.invoke(ctx, "g", "x:Account/get", map[string]any{
-			"ids":        query.IDs,
-			"properties": []string{"name"},
-		})
-		if err != nil {
-			return nil, err
-		}
-		var got struct {
-			List []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"list"`
-		}
-		if err := json.Unmarshal(raw, &got); err != nil {
-			return nil, err
-		}
-		for _, item := range got.List {
-			out = append(out, mailAccount{ID: item.ID, Local: item.Name})
-		}
-		if len(query.IDs) < 200 {
-			return out, nil
-		}
+	limit, err := page.Bound()
+	if err != nil {
+		return nil, "", err
 	}
+	args := map[string]any{"limit": limit + 1}
+	if page.After != "" {
+		args["anchor"] = page.After
+		args["anchorOffset"] = 1
+	}
+	raw, err := client.invoke(ctx, "q", "x:Account/query", args)
+	if err != nil {
+		if strings.Contains(err.Error(), "anchorNotFound") {
+			return nil, "", mailbackend.ErrPage
+		}
+		return nil, "", err
+	}
+	var query struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &query); err != nil {
+		return nil, "", err
+	}
+	ids := query.IDs
+	next := ""
+	if len(ids) > limit {
+		next = ids[limit-1]
+		ids = ids[:limit]
+	}
+	if len(ids) == 0 {
+		return nil, "", nil
+	}
+	raw, err = client.invoke(ctx, "g", "x:Account/get", map[string]any{
+		"ids":        ids,
+		"properties": []string{"name"},
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	var got struct {
+		List []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return nil, "", err
+	}
+	out := make([]mailAccount, 0, len(got.List))
+	for _, item := range got.List {
+		out = append(out, mailAccount{ID: item.ID, Local: item.Name})
+	}
+	return out, next, nil
 }
 
 type mailAccount struct {

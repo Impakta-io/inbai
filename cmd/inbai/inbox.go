@@ -9,7 +9,6 @@ import (
 	"flag"
 	"io"
 	"mime"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +74,8 @@ func inboxList(args []string, stdout, stderr io.Writer, getenv func(string) stri
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "config file")
 	asJSON := fs.Bool("json", false, "print JSON")
+	cursor := fs.String("cursor", "", "opaque cursor from the previous page")
+	limit := fs.Int("limit", 0, "page size, from 1 to 100")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -84,21 +85,28 @@ func inboxList(args []string, stdout, stderr io.Writer, getenv func(string) stri
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	inboxes, err := client.listInboxes(ctx)
+	inboxes, next, err := client.listInboxes(ctx, *cursor, *limit)
 	if err != nil {
 		writef(stderr, "inbox list: %s\n", err)
 		return 1
 	}
 	if *asJSON {
-		emit(stdout, true, "", map[string]any{"inboxes": inboxes})
+		body := map[string]any{"inboxes": inboxes}
+		if next != "" {
+			body["next"] = next
+		}
+		emit(stdout, true, "", body)
 		return 0
 	}
 	if len(inboxes) == 0 {
 		writef(stdout, "No inboxes.\n")
-		return 0
+	} else {
+		for _, inbox := range inboxes {
+			writef(stdout, "%s\t%s\n", inbox.Address, inbox.ID)
+		}
 	}
-	for _, inbox := range inboxes {
-		writef(stdout, "%s\t%s\n", inbox.Address, inbox.ID)
+	if next != "" {
+		writef(stdout, "next %s\n", next)
 	}
 	return 0
 }
@@ -169,6 +177,8 @@ func messageList(args []string, stdout, stderr io.Writer, getenv func(string) st
 	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	query := fs.String("query", "", "search message text")
+	cursor := fs.String("cursor", "", "opaque cursor from the previous page")
+	limit := fs.Int("limit", 0, "page size, from 1 to 100")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -187,21 +197,28 @@ func messageList(args []string, stdout, stderr io.Writer, getenv func(string) st
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	messages, err := client.listMessages(ctx, accountID, url.QueryEscape(*query))
+	messages, next, err := client.listMessages(ctx, accountID, *query, *cursor, *limit)
 	if err != nil {
 		writef(stderr, "message list: %s\n", err)
 		return 1
 	}
 	if *asJSON {
-		emit(stdout, true, "", map[string]any{"messages": messages})
+		body := map[string]any{"messages": messages}
+		if next != "" {
+			body["next"] = next
+		}
+		emit(stdout, true, "", body)
 		return 0
 	}
 	if len(messages) == 0 {
 		writef(stdout, "No messages.\n")
-		return 0
+	} else {
+		for _, message := range messages {
+			writef(stdout, "%s\t%s\n", message.Subject, message.Preview)
+		}
 	}
-	for _, message := range messages {
-		writef(stdout, "%s\t%s\n", message.Subject, message.Preview)
+	if next != "" {
+		writef(stdout, "next %s\n", next)
 	}
 	return 0
 }

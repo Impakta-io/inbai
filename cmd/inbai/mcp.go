@@ -121,10 +121,7 @@ type apiBox struct {
 }
 
 func (b apiBox) List(ctx context.Context, inbox, query string) ([]mailbackend.Message, error) {
-	if query != "" {
-		query = url.QueryEscape(query)
-	}
-	messages, err := b.client.listMessages(ctx, inbox, query)
+	messages, _, err := b.client.listMessages(ctx, inbox, query, "", 0)
 	return toMessages(messages), err
 }
 

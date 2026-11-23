@@ -207,19 +207,33 @@ func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbou
 
 // List returns messages in an inbox. An operator may always read.
 // An agent needs a read grant for that account.
-func (s *Service) List(ctx context.Context, caller Caller, accountID string) ([]mailbackend.Message, error) {
+func (s *Service) List(ctx context.Context, caller Caller, accountID string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	if !s.allowed(caller, accountID, PermRead) {
-		return nil, ErrForbidden
+		return nil, "", ErrForbidden
 	}
-	return s.mail.List(ctx, accountID)
+	if _, err := page.Bound(); err != nil {
+		return nil, "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
+	messages, next, err := s.mail.List(ctx, accountID, page)
+	if errors.Is(err, mailbackend.ErrPage) {
+		return nil, "", fmt.Errorf("%w: cursor was not found", ErrInvalid)
+	}
+	return messages, next, err
 }
 
 // Search returns messages matching text. It uses the same read grant as List.
-func (s *Service) Search(ctx context.Context, caller Caller, accountID, query string) ([]mailbackend.Message, error) {
+func (s *Service) Search(ctx context.Context, caller Caller, accountID, query string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	if !s.allowed(caller, accountID, PermRead) {
-		return nil, ErrForbidden
+		return nil, "", ErrForbidden
 	}
-	return s.mail.Search(ctx, accountID, query)
+	if _, err := page.Bound(); err != nil {
+		return nil, "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
+	messages, next, err := s.mail.Search(ctx, accountID, query, page)
+	if errors.Is(err, mailbackend.ErrPage) {
+		return nil, "", fmt.Errorf("%w: cursor was not found", ErrInvalid)
+	}
+	return messages, next, err
 }
 
 // Get returns one message. It uses the same read grant as List.
@@ -239,13 +253,19 @@ func (s *Service) Delete(ctx context.Context, caller Caller, accountID, messageI
 }
 
 // ListInboxes returns every account. Only an operator may do that.
-func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string) ([]Inbox, error) {
+func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string, page mailbackend.Page) ([]Inbox, string, error) {
 	if !caller.Operator {
-		return nil, ErrForbidden
+		return nil, "", ErrForbidden
 	}
-	accounts, err := s.mail.ListInboxes(ctx)
+	if _, err := page.Bound(); err != nil {
+		return nil, "", fmt.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
+	accounts, next, err := s.mail.ListInboxes(ctx, page)
+	if errors.Is(err, mailbackend.ErrPage) {
+		return nil, "", fmt.Errorf("%w: cursor was not found", ErrInvalid)
+	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]Inbox, 0, len(accounts))
 	for _, account := range accounts {
@@ -255,7 +275,7 @@ func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string)
 		}
 		out = append(out, Inbox{ID: account.ID, Address: address})
 	}
-	return out, nil
+	return out, next, nil
 }
 
 // DeleteInbox removes one account. Only an operator may do that.

@@ -39,20 +39,20 @@ func (m Mail) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	})
 }
 
-func (m Mail) List(ctx context.Context, accountID string) ([]mailbackend.Message, error) {
-	raw, err := ListMessages(ctx, m.Client, accountID)
+func (m Mail) List(ctx context.Context, accountID string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	raw, next, err := queryMessages(ctx, m.Client, accountID, nil, page, false)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return toMessages(raw), nil
+	return toMessages(raw), next, nil
 }
 
-func (m Mail) Search(ctx context.Context, accountID, query string) ([]mailbackend.Message, error) {
-	raw, err := SearchMessages(ctx, m.Client, accountID, query)
+func (m Mail) Search(ctx context.Context, accountID, query string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	raw, next, err := queryMessages(ctx, m.Client, accountID, map[string]any{"text": query}, page, false)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return toMessages(raw), nil
+	return toMessages(raw), next, nil
 }
 
 func (m Mail) Get(ctx context.Context, accountID, messageID string) (mailbackend.Message, error) {
@@ -67,16 +67,16 @@ func (m Mail) Delete(ctx context.Context, accountID, messageID string) error {
 	return DeleteMessage(ctx, m.Client, accountID, messageID)
 }
 
-func (m Mail) ListInboxes(ctx context.Context) ([]mailbackend.Account, error) {
-	raw, err := ListInboxes(ctx, m.Client)
+func (m Mail) ListInboxes(ctx context.Context, page mailbackend.Page) ([]mailbackend.Account, string, error) {
+	raw, next, err := ListInboxes(ctx, m.Client, page)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]mailbackend.Account, len(raw))
 	for i, account := range raw {
 		out[i] = mailbackend.Account{ID: account.ID, Local: account.Local}
 	}
-	return out, nil
+	return out, next, nil
 }
 
 func (m Mail) DeleteInbox(ctx context.Context, id string) error {

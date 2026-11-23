@@ -86,18 +86,18 @@ func (eventMail) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]stri
 	return nil, nil
 }
 func (eventMail) Deliver(context.Context, mailbackend.Outbound) error { return nil }
-func (eventMail) List(context.Context, string) ([]mailbackend.Message, error) {
-	return nil, nil
+func (eventMail) List(context.Context, string, mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return nil, "", nil
 }
-func (eventMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
-	return nil, nil
+func (eventMail) Search(context.Context, string, string, mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return nil, "", nil
 }
 func (eventMail) Get(context.Context, string, string) (mailbackend.Message, error) {
 	return mailbackend.Message{}, nil
 }
 func (eventMail) Delete(context.Context, string, string) error { return nil }
-func (eventMail) ListInboxes(context.Context) ([]mailbackend.Account, error) {
-	return nil, nil
+func (eventMail) ListInboxes(context.Context, mailbackend.Page) ([]mailbackend.Account, string, error) {
+	return nil, "", nil
 }
 func (eventMail) DeleteInbox(context.Context, string) error { return nil }
 func (eventMail) Download(context.Context, string, string) ([]byte, error) {

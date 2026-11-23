@@ -19,9 +19,11 @@ type ServiceBox struct {
 
 func (s ServiceBox) List(ctx context.Context, inbox, query string) ([]mailbackend.Message, error) {
 	if query != "" {
-		return s.Service.Search(ctx, s.Caller, inbox, query)
+		messages, _, err := s.Service.Search(ctx, s.Caller, inbox, query, mailbackend.Page{})
+		return messages, err
 	}
-	return s.Service.List(ctx, s.Caller, inbox)
+	messages, _, err := s.Service.List(ctx, s.Caller, inbox, mailbackend.Page{})
+	return messages, err
 }
 
 func (s ServiceBox) Get(ctx context.Context, inbox, messageID string) (mailbackend.Message, error) {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -132,16 +133,14 @@ func (c apiClient) generate(ctx context.Context, prefix string, count int, progr
 	}
 }
 
-func (c apiClient) listMessages(ctx context.Context, accountID, query string) ([]apiMessage, error) {
-	path := "/v1/inboxes/" + accountID + "/messages"
-	if query != "" {
-		path += "?q=" + query
-	}
+func (c apiClient) listMessages(ctx context.Context, accountID, query, cursor string, limit int) ([]apiMessage, string, error) {
+	path := withPage("/v1/inboxes/"+accountID+"/messages", map[string]string{"q": query, "cursor": cursor}, limit)
 	var out struct {
 		Messages []apiMessage `json:"messages"`
+		Next     string       `json:"next"`
 	}
 	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
-	return out.Messages, err
+	return out.Messages, out.Next, err
 }
 
 func (c apiClient) getMessage(ctx context.Context, accountID, messageID string) (apiMessage, error) {
@@ -160,12 +159,29 @@ func (c apiClient) reply(ctx context.Context, accountID, messageID string, msg a
 	return err
 }
 
-func (c apiClient) listInboxes(ctx context.Context) ([]apiInbox, error) {
+func (c apiClient) listInboxes(ctx context.Context, cursor string, limit int) ([]apiInbox, string, error) {
 	var out struct {
 		Inboxes []apiInbox `json:"inboxes"`
+		Next    string     `json:"next"`
 	}
-	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes", nil, &out)
-	return out.Inboxes, err
+	_, err := c.call(ctx, http.MethodGet, withPage("/v1/inboxes", map[string]string{"cursor": cursor}, limit), nil, &out)
+	return out.Inboxes, out.Next, err
+}
+
+func withPage(path string, extra map[string]string, limit int) string {
+	values := url.Values{}
+	for key, value := range extra {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	if limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	if len(values) == 0 {
+		return path
+	}
+	return path + "?" + values.Encode()
 }
 
 func (c apiClient) deleteInbox(ctx context.Context, id string) error {

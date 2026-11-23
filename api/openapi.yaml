@@ -124,6 +124,9 @@ paths:
     get:
       operationId: listInboxes
       summary: List accounts in the mail backend. An operator token is required.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
           description: Inboxes
@@ -137,6 +140,11 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Inbox"
+                  next:
+                    type: string
+                    description: Opaque cursor for the next page. Absent on the last page.
+        "400":
+          $ref: "#/components/responses/Problem"
         "401":
           $ref: "#/components/responses/Problem"
         "403":
@@ -238,6 +246,13 @@ paths:
     get:
       operationId: listMessages
       summary: List messages in an inbox. A q query parameter searches text.
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
           description: Messages
@@ -524,6 +539,22 @@ components:
       required: false
       schema:
         type: string
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. The default is 50 and the maximum is 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    PageCursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned as next on the previous page.
+      schema:
+        type: string
   responses:
     Problem:
       description: Problem details
@@ -651,6 +682,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Message"
+        next:
+          type: string
+          description: Opaque cursor for the next page. Absent on the last page.
     Event:
       type: object
       required: [id, inbox, messageId, kind]
