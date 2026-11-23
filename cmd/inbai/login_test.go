@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -56,12 +57,14 @@ func TestLoginWithOAuthAndSubsequentCommand(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil || out["auth"] != "client_credentials" || out["clientId"] != "cli-1" {
 		t.Fatalf("login json %s err %v", stdout.String(), err)
 	}
-	info, err := os.Stat(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("config mode %o, want 600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("config mode %o, want 600", info.Mode().Perm())
+		}
 	}
 
 	// Subsequent command works with empty env by exchanging the stored OAuth credential.
