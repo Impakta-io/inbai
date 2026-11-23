@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,29 @@ func TestDomainAddPrintsZoneAndChecksDNS(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "MX 10 mail.example.com.") || !strings.Contains(stdout.String(), "not published") {
 		t.Fatalf("stdout %s", stdout.String())
+	}
+	stdout.Reset()
+	code = run([]string{"domain", "add", "--json", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	if code != 0 {
+		t.Fatalf("json exit %d stderr %s", code, stderr.String())
+	}
+	var printed struct {
+		Zone   string `json:"zone"`
+		Checks []struct {
+			Status string `json:"status"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &printed); err != nil {
+		t.Fatalf("json %s", stdout.String())
+	}
+	found := false
+	for _, check := range printed.Checks {
+		if strings.Contains(check.Status, "not published") {
+			found = true
+		}
+	}
+	if !strings.Contains(printed.Zone, "MX 10 mail.example.com.") || !found {
+		t.Fatalf("printed %+v", printed)
 	}
 }
 

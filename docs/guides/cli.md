@@ -13,17 +13,17 @@ export INBAI_RECOVERY_PASSWORD='the-recovery-password'
 inbai init --url http://127.0.0.1:8080 --domain example.com
 ```
 
-`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands and defaults to `https://127.0.0.1`. `--config` sets the file path. The command prints the 30-day retention default.
+`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands and defaults to `https://127.0.0.1`. `--config` sets the file path. `--json` prints the domain, the operator login, the retention default, and the config path. It does not print the service API key. The command prints the 30-day retention default.
 
 Running init again reuses the domain, the roles, and the accounts. It keeps the API key already in the config file.
 
 ## domain add
 
-`inbai domain add` prints the DNS zone file for the domain in the config file and checks the MX and TXT records. The details are in [domain setup](domain-setup.md).
+`inbai domain add` prints the DNS zone file for the domain in the config file and checks the MX and TXT records. `--json` prints the zone and each check. The details are in [domain setup](domain-setup.md).
 
 ## doctor
 
-`inbai doctor` checks the same MX and TXT records, then checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. A healthy report exits 0. Any check that needs a fix exits 1. How to read a line is in [troubleshooting](troubleshooting.md).
+`inbai doctor` checks the same MX and TXT records, then checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. `--json` prints each check and whether the report is healthy. A healthy report exits 0. Any check that needs a fix exits 1. How to read a line is in [troubleshooting](troubleshooting.md).
 
 ## inbox create
 
@@ -61,7 +61,6 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 ## Planned sections
 
-- JSON output for `init`, `domain`, and `doctor`.
 - `login`.
 - Domain checks beyond MX and TXT, and the outbound relay.
 - `agent create`, `agent bind`, `agent suspend`, and `agent revoke`.

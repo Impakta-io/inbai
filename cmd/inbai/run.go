@@ -64,6 +64,7 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")
 	stalwartURL := fs.String("stalwart-url", "https://127.0.0.1", "Stalwart URL to store for later commands")
 	configPath := fs.String("config", "", "config file to write (default is the user config directory)")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -143,6 +144,18 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 			writef(stderr, "API key, shown once: %s\n", result.APIKey)
 		}
 		return 1
+	}
+	if *asJSON {
+		emit(stdout, true, "", map[string]any{
+			"domain":         cfg.Domain,
+			"hostname":       cfg.Hostname,
+			"operator":       "operator@" + cfg.Domain,
+			"serviceAccount": "service@" + cfg.Domain,
+			"retentionDays":  cfg.RetentionDays,
+			"config":         path,
+			"next":           "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail.",
+		})
+		return 0
 	}
 	writef(stdout, "Domain %s is ready.\n", cfg.Domain)
 	writef(stdout, "Operator login is operator@%s.\n", cfg.Domain)

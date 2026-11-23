@@ -135,6 +135,27 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 	if kept["apiKey"] != cfg["apiKey"] {
 		t.Fatalf("api key changed from %v to %v", cfg["apiKey"], kept["apiKey"])
 	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"init", "--json", "--url", srv.URL, "--domain", "example.com", "--config", path}, &stdout, &stderr, func(key string) string {
+		if key == "INBAI_RECOVERY_PASSWORD" {
+			return "recovery-secret"
+		}
+		return ""
+	})
+	if code != 0 {
+		t.Fatalf("json exit %d stderr %s", code, stderr.String())
+	}
+	var printed map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &printed); err != nil {
+		t.Fatalf("json %s", stdout.String())
+	}
+	if printed["domain"] != "example.com" || printed["retentionDays"] != float64(30) || printed["operator"] != "operator@example.com" {
+		t.Fatalf("printed %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "shown-once") || strings.Contains(stdout.String(), "apiKey") {
+		t.Fatalf("json included the API key: %s", stdout.String())
+	}
 }
 
 func methodName(t *testing.T, body io.Reader) string {

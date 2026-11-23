@@ -23,6 +23,7 @@ func doctorCmd(args []string, stdout, stderr io.Writer) int {
 	domain := fs.String("domain", "", "domain to check (default is the domain in the config file)")
 	configPath := fs.String("config", "", "config file written by inbai init")
 	tlsInsecure := fs.Bool("tls-insecure", false, "skip TLS verification for a server that is not on localhost")
+	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -72,8 +73,16 @@ func doctorCmd(args []string, stdout, stderr io.Writer) int {
 		records[i] = doctor.Record{Name: record.Name, Type: record.Type, Value: record.Value}
 	}
 	lines := doctor.Run(ctx, records, cfg.Hostname, doctorProbe)
-	for _, line := range lines {
-		writef(stdout, "%s\n", line.Text)
+	if *asJSON {
+		checks := make([]map[string]any, len(lines))
+		for i, line := range lines {
+			checks[i] = map[string]any{"ok": line.OK, "text": line.Text}
+		}
+		emit(stdout, true, "", map[string]any{"healthy": doctor.Healthy(lines), "checks": checks})
+	} else {
+		for _, line := range lines {
+			writef(stdout, "%s\n", line.Text)
+		}
 	}
 	if !doctor.Healthy(lines) {
 		return 1
