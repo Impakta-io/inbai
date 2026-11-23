@@ -23,6 +23,9 @@ type File struct {
 	ServiceRoleID     string            `json:"serviceRoleId"`
 	APIKey            string            `json:"apiKey"`
 	APIURL            string            `json:"apiUrl,omitempty"`
+	ClientID          string            `json:"clientId,omitempty"`
+	ClientSecret      string            `json:"clientSecret,omitempty"`
+	OperatorToken     string            `json:"operatorToken,omitempty"`
 	RetentionDays     int               `json:"retentionDays"`
 	Inboxes           map[string]string `json:"inboxes,omitempty"`
 }

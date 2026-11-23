@@ -1,4 +1,4 @@
-Status: partial — `init`, `domain add`, `domain relay`, `doctor`, inbox create, list, generate, delete, allowlist, and quota, message send, list, get, reply, delete, and attachment download, `agent create`, `agent grant`, `agent suspend`, `agent revoke`, `audit`, `retention`, `mcp serve`, `backup`, and `restore` are implemented. The other commands are not.
+Status: current
 
 # CLI
 
@@ -16,6 +16,26 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 `--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands and defaults to `https://127.0.0.1`. `--config` sets the file path. `--json` prints the domain, the operator login, the retention default, and the config path. It does not print the service API key. The command prints the 30-day retention default.
 
 Running init again reuses the domain, the roles, and the accounts. It keeps the API key already in the config file.
+
+## login
+
+`inbai login` verifies credentials against `inbaid` and saves them in the config file (mode `0600`) so later commands do not require exporting tokens on every run.
+
+With an operator token:
+
+```sh
+export INBAI_OPERATOR_TOKEN='the-operator-token'
+inbai login --url http://127.0.0.1:8787
+```
+
+With an OAuth client credential:
+
+```sh
+export INBAI_CLIENT_SECRET='the-client-secret'
+inbai login --url http://127.0.0.1:8787 --client-id <client-id>
+```
+
+`--url` updates `apiUrl` in the config file (defaulting to the saved `apiUrl` or `http://127.0.0.1:8787`). `INBAI_CLIENT_ID` may be used instead of `--client-id`. `--json` prints the API URL, auth mode, client id (when set), and config path; it does not print secrets or bearer tokens. `inbai login --clear` removes stored login credentials from the config file. Environment variables (`INBAI_OPERATOR_TOKEN`, `INBAI_CLIENT_ID`/`INBAI_CLIENT_SECRET`) still take precedence over stored credentials when set.
 
 ## domain add
 
@@ -88,8 +108,3 @@ Delivery to another server still depends on the DNS records from `domain add` an
 ## backup and restore
 
 `inbai backup --file path` writes the inbAI database. `inbai restore --file path` replaces that database with the file. Both require `INBAI_DATABASE_URL`. `--json` prints the file path and the event and suppression counts. The file has no message bodies. The procedure for the Stalwart copy is in [backup](backup.md).
-
-## Planned sections
-
-- `login`.
-- Domain checks beyond MX and TXT.

@@ -45,7 +45,7 @@ func mcpCmd(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv fun
 	if base == "" {
 		base = config.DefaultAPIURL
 	}
-	token, err := mcpToken(context.Background(), base, getenv)
+	token, err := mcpToken(context.Background(), base, cfg, getenv)
 	if err != nil {
 		writef(stderr, "mcp: %s\n", err)
 		if errors.Is(err, errMissingCredential) {
@@ -63,23 +63,28 @@ func mcpCmd(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv fun
 
 var errMissingCredential = errors.New("missing credential")
 
-func mcpToken(ctx context.Context, base string, getenv func(string) string) (string, error) {
-	if getenv == nil {
-		return "", errMissingCredential
-	}
-	if token := getenv("INBAI_ACCESS_TOKEN"); token != "" {
-		return token, nil
-	}
-	id := getenv("INBAI_CLIENT_ID")
-	secret := getenv("INBAI_CLIENT_SECRET")
-	if id != "" || secret != "" {
-		if id == "" || secret == "" {
-			return "", errMissingCredential
+func mcpToken(ctx context.Context, base string, cfg config.File, getenv func(string) string) (string, error) {
+	if getenv != nil {
+		if token := getenv("INBAI_ACCESS_TOKEN"); token != "" {
+			return token, nil
 		}
-		return exchangeToken(ctx, base, id, secret)
+		id := getenv("INBAI_CLIENT_ID")
+		secret := getenv("INBAI_CLIENT_SECRET")
+		if id != "" || secret != "" {
+			if id == "" || secret == "" {
+				return "", errMissingCredential
+			}
+			return exchangeToken(ctx, base, id, secret)
+		}
+		if token := getenv("INBAI_OPERATOR_TOKEN"); token != "" {
+			return token, nil
+		}
 	}
-	if token := getenv("INBAI_OPERATOR_TOKEN"); token != "" {
-		return token, nil
+	if cfg.ClientID != "" && cfg.ClientSecret != "" {
+		return exchangeToken(ctx, base, cfg.ClientID, cfg.ClientSecret)
+	}
+	if cfg.OperatorToken != "" {
+		return cfg.OperatorToken, nil
 	}
 	return "", errMissingCredential
 }

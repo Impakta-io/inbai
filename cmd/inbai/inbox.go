@@ -444,19 +444,54 @@ func openAPI(configPath *string, stderr io.Writer, getenv func(string) string) (
 		writef(stderr, "read config: %s\n", err)
 		return config.File{}, "", apiClient{}, 1
 	}
-	token := ""
-	if getenv != nil {
-		token = getenv("INBAI_OPERATOR_TOKEN")
-	}
-	if token == "" {
-		writef(stderr, "INBAI_OPERATOR_TOKEN is required. It is the bearer token inbaid serve expects.\n")
-		return config.File{}, "", apiClient{}, 2
-	}
 	base := cfg.APIURL
 	if base == "" {
 		base = config.DefaultAPIURL
 	}
+	token, code := resolveAPIToken(base, cfg, stderr, getenv)
+	if code != 0 {
+		return config.File{}, "", apiClient{}, code
+	}
 	return cfg, path, apiClient{base: base, token: token}, 0
+}
+
+func resolveAPIToken(base string, cfg config.File, stderr io.Writer, getenv func(string) string) (string, int) {
+	if getenv != nil {
+		if token := getenv("INBAI_OPERATOR_TOKEN"); token != "" {
+			return token, 0
+		}
+		id := getenv("INBAI_CLIENT_ID")
+		secret := getenv("INBAI_CLIENT_SECRET")
+		if id != "" || secret != "" {
+			if id == "" || secret == "" {
+				writef(stderr, "INBAI_CLIENT_ID and INBAI_CLIENT_SECRET must both be set.\n")
+				return "", 2
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			token, err := exchangeToken(ctx, base, id, secret)
+			if err != nil {
+				writef(stderr, "auth: %s\n", err)
+				return "", 1
+			}
+			return token, 0
+		}
+	}
+	if cfg.ClientID != "" && cfg.ClientSecret != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		token, err := exchangeToken(ctx, base, cfg.ClientID, cfg.ClientSecret)
+		if err != nil {
+			writef(stderr, "auth: %s\n", err)
+			return "", 1
+		}
+		return token, 0
+	}
+	if cfg.OperatorToken != "" {
+		return cfg.OperatorToken, 0
+	}
+	writef(stderr, "INBAI_OPERATOR_TOKEN is required, or run inbai login.\n")
+	return "", 2
 }
 
 func emit(stdout io.Writer, asJSON bool, text string, value any) {

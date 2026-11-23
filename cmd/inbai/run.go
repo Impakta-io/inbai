@@ -29,6 +29,8 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	switch args[0] {
 	case "init":
 		return initCmd(args[1:], stdout, stderr, getenv)
+	case "login":
+		return loginCmd(args[1:], stdout, stderr, getenv)
 	case "domain":
 		return domainCmd(args[1:], stdout, stderr, getenv)
 	case "doctor":
@@ -50,7 +52,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	case "restore":
 		return restoreCmd(args[1:], stdout, stderr, getenv)
 	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|domain|doctor|inbox|message|agent|audit|retention|mcp|backup|restore]\n")
+		writef(stdout, "usage: inbai [version|init|login|domain|doctor|inbox|message|agent|audit|retention|mcp|backup|restore]\n")
 		return 0
 	default:
 		writef(stderr, "unknown command %q\n", args[0])
