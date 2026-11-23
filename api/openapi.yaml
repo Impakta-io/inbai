@@ -6,9 +6,161 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
   description: |
-    Contract skeleton. inbaid does not serve this API yet.
-
-    When the API is added, routes live under /v1, lists use cursor
-    pagination, create and send requests accept an Idempotency-Key header,
-    and errors use RFC 9457 problem details.
-paths: {}
+    Operator HTTP API served by inbaid. Routes live under /v1.
+    Create and send accept an Idempotency-Key header.
+    Errors use RFC 9457 problem details.
+    The caller is an operator bearer token. Agent OAuth is not implemented.
+servers:
+  - url: http://127.0.0.1:8787
+security:
+  - operatorBearer: []
+paths:
+  /v1/inboxes:
+    post:
+      operationId: createInbox
+      summary: Create one inbox in the configured domain.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInbox"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Inbox"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listMessages
+      summary: List messages in an inbox.
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "401":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: sendMessage
+      summary: Submit a plain-text message as the inbox.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessage"
+      responses:
+        "202":
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: submitted
+        "401":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    operatorBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: Problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+    CreateInbox:
+      type: object
+      required: [localPart]
+      properties:
+        localPart:
+          type: string
+    Inbox:
+      type: object
+      required: [id, address]
+      properties:
+        id:
+          type: string
+        address:
+          type: string
+    SendMessage:
+      type: object
+      required: [from, to, subject]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        subject:
+          type: string
+        text:
+          type: string
+    Message:
+      type: object
+      required: [id, subject, preview]
+      properties:
+        id:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+    MessageList:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"

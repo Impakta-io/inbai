@@ -53,7 +53,7 @@ func inboxCmd(args []string, stdout, stderr io.Writer) int {
 		DomainID: cfg.DomainID,
 		RoleID:   cfg.InboxRoleID,
 		Local:    local,
-	})
+	}, "")
 	if err != nil {
 		writef(stderr, "inbox create: %s\n", err)
 		return 1
@@ -158,7 +158,7 @@ func messageSend(args []string, stdout, stderr io.Writer) int {
 		To:        *to,
 		Subject:   *subject,
 		Body:      *body,
-	})
+	}, "")
 	if err != nil {
 		writef(stderr, "message send: %s\n", err)
 		return 1

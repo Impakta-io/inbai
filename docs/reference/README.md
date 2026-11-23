@@ -9,4 +9,4 @@ This directory will hold generated reference pages.
 - CLI reference, generated from the `inbai` command tree.
 - HTTP reference, generated from [api/openapi.yaml](../../api/openapi.yaml).
 
-The OpenAPI file is a skeleton today. The CLI implements `init`, `domain add`, and `doctor`, and otherwise prints its version.
+The CLI implements `init`, `domain add`, `doctor`, `inbox create`, `message send`, and `message list`. `inbaid serve` implements the paths in the OpenAPI file. Generated reference pages are not built yet.

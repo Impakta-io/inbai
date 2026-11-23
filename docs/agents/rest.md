@@ -1,14 +1,25 @@
-Status: planned — filled in when the REST API exists.
+Status: partial — `inbaid serve` creates an inbox, lists messages, and submits plain text. OAuth, attachments, search, reply, and delete are not implemented.
 
 # REST API
 
-The contract will live in [api/openapi.yaml](../../api/openapi.yaml). That file is a skeleton with no paths. The server does not listen yet.
+The contract is [api/openapi.yaml](../../api/openapi.yaml). `inbaid serve` listens on `127.0.0.1:8787` unless `--addr` is set. It reads the config file written by `inbai init`.
+
+## Operator token
+
+Set `INBAI_OPERATOR_TOKEN` before starting the server. Send it as `Authorization: Bearer <token>`. A missing or rejected token is `401` with a problem document. Agent OAuth is not implemented, so this token is the only caller and it acts as the operator.
+
+## Routes
+
+`POST /v1/inboxes` with `{"localPart":"alice"}` creates `alice@<domain>` and returns the account id. `GET /v1/inboxes/{id}/messages` returns id, subject, and preview. `POST /v1/inboxes/{id}/messages` submits `from`, `to`, `subject`, and `text`.
+
+Create and send take an optional `Idempotency-Key` header. Repeating a completed key returns the first result and does not create or send again.
+
+The server allows 50 submitted messages per inbox per UTC day and 500 per domain. The next send is `429`. A failed submit does not consume the quota. These counters live in the process and reset when `inbaid` restarts.
+
+Errors use `application/problem+json` with `type`, `title`, `status`, and `detail`.
 
 ## Planned sections
 
-- The base URL and the `/v1` prefix.
 - How to exchange a client credential for an access token.
 - Cursor pagination.
-- The `Idempotency-Key` header on create and send.
-- The error document shape.
-- Sending, listing, reading, replying, and deleting, including attachments and threading headers.
+- Reading one message, searching, replying, and deleting, including attachments and threading headers.
