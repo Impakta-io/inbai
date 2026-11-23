@@ -60,7 +60,7 @@ Each inbox is one account in the mail server. The service layer talks to a `Mail
 
 Domain setup prints the zone file Stalwart computes, including MX, SPF, DKIM, and DMARC. `inbai domain add` does that and checks the MX and TXT records. `inbai doctor` also checks reverse DNS, port 25, TLS on port 443, and the Spamhaus ZEN and SpamCop blocklists. Direct delivery is the default. `inbai domain relay` sends other domains through an authenticated SMTP relay, and `--off` restores MX delivery. The service account cannot change that route. Sending has quotas per inbox, per domain, and per workspace, a rate limit per recipient domain, a suppression list fed by hard bounces, and a way to suspend an agent.
 
-The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is untrusted input. Results will include SPF, DKIM, DMARC, and the spam verdict. MCP results mark message bodies as external content.
+The API preserves `Message-ID`, `In-Reply-To`, and `References`. Inbound mail is untrusted input. A message read includes `authentication` with SPF, DKIM, and DMARC results from `Authentication-Results`, and `spam` when the message is marked junk. A result that was not recorded is absent. MCP results mark message bodies as external content.
 
 ## Events and jobs
 

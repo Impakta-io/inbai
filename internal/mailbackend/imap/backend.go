@@ -175,7 +175,21 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 		if !ok || len(got.literals) == 0 {
 			return fmt.Errorf("imap: message %s was not found", messageID)
 		}
-		message = mailbackend.Message{ID: messageID, Text: string(got.literals[0])}
+		text := string(got.literals[0])
+		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS)])")
+		if err != nil {
+			return err
+		}
+		auth := fetched(authItems)[uid]
+		header := ""
+		if len(auth.literals) > 0 {
+			header = string(auth.literals[0])
+		}
+		message = mailbackend.Message{
+			ID:             messageID,
+			Text:           text,
+			Authentication: mailbackend.AuthenticationOf(header, strings.Contains(auth.text, `\Junk`)),
+		}
 		return nil
 	})
 	return message, err

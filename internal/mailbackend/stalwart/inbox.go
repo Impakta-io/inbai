@@ -34,15 +34,16 @@ type Delivery struct {
 
 // Message is one message in an inbox.
 type Message struct {
-	ID          string       `json:"id"`
-	Subject     string       `json:"subject"`
-	Preview     string       `json:"preview"`
-	Text        string       `json:"text,omitempty"`
-	MessageID   []string     `json:"messageId,omitempty"`
-	InReplyTo   []string     `json:"inReplyTo,omitempty"`
-	References  []string     `json:"references,omitempty"`
-	ReceivedAt  time.Time    `json:"receivedAt,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	ID             string                     `json:"id"`
+	Subject        string                     `json:"subject"`
+	Preview        string                     `json:"preview"`
+	Text           string                     `json:"text,omitempty"`
+	MessageID      []string                   `json:"messageId,omitempty"`
+	InReplyTo      []string                   `json:"inReplyTo,omitempty"`
+	References     []string                   `json:"references,omitempty"`
+	ReceivedAt     time.Time                  `json:"receivedAt,omitempty"`
+	Attachments    []Attachment               `json:"attachments,omitempty"`
+	Authentication mailbackend.Authentication `json:"authentication,omitempty"`
 }
 
 // Attachment is one file on a stored message.

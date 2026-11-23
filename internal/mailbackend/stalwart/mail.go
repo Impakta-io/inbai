@@ -113,14 +113,15 @@ func toMessage(message Message) mailbackend.Message {
 		files[i] = mailbackend.Attachment{Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID}
 	}
 	return mailbackend.Message{
-		ID:          message.ID,
-		Subject:     message.Subject,
-		Preview:     message.Preview,
-		Text:        message.Text,
-		MessageID:   message.MessageID,
-		InReplyTo:   message.InReplyTo,
-		References:  message.References,
-		ReceivedAt:  message.ReceivedAt,
-		Attachments: files,
+		ID:             message.ID,
+		Subject:        message.Subject,
+		Preview:        message.Preview,
+		Text:           message.Text,
+		MessageID:      message.MessageID,
+		InReplyTo:      message.InReplyTo,
+		References:     message.References,
+		ReceivedAt:     message.ReceivedAt,
+		Attachments:    files,
+		Authentication: message.Authentication,
 	}
 }

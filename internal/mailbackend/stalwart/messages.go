@@ -30,7 +30,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":          accountID,
 		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments"},
+		"properties":         []string{"subject", "preview", "receivedAt", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
 		"fetchAllBodyValues": true,
 	})
 	if err != nil {
@@ -137,6 +137,8 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Size   int    `json:"size"`
 				BlobID string `json:"blobId"`
 			} `json:"attachments"`
+			Keywords json.RawMessage `json:"keywords"`
+			Auth     json.RawMessage `json:"header:Authentication-Results:asText"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -163,6 +165,30 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Name: file.Name, Type: file.Type, Size: file.Size, BlobID: file.BlobID,
 			})
 		}
+		out[i].Authentication = mailbackend.AuthenticationOf(headerText(item.Auth), junkKeyword(item.Keywords))
 	}
 	return out, nil
+}
+
+func headerText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var many []string
+	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
+		return many[0]
+	}
+	return ""
+}
+
+func junkKeyword(raw json.RawMessage) bool {
+	var keywords map[string]bool
+	if json.Unmarshal(raw, &keywords) != nil {
+		return false
+	}
+	return keywords["$junk"]
 }

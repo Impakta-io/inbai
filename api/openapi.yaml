@@ -744,6 +744,18 @@ components:
           type: array
           items:
             type: string
+        authentication:
+          type: object
+          description: SPF, DKIM, and DMARC results from Authentication-Results, and spam when the message is marked junk. An absent field was not on the message.
+          properties:
+            spf:
+              type: string
+            dkim:
+              type: string
+            dmarc:
+              type: string
+            spam:
+              type: string
         attachments:
           type: array
           items:

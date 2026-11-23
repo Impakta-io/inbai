@@ -27,7 +27,7 @@ Install, domain setup, the CLI, troubleshooting, backup, and the quickstart desc
 
 ## Agents that use inbAI
 
-The REST guide, the agent overview, the MCP guide, and the events guide describe the routes, client credentials, tools, and feed that exist. Untrusted mail describes the external-content marker and leaves authentication results for later.
+The REST guide, the agent overview, the MCP guide, and the events guide describe the routes, client credentials, tools, and feed that exist. Untrusted mail describes the external-content marker and the authentication fields a message read returns.
 
 - [Overview](agents/overview.md)
 - [MCP](agents/mcp.md)
