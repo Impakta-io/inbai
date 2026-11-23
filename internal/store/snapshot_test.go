@@ -4,6 +4,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -123,6 +124,9 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SaveRetention(ctx, "server", 14); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
+		t.Fatal(err)
+	}
 	snap, err := db.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -186,6 +190,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err != nil || !ok || days != 14 {
 		t.Fatalf("retention %d ok %v err %v", days, ok, err)
 	}
+	key, err := db.AdoptSigningKey(ctx, nil)
+	if err != nil || !bytes.Equal(key, []byte("signing-key")) {
+		t.Fatalf("signing key %q err %v", key, err)
+	}
 }
 
 func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
@@ -193,7 +201,7 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil {
+	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.SigningKey != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
 	}
 }

@@ -104,6 +104,7 @@ type Snapshot struct {
 	Suspensions   []string         `json:"suspensions"`
 	Audits        []AuditRow       `json:"audits"`
 	Retention     []RetentionRow   `json:"retention"`
+	SigningKey    []byte           `json:"signingKey"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -313,5 +314,6 @@ func emptySnapshot() Snapshot {
 		Suspensions:   []string{},
 		Audits:        []AuditRow{},
 		Retention:     []RetentionRow{},
+		SigningKey:    []byte{},
 	}
 }

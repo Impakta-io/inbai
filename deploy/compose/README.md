@@ -31,7 +31,7 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 The service account uses the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes. The operator account can also change the outbound route. The service account cannot.
 
-The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service uses `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. Set `INBAI_SIGNING_KEY` when more than one `inbaid` process must accept the same access tokens. Without it, the container prints a key once in its logs.
+The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service uses `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. The signing key is stored in that database, so another `inbaid` process that uses the same URL verifies the same tokens. Set `INBAI_SIGNING_KEY` on every process only when you want to choose the key. That value must match the key already stored. Without a database, a missing key is printed once.
 
 Leave recovery mode before creating an inbox. `inbaid` answers mail routes only after Stalwart is serving HTTPS.
 
@@ -50,7 +50,7 @@ inbai message send --from alice@example.com --to alice@example.com --subject hel
 inbai message list alice@example.com
 ```
 
-Running `inbaid serve` on the host remains valid. Do not run that process and the Compose service against the same database at the same time unless `INBAI_SIGNING_KEY` is set on both.
+Running `inbaid serve` on the host remains valid. Both processes accept the same tokens when they use this database. Both also delete old mail on their own schedule.
 
 ## Outbound relay
 

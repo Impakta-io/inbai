@@ -73,7 +73,7 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 }
 
 func reset(ctx context.Context, db *Postgres) error {
-	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression, access_grant, quota_counter, idempotency, bulk_job, agent_credential, agent_suspension, audit_event, retention_policy`)
+	_, err := db.pool.Exec(ctx, `TRUNCATE webhook_delivery, webhook_subscription, mail_event, inbox_cursor, suppression, access_grant, quota_counter, idempotency, bulk_job, agent_credential, agent_suspension, audit_event, retention_policy, signing_key`)
 	return err
 }
 

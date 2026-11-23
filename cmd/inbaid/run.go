@@ -89,27 +89,30 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			return 1
 		}
 	}
-	signingKey := []byte(getenv("INBAI_SIGNING_KEY"))
-	if len(signingKey) == 0 {
-		var err error
-		signingKey, err = randomKey()
-		if err != nil {
-			writef(stderr, "signing key: %s\n", err)
-			return 1
-		}
-		writef(stdout, "Signing key, shown once: %x\n", signingKey)
-	}
-	svc := service.New(stalwart.Mail{Client: client})
-	issuer := "http://" + *addr
-	directory := auth.NewDirectory(signingKey, issuer)
+	var log *store.Postgres
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		log, err := store.Open(ctx, dsn)
+		log, err = store.Open(ctx, dsn)
 		cancel()
 		if err != nil {
 			writef(stderr, "database: %s\n", err)
 			return 1
 		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	signingKey, showKey, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
+	cancel()
+	if err != nil {
+		writef(stderr, "signing key: %s\n", err)
+		return 1
+	}
+	if showKey {
+		writef(stdout, "Signing key, shown once: %x\n", signingKey)
+	}
+	svc := service.New(stalwart.Mail{Client: client})
+	issuer := "http://" + *addr
+	directory := auth.NewDirectory(signingKey, issuer)
+	if log != nil {
 		svc.SetDB(log)
 		directory.SetDB(log)
 		feed := events.New(log)

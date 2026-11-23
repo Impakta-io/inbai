@@ -21,7 +21,7 @@ The numbers in the JSON are that run only. This repository does not treat them a
 
 ## More than one inbaid
 
-Each replica uses the same `INBAI_DATABASE_URL` and the same `INBAI_SIGNING_KEY`. The event log, cursors, webhook deliveries, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs are in that database, so a replica that restarts can read them.
+Each replica uses the same `INBAI_DATABASE_URL`. That database holds the signing key, so the replicas verify the same access tokens. Set `INBAI_SIGNING_KEY` only when every process must use a key you chose, and set the same value on each. The event log, cursors, webhook deliveries, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs are in that database, so a replica that restarts can read them.
 
 Stalwart stays a single node in this deployment. inbAI does not use a Stalwart Enterprise feature. A second Stalwart node is a later layout, and this project does not ship one.
 
