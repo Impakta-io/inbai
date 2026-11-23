@@ -52,6 +52,8 @@ Operators and agents use the same mechanism: OAuth 2.1 client credentials issued
 
 The inbox is the isolation boundary. A grant is a tuple of agent, inbox, and permissions. The permissions are `read`, `send`, `reply`, `delete`, and `manage`. One agent may hold many inboxes. One inbox may be granted to many agents. Only an operator can create domains and inboxes, unless an agent is granted `inbox:provision`.
 
+Every row in the inbAI database stores `workspace_id`. This server has one workspace, `default`. There is no workspace command. The column is an inbAI value and does not use a Stalwart tenant.
+
 Human sign-in through an external OIDC provider is not part of this design yet.
 
 ## Mail

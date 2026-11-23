@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,17 +15,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// WorkspaceID is the one workspace stored on every row. There is no workspace command.
+const WorkspaceID = "default"
+
 const schema = `
 CREATE TABLE IF NOT EXISTS inbox_cursor (
     inbox text PRIMARY KEY,
     address text NOT NULL DEFAULT '',
-    jmap_state text NOT NULL DEFAULT ''
+    jmap_state text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS mail_event (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     inbox text NOT NULL,
     message_id text NOT NULL,
-    kind text NOT NULL
+    kind text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS mail_event_inbox_id ON mail_event (inbox, id);
 CREATE TABLE IF NOT EXISTS webhook_subscription (
@@ -32,7 +38,8 @@ CREATE TABLE IF NOT EXISTS webhook_subscription (
     agent text NOT NULL,
     inbox text NOT NULL,
     url text NOT NULL,
-    secret text NOT NULL
+    secret text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS webhook_delivery (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -41,28 +48,33 @@ CREATE TABLE IF NOT EXISTS webhook_delivery (
     attempt int NOT NULL DEFAULT 0,
     next_at timestamptz NOT NULL DEFAULT now(),
     done_at timestamptz,
-    failed_at timestamptz
+    failed_at timestamptz,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS webhook_delivery_due ON webhook_delivery (next_at)
     WHERE done_at IS NULL AND failed_at IS NULL;
 CREATE TABLE IF NOT EXISTS suppression (
     address text PRIMARY KEY,
-    reason text NOT NULL
+    reason text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS access_grant (
     agent text NOT NULL,
     inbox text NOT NULL,
     permission text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default',
     PRIMARY KEY (agent, inbox, permission)
 );
 CREATE TABLE IF NOT EXISTS quota_counter (
     bucket text PRIMARY KEY,
-    used int NOT NULL
+    used int NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS idempotency (
     kind text NOT NULL,
     key text NOT NULL,
     payload text NOT NULL DEFAULT '',
+    workspace_id text NOT NULL DEFAULT 'default',
     PRIMARY KEY (kind, key)
 );
 CREATE TABLE IF NOT EXISTS bulk_job (
@@ -71,35 +83,42 @@ CREATE TABLE IF NOT EXISTS bulk_job (
     total int NOT NULL,
     created int NOT NULL DEFAULT 0,
     error text NOT NULL DEFAULT '',
-    inboxes jsonb NOT NULL DEFAULT '[]'
+    inboxes jsonb NOT NULL DEFAULT '[]',
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS agent_credential (
     id text PRIMARY KEY,
     agent text NOT NULL,
     secret_hash bytea NOT NULL,
-    operator boolean NOT NULL DEFAULT false
+    operator boolean NOT NULL DEFAULT false,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS agent_suspension (
-    agent text PRIMARY KEY
+    agent text PRIMARY KEY,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS audit_event (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     at timestamptz NOT NULL DEFAULT now(),
     actor text NOT NULL,
     action text NOT NULL,
-    target text NOT NULL
+    target text NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS retention_policy (
     scope text PRIMARY KEY,
-    days int NOT NULL
+    days int NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS sender_allowlist (
     inbox text PRIMARY KEY,
-    senders jsonb NOT NULL
+    senders jsonb NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS signing_key (
     id int PRIMARY KEY,
     secret bytea NOT NULL,
+    workspace_id text NOT NULL DEFAULT 'default',
     CONSTRAINT signing_key_singleton CHECK (id = 1)
 );
 `
@@ -123,7 +142,42 @@ func Open(ctx context.Context, dsn string) (*Postgres, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := ensureWorkspace(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &Postgres{pool: pool}, nil
+}
+
+var workspaceTables = []string{
+	"inbox_cursor",
+	"mail_event",
+	"webhook_subscription",
+	"webhook_delivery",
+	"suppression",
+	"access_grant",
+	"quota_counter",
+	"idempotency",
+	"bulk_job",
+	"agent_credential",
+	"agent_suspension",
+	"audit_event",
+	"retention_policy",
+	"sender_allowlist",
+	"signing_key",
+}
+
+func ensureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, table := range workspaceTables {
+		stmt := fmt.Sprintf(
+			`ALTER TABLE %s ADD COLUMN IF NOT EXISTS workspace_id text NOT NULL DEFAULT '%s'`,
+			table, WorkspaceID,
+		)
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close releases the pool.
