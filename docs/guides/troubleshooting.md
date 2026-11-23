@@ -1,4 +1,4 @@
-Status: partial — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. `inbaid` writes one JSON line per request. Relay authentication failures are not a separate section.
+Status: current — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. `inbaid` writes one JSON line per request. Common relay and startup errors are covered below.
 
 # Troubleshooting
 
@@ -26,6 +26,15 @@ Each line is `ok` or `fix`. The command exits 0 only when every line is `ok`.
 
 The response header `X-Request-Id` is the same value. Send that header when you want to choose the ID. Use letters, digits, `.`, `_`, and `-`, up to 64 characters. Quote `requestId` when you report a failed call.
 
-## Planned sections
+## Relay authentication failures
 
-- Relay authentication failures.
+`inbai domain relay` authenticates to Stalwart as `operator@<domain>` using `INBAI_OPERATOR_PASSWORD` (or `INBAI_RECOVERY_PASSWORD`), not the service API key. Common failures:
+
+- **Permission denied from Stalwart on `domain relay`:** servers initialized before the operator role existed do not have MTA route permissions on `operator@<domain>`. Start Stalwart in recovery mode and run `inbai init` again to update the operator role, then leave recovery mode and retry `inbai domain relay`.
+- **401 from Stalwart on `domain relay`:** `INBAI_OPERATOR_PASSWORD` does not match the password set when `inbai init` ran.
+- **Missing relay password:** `inbai domain relay` reads the upstream SMTP password only from `INBAI_RELAY_PASSWORD`. It is not accepted as a flag.
+- **Upstream relay rejects mail or TLS fails:** check `--port` (default `587`), `--implicit-tls` for port `465`, and `--allow-invalid-certs` only for a private relay whose certificate is not publicly trusted.
+
+## Signing key mismatch on startup
+
+When `INBAI_DATABASE_URL` is set, `inbaid` stores the access-token signing key in PostgreSQL. If you also set `INBAI_SIGNING_KEY`, it must match the stored key. A different value stops startup with `signing key does not match the database`. Unset `INBAI_SIGNING_KEY` to adopt the stored key, or set the same value on every replica.

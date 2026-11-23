@@ -1,4 +1,4 @@
-Status: partial — Compose starts PostgreSQL, Stalwart, and `inbaid`. `inbai init` still bootstraps Stalwart from the host. Host requirements, upgrades, and removing the stack are not a checked procedure yet.
+Status: current — Compose starts PostgreSQL, Stalwart, and `inbaid`. `inbai init` bootstraps Stalwart from the host. Host requirements, upgrades, and teardown steps are below.
 
 # Install
 
@@ -16,8 +16,41 @@ Build the CLI, start the stack in recovery mode, and run init. The commands and 
 
 The container reaches Stalwart at `https://stalwart` and does not verify Stalwart's generated certificate. The config file keeps the host URL `https://127.0.0.1` for `inbai domain add` and `inbai doctor`.
 
-## Planned sections
+## Host requirements
 
-- Host requirements, including ports 25 and 443, written as a checked procedure.
-- How to upgrade a pinned Stalwart version.
-- How to stop and remove the stack.
+- One Linux host with Docker Engine and the Compose plugin (`docker compose`).
+- A public IPv4 address with reverse DNS (`PTR`) matching your mail hostname.
+- Inbound TCP port `25` (SMTP) and port `443` (HTTPS) reachable from the internet. Outbound TCP port `25` is required for direct delivery, or outbound TCP port `587`/`465` when using an SMTP relay (`inbai domain relay`).
+- Keep port `8080` (Stalwart recovery management) and port `8787` (`inbaid`) bound to `127.0.0.1` as in `deploy/compose/compose.yaml`, and place a TLS reverse proxy in front of `inbaid` if remote clients call it.
+
+After DNS records are published, run `inbai doctor` to verify MX, TXT, PTR, port 25, TLS on port 443, and blocklists.
+
+## Upgrade Stalwart
+
+`deploy/compose/compose.yaml` pins the Stalwart image tag (`stalwartlabs/stalwart:v1`). Before upgrading:
+
+1. Stop `inbaid` and back up both the inbAI database (`inbai backup`) and Stalwart's `stalwart` PostgreSQL database and `stalwart` volume. See [backup](backup.md).
+2. Update the image tag in `deploy/compose/compose.yaml` (or pull a newer patch release on the same tag with `docker compose pull stalwart`).
+3. Recreate Stalwart and start the stack:
+
+```sh
+docker compose up -d
+```
+
+4. Check `GET /healthz`, `GET /readyz`, and `inbai doctor`.
+
+## Stop and remove the stack
+
+To stop the containers while keeping the `postgres` and `stalwart` volumes:
+
+```sh
+docker compose down
+```
+
+To remove the containers and delete all stored mail, accounts, and inbAI state in those volumes:
+
+```sh
+docker compose down -v
+```
+
+Remove `$INBAI_CONFIG_DIR/config.json` as well if you are decommissioning the host.

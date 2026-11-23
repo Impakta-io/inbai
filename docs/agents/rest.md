@@ -1,4 +1,4 @@
-Status: partial — `inbaid serve` creates, lists, and deletes inboxes, and can list, search, read, send, reply, and delete messages, including attachment upload and download. Operators and agents authenticate as described below. MCP is a separate transport, described in [MCP](mcp.md).
+Status: current — `inbaid serve` creates, lists, and deletes inboxes, manages sender allowlists and retention, and can list, search, read, send, reply, and delete messages, including attachment upload and download. Operators and agents authenticate as described below. MCP is a separate transport, described in [MCP](mcp.md).
 
 # REST API
 
@@ -18,6 +18,17 @@ The server allows 50 submitted messages per inbox per UTC day and 500 per domain
 
 Errors use `application/problem+json` with `type`, `title`, `status`, and `detail`.
 
-## Planned sections
+## Exchange a client credential
 
-- How to exchange a client credential for an access token.
+An agent obtains an access token from `POST /oauth/token` using `grant_type=client_credentials`. The server accepts the client id and secret either in HTTP Basic auth (`client_secret_basic`) or in the form body (`client_secret_post`):
+
+```sh
+curl -s -X POST \
+  -u "$INBAI_CLIENT_ID:$INBAI_CLIENT_SECRET" \
+  -d 'grant_type=client_credentials' \
+  http://127.0.0.1:8787/oauth/token
+```
+
+The response is JSON with `access_token`, `token_type` (`bearer`), and `expires_in` (`600` seconds). Pass `access_token` in `Authorization: Bearer <token>` on `/v1/*` and `/mcp` calls, and request a fresh token before it expires. If the credential is unknown or the agent has been suspended, `POST /oauth/token` answers `401` with `{"error":"invalid_client"}`.
+
+Discovery metadata is served at `GET /.well-known/oauth-authorization-server` and `GET /.well-known/oauth-protected-resource`.
