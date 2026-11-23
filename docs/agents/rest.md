@@ -1,4 +1,4 @@
-Status: partial — `inbaid serve` creates an inbox and can list, search, read, send, reply, and delete. OAuth and attachments are not implemented.
+Status: partial — `inbaid serve` creates one inbox or many, and can list, search, read, send, reply, and delete, including attachments. OAuth is not implemented.
 
 # REST API
 
@@ -10,7 +10,7 @@ Set `INBAI_OPERATOR_TOKEN` before starting the server. Send it as `Authorization
 
 ## Routes
 
-`POST /v1/inboxes` with `{"localPart":"alice"}` creates `alice@<domain>` and returns the account id. `GET /v1/inboxes/{id}/messages` returns id, subject, and preview. Add `?q=` to search message text. `GET /v1/inboxes/{id}/messages/{messageId}` adds the plain-text body and threading headers. `POST /v1/inboxes/{id}/messages` submits `from`, `to`, `subject`, and `text`. `POST /v1/inboxes/{id}/messages/{messageId}/reply` does the same and sets `In-Reply-To` and `References` from the original message. `DELETE /v1/inboxes/{id}/messages/{messageId}` removes that message.
+`POST /v1/inboxes` with `{"localPart":"alice"}` creates `alice@<domain>` and returns the account id. `POST /v1/inboxes/generate` with `{"prefix":"u","count":10}` creates `u00000` through `u00009`. A count from 51 to 10000 returns `202` and a job id. `GET /v1/jobs/{id}` reports `running`, `done`, or `failed`. `GET /v1/inboxes/{id}/messages` returns id, subject, and preview. Add `?q=` to search message text. `GET /v1/inboxes/{id}/messages/{messageId}` adds the plain-text body, threading headers, and attachment names. `POST /v1/inboxes/{id}/messages` submits `from`, `to`, `subject`, `text`, and optional base64 `attachments`. `POST /v1/inboxes/{id}/messages/{messageId}/reply` does the same and sets `In-Reply-To` and `References` from the original message. `DELETE /v1/inboxes/{id}/messages/{messageId}` removes that message.
 
 Create and send take an optional `Idempotency-Key` header. Repeating a completed key returns the first result and does not create or send again.
 
@@ -22,4 +22,4 @@ Errors use `application/problem+json` with `type`, `title`, `status`, and `detai
 
 - How to exchange a client credential for an access token.
 - Cursor pagination.
-- Attachments.
+- Downloading attachment bytes.

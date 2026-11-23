@@ -40,6 +40,74 @@ paths:
           $ref: "#/components/responses/Problem"
         "502":
           $ref: "#/components/responses/Problem"
+  /v1/inboxes/generate:
+    post:
+      operationId: generateInboxes
+      summary: Create many inboxes. More than 50 addresses returns a job.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prefix, count]
+              properties:
+                prefix:
+                  type: string
+                count:
+                  type: integer
+                  minimum: 1
+                  maximum: 10000
+      responses:
+        "201":
+          description: Created in this request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inboxes]
+                properties:
+                  inboxes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Inbox"
+        "202":
+          description: Accepted as a job
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, status]
+                properties:
+                  jobId:
+                    type: string
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      summary: Read a bulk-create job.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/inboxes/{id}/messages:
     parameters:
       - name: id
@@ -214,6 +282,21 @@ components:
           type: string
         text:
           type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+    Attachment:
+      type: object
+      required: [name, type, data]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        data:
+          type: string
+          contentEncoding: base64
     Message:
       type: object
       required: [id, subject, preview]
@@ -238,6 +321,38 @@ components:
           type: array
           items:
             type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoredAttachment"
+    StoredAttachment:
+      type: object
+      required: [name, type, size]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        size:
+          type: integer
+    Job:
+      type: object
+      required: [id, status, total, created]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        total:
+          type: integer
+        created:
+          type: integer
+        error:
+          type: string
+        inboxes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Inbox"
     MessageList:
       type: object
       required: [messages]

@@ -7,6 +7,9 @@ import (
 	"context"
 	"flag"
 	"io"
+	"mime"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,8 +20,16 @@ import (
 )
 
 func inboxCmd(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "create" {
-		writef(stderr, "usage: inbai inbox create <local-part>\n")
+	if len(args) == 0 {
+		writef(stderr, "usage: inbai inbox [create|generate]\n")
+		return 2
+	}
+	switch args[0] {
+	case "generate":
+		return inboxGenerate(args[1:], stdout, stderr)
+	case "create":
+	default:
+		writef(stderr, "usage: inbai inbox [create|generate]\n")
 		return 2
 	}
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)
@@ -134,11 +145,12 @@ func messageSend(args []string, stdout, stderr io.Writer) int {
 	to := fs.String("to", "", "recipient address")
 	subject := fs.String("subject", "", "subject")
 	body := fs.String("body", "", "plain text body")
+	attach := fs.String("attach", "", "file to attach")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *from == "" || *to == "" || *subject == "" {
-		writef(stderr, "usage: inbai message send --from <address> --to <address> --subject <text> [--body <text>]\n")
+		writef(stderr, "usage: inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]\n")
 		return 2
 	}
 	cfg, _, client, code := openMail(configPath, tlsInsecure, stderr)
@@ -152,12 +164,26 @@ func messageSend(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	var files []mailbackend.File
+	if *attach != "" {
+		data, err := os.ReadFile(*attach)
+		if err != nil {
+			writef(stderr, "message send: %s\n", err)
+			return 1
+		}
+		files = []mailbackend.File{{
+			Name: filepath.Base(*attach),
+			Type: mime.TypeByExtension(filepath.Ext(*attach)),
+			Data: data,
+		}}
+	}
 	err := service.New(stalwart.Mail{Client: client}).Deliver(ctx, service.Caller{Operator: true}, mailbackend.Outbound{
-		AccountID: accountID,
-		From:      *from,
-		To:        *to,
-		Subject:   *subject,
-		Body:      *body,
+		AccountID:   accountID,
+		From:        *from,
+		To:          *to,
+		Subject:     *subject,
+		Body:        *body,
+		Attachments: files,
 	}, "")
 	if err != nil {
 		writef(stderr, "message send: %s\n", err)

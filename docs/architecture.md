@@ -70,7 +70,7 @@ Message retention defaults to 30 days. An operator can change or disable it per 
 
 ## API
 
-`api/openapi.yaml` is the contract. `inbaid serve` listens on `127.0.0.1:8787` and serves inbox create, message list, search, read, send, reply, and delete. The caller presents `INBAI_OPERATOR_TOKEN` as a bearer token. Create and send accept an `Idempotency-Key`. A completed key returns the first result and does not send again. The default send quota is 50 messages per inbox per day and 500 per domain per day. Errors use RFC 9457 problem details. Quota and idempotency keys are kept in the server process until PostgreSQL is wired. Agent OAuth, cursor pagination, attachments, and bulk inbox generation are not implemented.
+`api/openapi.yaml` is the contract. `inbaid serve` listens on `127.0.0.1:8787` and serves inbox create, bulk generate, message list, search, read, send, reply, and delete. Send and reply accept attachments. A generate of more than 50 addresses returns a job. The job record stays in the server process. The caller presents `INBAI_OPERATOR_TOKEN` as a bearer token. Create and send accept an `Idempotency-Key`. A completed key returns the first result and does not send again. The default send quota is 50 messages per inbox per day and 500 per domain per day. Errors use RFC 9457 problem details. Quota and idempotency keys are kept in the server process until PostgreSQL is wired. Agent OAuth and cursor pagination are not implemented.
 
 MCP tools are defined once and served two ways: Streamable HTTP at `/mcp` on `inbaid`, and stdio from `inbai mcp serve`. The HTTP transport has no protocol-level session, so it works behind a load balancer.
 

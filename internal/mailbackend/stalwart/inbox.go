@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 // InboxInput names the account to create inside an existing domain.
@@ -19,24 +21,33 @@ type InboxInput struct {
 
 // Delivery is one message submitted as an existing account.
 type Delivery struct {
-	AccountID  string
-	From       string
-	To         string
-	Subject    string
-	Body       string
-	InReplyTo  []string
-	References []string
+	AccountID   string
+	From        string
+	To          string
+	Subject     string
+	Body        string
+	InReplyTo   []string
+	References  []string
+	Attachments []mailbackend.File
 }
 
 // Message is one message in an inbox.
 type Message struct {
-	ID         string   `json:"id"`
-	Subject    string   `json:"subject"`
-	Preview    string   `json:"preview"`
-	Text       string   `json:"text,omitempty"`
-	MessageID  []string `json:"messageId,omitempty"`
-	InReplyTo  []string `json:"inReplyTo,omitempty"`
-	References []string `json:"references,omitempty"`
+	ID          string       `json:"id"`
+	Subject     string       `json:"subject"`
+	Preview     string       `json:"preview"`
+	Text        string       `json:"text,omitempty"`
+	MessageID   []string     `json:"messageId,omitempty"`
+	InReplyTo   []string     `json:"inReplyTo,omitempty"`
+	References  []string     `json:"references,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Attachment is one file on a stored message.
+type Attachment struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int    `json:"size"`
 }
 
 // CreateInbox creates a Stalwart account that can receive mail.
@@ -122,6 +133,26 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 	}
 	if len(msg.References) > 0 {
 		draft["references"] = msg.References
+	}
+	if len(msg.Attachments) > 0 {
+		files := make([]any, 0, len(msg.Attachments))
+		for _, file := range msg.Attachments {
+			blobID, err := client.upload(ctx, msg.AccountID, file.Type, file.Data)
+			if err != nil {
+				return err
+			}
+			kind := file.Type
+			if kind == "" {
+				kind = "application/octet-stream"
+			}
+			files = append(files, map[string]any{
+				"blobId":      blobID,
+				"name":        file.Name,
+				"type":        kind,
+				"disposition": "attachment",
+			})
+		}
+		draft["attachments"] = files
 	}
 	_, err = client.invokeMany(ctx, []jmapCall{
 		{Name: "Email/set", ID: "e", Args: map[string]any{

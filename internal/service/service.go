@@ -54,11 +54,14 @@ type Service struct {
 	inboxDaily  int
 	domainDaily int
 	now         func() time.Time
+	syncLimit   int
 
 	mu        sync.Mutex
 	sent      map[string]int
 	sentID    map[string]struct{}
 	createdID map[string]string
+	jobs      map[string]*Job
+	generated map[string]GenerateResult
 }
 
 // New returns a service over a mail backend.

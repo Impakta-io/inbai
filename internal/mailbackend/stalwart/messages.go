@@ -25,7 +25,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":          accountID,
 		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues"},
+		"properties":         []string{"subject", "preview", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments"},
 		"fetchAllBodyValues": true,
 	})
 	if err != nil {
@@ -107,6 +107,11 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 			BodyValues map[string]struct {
 				Value string `json:"value"`
 			} `json:"bodyValues"`
+			Attachments []struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+				Size int    `json:"size"`
+			} `json:"attachments"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -127,6 +132,13 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 		}
 		if body, ok := item.BodyValues[part]; ok {
 			out[i].Text = body.Value
+		}
+		for _, file := range item.Attachments {
+			out[i].Attachments = append(out[i].Attachments, Attachment{
+				Name: file.Name,
+				Type: file.Type,
+				Size: file.Size,
+			})
 		}
 	}
 	return out, nil
