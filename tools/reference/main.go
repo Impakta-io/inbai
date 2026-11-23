@@ -64,7 +64,7 @@ func write(root string, check bool) error {
 			if err != nil {
 				return err
 			}
-			if string(got) != body {
+			if strings.ReplaceAll(string(got), "\r\n", "\n") != body {
 				return fmt.Errorf("%s is stale; run go run ./tools/reference", filepath.Base(path))
 			}
 			continue
@@ -121,7 +121,7 @@ func operations(text string) ([]operation, error) {
 		method, id, summary = "", "", ""
 		return nil
 	}
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(line, "  /") && strings.HasSuffix(trim, ":") {
 			if err := flush(); err != nil {

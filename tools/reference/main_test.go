@@ -25,6 +25,10 @@ func TestOperationsKeepMethodAndPath(t *testing.T) {
 	if len(ops) != 2 || ops[0].id != "createInbox" || ops[0].method != "post" || ops[1].method != "get" || ops[1].path != "/v1/inboxes" {
 		t.Fatalf("%+v", ops)
 	}
+	crlfOps, err := operations(strings.ReplaceAll(text, "\n", "\r\n"))
+	if err != nil || len(crlfOps) != 2 {
+		t.Fatalf("crlf ops=%+v err=%v", crlfOps, err)
+	}
 }
 
 func TestHTTPReferenceListsEveryOperation(t *testing.T) {
