@@ -147,18 +147,19 @@ func (b apiBox) Delete(ctx context.Context, inbox, messageID string) error {
 }
 
 func (b apiBox) Wait(ctx context.Context, inbox string, timeout time.Duration) ([]mailbackend.Message, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		messages, err := b.List(ctx, inbox, "")
-		if err != nil || len(messages) > 0 || !time.Now().Before(deadline) {
-			return messages, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(b.client.pause()):
-		}
+	seconds := int(timeout.Seconds())
+	if seconds < 0 {
+		seconds = 0
 	}
+	records, err := b.client.events(ctx, inbox, 0, seconds)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mailbackend.Message, len(records))
+	for i, record := range records {
+		out[i] = mailbackend.Message{ID: record.MessageID, Subject: record.Kind}
+	}
+	return out, nil
 }
 
 func toMessages(in []apiMessage) []mailbackend.Message {

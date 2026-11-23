@@ -178,6 +178,7 @@ type fakeMail struct {
 	made     []string
 	last     mailbackend.Outbound
 	listed   bool
+	jmap     string
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
@@ -217,3 +218,18 @@ func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, er
 }
 
 func (f *fakeMail) Delete(context.Context, string, string) error { return nil }
+
+func (f *fakeMail) MailState(context.Context, string) (string, error) {
+	if f.jmap == "" {
+		f.jmap = "s0"
+	}
+	return f.jmap, nil
+}
+
+func (f *fakeMail) MailChanges(_ context.Context, _, since string) (mailbackend.Delta, error) {
+	if since == "s0" {
+		f.jmap = "s1"
+		return mailbackend.Delta{State: "s1", Created: []string{"m-new"}}, nil
+	}
+	return mailbackend.Delta{State: since}, nil
+}

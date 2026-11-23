@@ -36,7 +36,7 @@ inbai domain add
 
 Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates, so `domain add` skips certificate verification when the stored URL is localhost. Copy the printed zone file into DNS. Run `inbai domain add` again to see which MX and TXT records are published.
 
-Start `inbaid`, then create an inbox and submit a message as that address:
+The Postgres service also creates a database named `inbai` for the event log. On the compose network its URL is `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable`. This file does not publish port 5432. `inbaid serve` uses the log when `INBAI_DATABASE_URL` is set. Without that URL the event routes answer 503.
 
 ```sh
 export INBAI_OPERATOR_TOKEN='choose-a-token'
