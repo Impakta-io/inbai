@@ -54,6 +54,28 @@ func TestCreateListAndSend(t *testing.T) {
 	}
 }
 
+func TestReadSearchReplyAndDelete(t *testing.T) {
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body", Text: "body"}}}
+	srv := httptest.NewServer((&Server{Service: service.New(mail), Token: "operator-token", Domain: "example.com"}).Handler())
+	defer srv.Close()
+	res := call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages/m", "operator-token", "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(readBody(t, res), `"text":"body"`) {
+		t.Fatalf("get %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages?q=hello", "operator-token", "", "")
+	if res.StatusCode != http.StatusOK || !strings.Contains(readBody(t, res), `"subject":"hello"`) {
+		t.Fatalf("search %d", res.StatusCode)
+	}
+	res = call(t, srv.URL, http.MethodPost, "/v1/inboxes/alice-id/messages/m/reply", "operator-token", `{"from":"alice@example.com","to":"bob@example.com","text":"reply"}`, "")
+	if res.StatusCode != http.StatusAccepted || mail.sent != 1 {
+		t.Fatalf("reply %d sends %d", res.StatusCode, mail.sent)
+	}
+	res = call(t, srv.URL, http.MethodDelete, "/v1/inboxes/alice-id/messages/m", "operator-token", "", "")
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete %d %s", res.StatusCode, readBody(t, res))
+	}
+}
+
 func TestQuotaIsAProblem(t *testing.T) {
 	mail := &fakeMail{id: "alice-id"}
 	svc := service.New(mail)
@@ -125,3 +147,16 @@ func (f *fakeMail) Deliver(context.Context, mailbackend.Outbound) error {
 func (f *fakeMail) List(context.Context, string) ([]mailbackend.Message, error) {
 	return f.messages, nil
 }
+
+func (f *fakeMail) Search(context.Context, string, string) ([]mailbackend.Message, error) {
+	return f.messages, nil
+}
+
+func (f *fakeMail) Get(context.Context, string, string) (mailbackend.Message, error) {
+	if len(f.messages) == 0 {
+		return mailbackend.Message{}, nil
+	}
+	return f.messages[0], nil
+}
+
+func (f *fakeMail) Delete(context.Context, string, string) error { return nil }

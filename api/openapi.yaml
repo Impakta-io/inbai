@@ -49,7 +49,7 @@ paths:
           type: string
     get:
       operationId: listMessages
-      summary: List messages in an inbox.
+      summary: List messages in an inbox. A q query parameter searches text.
       responses:
         "200":
           description: Messages
@@ -82,6 +82,74 @@ paths:
                   status:
                     type: string
                     const: submitted
+        "401":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/messages/{messageId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getMessage
+      summary: Read one message, including its plain-text body and threading headers.
+      responses:
+        "200":
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMessage
+      summary: Delete one message.
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Problem"
+        "502":
+          $ref: "#/components/responses/Problem"
+  /v1/inboxes/{id}/messages/{messageId}/reply:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: replyMessage
+      summary: Reply to one message. The server sets In-Reply-To and References.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessage"
+      responses:
+        "202":
+          description: Submitted
         "401":
           $ref: "#/components/responses/Problem"
         "429":
@@ -156,6 +224,20 @@ components:
           type: string
         preview:
           type: string
+        text:
+          type: string
+        messageId:
+          type: array
+          items:
+            type: string
+        inReplyTo:
+          type: array
+          items:
+            type: string
+        references:
+          type: array
+          items:
+            type: string
     MessageList:
       type: object
       required: [messages]

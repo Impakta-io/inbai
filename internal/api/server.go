@@ -30,6 +30,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/inboxes", s.createInbox)
 	mux.HandleFunc("GET /v1/inboxes/{id}/messages", s.listMessages)
 	mux.HandleFunc("POST /v1/inboxes/{id}/messages", s.sendMessage)
+	mux.HandleFunc("GET /v1/inboxes/{id}/messages/{messageId}", s.getMessage)
+	mux.HandleFunc("DELETE /v1/inboxes/{id}/messages/{messageId}", s.deleteMessage)
+	mux.HandleFunc("POST /v1/inboxes/{id}/messages/{messageId}/reply", s.replyMessage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
 			writeProblem(w, http.StatusUnauthorized, "Unauthorized", "bearer token is missing or rejected")
@@ -74,7 +77,15 @@ func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
-	messages, err := s.Service.List(r.Context(), service.Caller{Operator: true}, r.PathValue("id"))
+	accountID := r.PathValue("id")
+	caller := service.Caller{Operator: true}
+	var messages []mailbackend.Message
+	var err error
+	if query := r.URL.Query().Get("q"); query != "" {
+		messages, err = s.Service.Search(r.Context(), caller, accountID, query)
+	} else {
+		messages, err = s.Service.List(r.Context(), caller, accountID)
+	}
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -102,6 +113,48 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		To:        body.To,
 		Subject:   body.Subject,
 		Body:      body.Text,
+	}, r.Header.Get("Idempotency-Key"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "submitted"})
+}
+
+func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
+	message, err := s.Service.Get(r.Context(), service.Caller{Operator: true}, r.PathValue("id"), r.PathValue("messageId"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, message)
+}
+
+func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	err := s.Service.Delete(r.Context(), service.Caller{Operator: true}, r.PathValue("id"), r.PathValue("messageId"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) replyMessage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		From    string `json:"from"`
+		To      string `json:"to"`
+		Subject string `json:"subject"`
+		Text    string `json:"text"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Bad request", "request body is not JSON")
+		return
+	}
+	err := s.Service.Reply(r.Context(), service.Caller{Operator: true}, r.PathValue("id"), r.PathValue("messageId"), mailbackend.Outbound{
+		From:    body.From,
+		To:      body.To,
+		Subject: body.Subject,
+		Body:    body.Text,
 	}, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)
