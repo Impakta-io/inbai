@@ -47,6 +47,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 }
 
 // DeleteMessage removes one message from the account.
+// A message that is already gone counts as deleted, as it does for the IMAP backend.
 func DeleteMessage(ctx context.Context, client *Client, accountID, messageID string) error {
 	if client == nil {
 		return fmt.Errorf("missing stalwart client")
@@ -54,11 +55,28 @@ func DeleteMessage(ctx context.Context, client *Client, accountID, messageID str
 	if accountID == "" || messageID == "" {
 		return fmt.Errorf("message needs an account and an id")
 	}
-	_, err := client.invoke(ctx, "e", "Email/set", map[string]any{
+	raw, err := client.invoke(ctx, "e", "Email/set", map[string]any{
 		"accountId": accountID,
 		"destroy":   []string{messageID},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	var body struct {
+		NotDestroyed map[string]struct {
+			Type string `json:"type"`
+		} `json:"notDestroyed"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	if missing, ok := body.NotDestroyed[messageID]; ok && missing.Type == "notFound" {
+		return nil
+	}
+	if err := destroyedID(raw, messageID); err != nil {
+		return fmt.Errorf("stalwart did not delete the message: %w", err)
+	}
+	return nil
 }
 
 func queryMessages(ctx context.Context, client *Client, accountID string, filter map[string]any, page mailbackend.Page, full bool) ([]Message, string, error) {
