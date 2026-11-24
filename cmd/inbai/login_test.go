@@ -156,3 +156,86 @@ func TestLoginWithOperatorToken(t *testing.T) {
 		t.Fatalf("bad login should not write config file")
 	}
 }
+
+func TestLoginKeepsOperatorToken(t *testing.T) {
+	var seenAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			_, _ = w.Write([]byte(`{"access_token":"agent-jwt","token_type":"bearer","expires_in":600}`))
+		case "/v1/inboxes":
+			seenAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"inboxes":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"apiUrl":"`+srv.URL+`","operatorToken":"server-token"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	noEnv := func(string) string { return "" }
+	secretEnv := func(key string) string {
+		if key == "INBAI_CLIENT_SECRET" {
+			return "s3cret"
+		}
+		return ""
+	}
+	if code := run([]string{"login", "--client-id", "cli-1", "--config", cfgPath}, &stdout, &stderr, secretEnv); code != 0 {
+		t.Fatalf("login %d: %s", code, stderr.String())
+	}
+	cfg, err := readConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OperatorToken != "server-token" || cfg.ClientID != "cli-1" {
+		t.Fatalf("after login: operatorToken %q clientId %q", cfg.OperatorToken, cfg.ClientID)
+	}
+
+	// The CLI acts as the client, not as the stored operator token.
+	if code := run([]string{"inbox", "list", "--config", cfgPath}, &stdout, &stderr, noEnv); code != 0 {
+		t.Fatalf("inbox list %d: %s", code, stderr.String())
+	}
+	if seenAuth != "Bearer agent-jwt" {
+		t.Fatalf("auth = %q, want Bearer agent-jwt", seenAuth)
+	}
+
+	// Environment variables still win over anything stored.
+	envOp := func(key string) string {
+		if key == "INBAI_OPERATOR_TOKEN" {
+			return "env-token"
+		}
+		return ""
+	}
+	if code := run([]string{"inbox", "list", "--config", cfgPath}, &stdout, &stderr, envOp); code != 0 {
+		t.Fatalf("inbox list %d: %s", code, stderr.String())
+	}
+	if seenAuth != "Bearer env-token" {
+		t.Fatalf("auth = %q, want Bearer env-token", seenAuth)
+	}
+
+	// Clear drops the client credentials and keeps the operator token.
+	stdout.Reset()
+	if code := run([]string{"login", "--clear", "--config", cfgPath}, &stdout, &stderr, noEnv); code != 0 {
+		t.Fatalf("clear %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "client credentials") {
+		t.Fatalf("clear output %q does not say what was cleared", stdout.String())
+	}
+	cfg, err = readConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientID != "" || cfg.ClientSecret != "" || cfg.OperatorToken != "server-token" {
+		t.Fatalf("after clear: %+v", cfg)
+	}
+	if code := run([]string{"inbox", "list", "--config", cfgPath}, &stdout, &stderr, noEnv); code != 0 {
+		t.Fatalf("inbox list %d: %s", code, stderr.String())
+	}
+	if seenAuth != "Bearer server-token" {
+		t.Fatalf("auth after clear = %q, want Bearer server-token", seenAuth)
+	}
+}
