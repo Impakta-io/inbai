@@ -57,7 +57,22 @@ func domainRelay(args []string, stdout, stderr io.Writer, getenv func(string) st
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
+	path, err := configFilePath(*configPath)
+	if err != nil {
+		writef(stderr, "config directory: %s\n", err)
+		return 1
+	}
+	cfg, err := readStoredConfig(path)
+	if err != nil {
+		writef(stderr, "read config: %s\n", err)
+		return 1
+	}
+	// The environment wins. Docker-mode init stores the operator password in
+	// the config file. External-mode init used the recovery password.
 	password := getenv(operatorPasswordEnv)
+	if password == "" {
+		password = cfg.OperatorPassword
+	}
 	if password == "" {
 		password = getenv(recoveryPasswordEnv)
 	}
@@ -72,16 +87,6 @@ func domainRelay(args []string, stdout, stderr io.Writer, getenv func(string) st
 			writef(stderr, "domain relay needs %s\n", relayPasswordEnv)
 			return 2
 		}
-	}
-	path, err := configFilePath(*configPath)
-	if err != nil {
-		writef(stderr, "config directory: %s\n", err)
-		return 1
-	}
-	cfg, err := readConfig(path)
-	if err != nil {
-		writef(stderr, "read config: %s\n", err)
-		return 1
 	}
 	if cfg.Domain == "" || cfg.StalwartURL == "" {
 		writef(stderr, "run inbai init before domain relay\n")

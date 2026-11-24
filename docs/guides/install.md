@@ -29,7 +29,7 @@ inbaid serve
 
 If you prefer to manage Stalwart yourself or run `inbaid` inside Docker Compose as well, follow [deploy/compose](../../deploy/compose/README.md) and pass `--url` with `INBAI_RECOVERY_PASSWORD`.
 
-`inbai init` writes a config file. The default path is `$XDG_CONFIG_HOME/inbai/config.json`, or the platform user config directory when that variable is unset. On macOS that directory is `$HOME/Library/Application Support/inbai`. The file mode is `0600`. It contains the service API key, operator token, and database URL (in Docker mode), so do not commit it. `--config` chooses another path.
+`inbai init` writes a config file. The default path is `$XDG_CONFIG_HOME/inbai/config.json`, or the platform user config directory when that variable is unset. On macOS that directory is `$HOME/Library/Application Support/inbai`. The file mode is `0600`. A config directory that init creates gets mode `0700`. The file contains the service API key, operator token, and, in Docker mode, the operator password and database URL, so do not commit it. `--config` chooses another path.
 
 When using an external Stalwart instance, `INBAI_RECOVERY_PASSWORD` is the recovery administrator password. Init uses it once, stores an API key, and sets the same value as the password for `operator@<domain>`. `inbai domain relay` asks for that password again as `INBAI_OPERATOR_PASSWORD`.
 
@@ -73,3 +73,5 @@ docker compose down -v
 ```
 
 Remove `$INBAI_CONFIG_DIR/config.json` as well if you are decommissioning the host.
+
+The stack that `inbai init` starts in Docker mode takes the same commands with `-f <config-dir>/stack/compose.yaml`. After `down -v` there, `inbai init` can be run again with the same domain. It sees that the new Stalwart refuses the saved API key and saves a new one. With an external Stalwart, such as this Compose file, init does not check the key. Remove `config.json` before running init again after `down -v`.
