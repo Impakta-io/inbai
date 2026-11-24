@@ -19,23 +19,42 @@ var authValues = map[string]struct{}{
 	"temperror": {}, "permerror": {}, "policy": {}, "unknown": {}, "bestguesspass": {},
 }
 
+// HeaderField is one field of a message header. Value is the field body as
+// it appears in the message, folding included.
+type HeaderField struct {
+	Name  string
+	Value string
+}
+
 // AuthenticationOf reads SPF, DKIM, and DMARC from the Authentication-Results
-// header that our own mail server wrote.
+// field that our own mail server wrote when it received the message.
 //
-// headers are the values of every Authentication-Results field on the message,
-// in header order, top first. Any server on the path, and the sender, can add
-// one of these fields, so only the top-most one whose authserv-id equals
-// authservID is read. The comparison ignores case and is otherwise exact.
-// Every other instance is ignored. When authservID is empty or no header
-// matches, SPF, DKIM, and DMARC are empty. A malformed header has no
-// authserv-id anyone can trust, so reading stops there and they are empty too.
+// fields is the whole message header, in order, top first. The receiving
+// server adds its trace fields, Received and Authentication-Results, at the
+// top, above everything the sender wrote. The sender can also write an
+// Authentication-Results field that names our server, and our server does not
+// add one to every message: by default Stalwart adds none to mail that one of
+// its own accounts submits. So the result comes from one field, and only when
+// all of these hold:
 //
-// When the header has more than one result for a method, such as one per DKIM
+//   - it is the top-most Authentication-Results field on the message;
+//   - its authserv-id equals authservID, ignoring case;
+//   - it is in the trace block at the top of the header, above the first
+//     field that the author or a DKIM signer writes (see authorField); and
+//   - that trace block has a Received field.
+//
+// Otherwise SPF, DKIM, and DMARC are empty. A malformed field has no
+// authserv-id anyone can trust, so it reads as no results too. The rule holds
+// when our server adds an Authentication-Results field to every message it
+// accepts, or signs the mail its own accounts send; inbai init sets the first
+// for Stalwart, and Stalwart does the second by default.
+//
+// When the field has more than one result for a method, such as one per DKIM
 // signature, the value is pass if any of them passed, and the first result
 // otherwise.
 //
 // junk sets Spam to "spam". A message that is not marked junk leaves Spam empty.
-func AuthenticationOf(headers []string, authservID string, junk bool) Authentication {
+func AuthenticationOf(fields []HeaderField, authservID string, junk bool) Authentication {
 	var out Authentication
 	if junk {
 		out.Spam = "spam"
@@ -44,20 +63,63 @@ func AuthenticationOf(headers []string, authservID string, junk bool) Authentica
 	if authservID == "" {
 		return out
 	}
-	for _, header := range headers {
-		id, results, ok := parseAuthResults(header)
-		if !ok {
-			return out
-		}
-		if !strings.EqualFold(id, authservID) {
-			continue
-		}
-		out.SPF = pick(results["spf"])
-		out.DKIM = pick(results["dkim"])
-		out.DMARC = pick(results["dmarc"])
+	value, ok := traceResults(fields)
+	if !ok {
 		return out
 	}
+	id, results, ok := parseAuthResults(value)
+	if !ok || !strings.EqualFold(id, authservID) {
+		return out
+	}
+	out.SPF = pick(results["spf"])
+	out.DKIM = pick(results["dkim"])
+	out.DMARC = pick(results["dmarc"])
 	return out
+}
+
+// traceResults returns the value of the top-most Authentication-Results field
+// when it is in the trace block at the top of fields and that block has a
+// Received field. The trace block ends at the first authorField.
+func traceResults(fields []HeaderField) (string, bool) {
+	var (
+		value           string
+		found, received bool
+	)
+	for _, field := range fields {
+		name := strings.ToLower(strings.TrimSpace(field.Name))
+		if authorField(name) {
+			break
+		}
+		switch name {
+		case "received":
+			received = true
+		case "authentication-results":
+			if !found {
+				value, found = field.Value, true
+			}
+		}
+	}
+	return value, found && received
+}
+
+// authorFields are the RFC 5322 originator, destination, identification, and
+// informational fields, MIME-Version, and DKIM-Signature. The author or a
+// server on the sender's side writes them, and a receiving server adds its
+// trace fields above them. Our server signs only mail it sends, so a
+// DKIM-Signature above an Authentication-Results field means our server did
+// not write that field for an inbound hop.
+var authorFields = map[string]struct{}{
+	"from": {}, "sender": {}, "reply-to": {}, "to": {}, "cc": {}, "bcc": {},
+	"message-id": {}, "in-reply-to": {}, "references": {},
+	"subject": {}, "comments": {}, "keywords": {}, "date": {},
+	"mime-version": {}, "dkim-signature": {},
+}
+
+// authorField reports whether the lower-case field name is one of
+// authorFields or a Content- field.
+func authorField(name string) bool {
+	_, ok := authorFields[name]
+	return ok || strings.HasPrefix(name, "content-")
 }
 
 func pick(results []string) string {

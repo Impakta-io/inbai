@@ -37,7 +37,7 @@ func TestGetSearchAndDelete(t *testing.T) {
 				if prop == "bodyValues" {
 					full = true
 				}
-				if prop == "header:Authentication-Results:asText:all" {
+				if prop == "headers" {
 					sawAuth = true
 				}
 				if prop == "from" {
@@ -57,7 +57,11 @@ func TestGetSearchAndDelete(t *testing.T) {
 				"bodyValues": map[string]any{"p": map[string]any{"value": "body"}},
 				"from":       []any{map[string]any{"email": "ada@example.com"}},
 				"keywords":   map[string]bool{"$junk": true},
-				"header:Authentication-Results:asText:all": []string{"mail.example.com; spf=pass; dkim=pass; dmarc=fail"},
+				"headers": []any{
+					map[string]any{"name": "Received", "value": " from mx.sender.example by mail.example.com (Stalwart SMTP) with ESMTP id 1;\r\n\tTue, 24 Nov 2026 12:00:00 +0000"},
+					map[string]any{"name": "Authentication-Results", "value": " mail.example.com; spf=pass; dkim=pass; dmarc=fail"},
+					map[string]any{"name": "From", "value": " ada@example.com"},
+				},
 			}}}, "g"}})
 		case "Mailbox/query":
 			writeMethods(w, []any{[]any{"Mailbox/query", map[string]any{"ids": []string{"inbox-box"}}, "q"}})
@@ -97,46 +101,96 @@ func TestGetSearchAndDelete(t *testing.T) {
 }
 
 // authResultsServer answers Email/get as RFC 8621 section 4.1.3 says Stalwart
-// does: header:Authentication-Results:asText is the last field in the message,
-// and :asText:all is every field, top first.
-func authResultsServer(t *testing.T, fields []string) *httptest.Server {
+// does for a message whose header is block: headers is every field in order,
+// with the raw value after the colon, and
+// header:Authentication-Results:asText:all is the values of those fields.
+func authResultsServer(t *testing.T, block string) *httptest.Server {
 	t.Helper()
+	type emailHeader struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	var fields []emailHeader
+	if block != "" {
+		for _, line := range strings.Split(strings.TrimSuffix(block, "\r\n"), "\r\n") {
+			if line[0] == ' ' || line[0] == '\t' {
+				fields[len(fields)-1].Value += "\r\n" + line
+				continue
+			}
+			name, value, _ := strings.Cut(line, ":")
+			fields = append(fields, emailHeader{Name: name, Value: value})
+		}
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, args := allCalls(t, r.Body)
 		item := map[string]any{"id": "msg", "subject": "hello"}
 		props, _ := args[0]["properties"].([]any)
 		for _, prop := range props {
 			switch prop {
-			case "header:Authentication-Results:asText":
-				if len(fields) > 0 {
-					item["header:Authentication-Results:asText"] = fields[len(fields)-1]
-				} else {
-					item["header:Authentication-Results:asText"] = nil
-				}
+			case "headers":
+				item["headers"] = fields
 			case "header:Authentication-Results:asText:all":
-				item["header:Authentication-Results:asText:all"] = append([]string{}, fields...)
+				texts := []string{}
+				for _, field := range fields {
+					if strings.EqualFold(field.Name, "Authentication-Results") {
+						texts = append(texts, strings.TrimSpace(field.Value))
+					}
+				}
+				item["header:Authentication-Results:asText:all"] = texts
 			}
 		}
 		writeMethods(w, []any{[]any{"Email/get", map[string]any{"list": []any{item}}, "g"}})
 	}))
 }
 
+// Header blocks as stalwartlabs/stalwart:v1 stored them, anonymised and cut.
+const (
+	ceoFields = "From: CEO <ceo@outside.example.test>\r\n" +
+		"To: alice@example.com\r\n" +
+		"Subject: quarterly numbers\r\n" +
+		"Date: Tue, 24 Nov 2026 12:00:00 +0000\r\n"
+	forgedField = "Authentication-Results: mail.example.com; spf=pass smtp.mailfrom=outside.example.test; dkim=pass header.d=outside.example.test; dmarc=pass header.from=outside.example.test\r\n"
+
+	// Inbound SMTP: Stalwart's Received and Authentication-Results lead.
+	inboundBlock = "Delivered-To: alice@example.com\r\n" +
+		"X-Spam-Status: No\r\n" +
+		"Received: from mx.bank.example (mx.bank.example [192.0.2.1])\r\n" +
+		"\tby mail.example.com (Stalwart SMTP) with ESMTPS id 4C0599E33A00001;\r\n" +
+		"\tTue, 24 Nov 2026 15:55:42 +0000\r\n" +
+		"Authentication-Results: mail.example.com;\r\n" +
+		"\tspf=fail smtp.mailfrom=bank.example;\r\n" +
+		"\tdkim=fail header.d=bank.example;\r\n" +
+		"\tdmarc=fail header.from=bank.example policy.dmarc=reject\r\n" +
+		"Received-SPF: fail (mail.example.com: domain of bank.example does not designate 192.0.2.1)\r\n" +
+		"X-Spam-Score: spam, score=11.20\r\n" +
+		"Return-Path: <help@bank.example>\r\n"
+
+	// Authenticated submission: Stalwart signs the message and adds no trace
+	// fields. The forged field below From is what a live test sent.
+	submissionBlock = "Delivered-To: alice@example.com\r\n" +
+		"X-Spam-Status: No\r\n" +
+		"DKIM-Signature: v=1; a=ed25519-sha256; s=v1-ed25519-20261124; d=example.com; c=relaxed/relaxed; r=y;\r\n" +
+		"\th=Date:Message-ID:Subject:To:From; t=1795535801; bh=u5j8L8MB6c95fNAGW1gDwrJ\r\n" +
+		"\tfntk4hoUsTG98ojM00ec=; b=rgIcAugvPpU7GGXFjyVkG6Y5eA==;\r\n" +
+		ceoFields + forgedField
+)
+
 func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
-	ours := "mail.example.com; spf=fail smtp.mailfrom=bank.example; dkim=fail header.d=bank.example; dmarc=fail header.from=bank.example"
-	forged := "mail.example.com; spf=pass; dkim=pass; dmarc=pass"
 	cases := []struct {
-		name   string
-		fields []string
-		want   mailbackend.Authentication
+		name  string
+		block string
+		want  mailbackend.Authentication
 	}{
-		{"forged below ours", []string{ours, forged}, mailbackend.Authentication{SPF: "fail", DKIM: "fail", DMARC: "fail"}},
-		{"forged by another server name", []string{"mx.example; spf=pass; dkim=pass; dmarc=pass"}, mailbackend.Authentication{}},
-		{"look-alike name", []string{"mail.example.com.evil; spf=pass; dkim=pass; dmarc=pass"}, mailbackend.Authentication{}},
-		{"none", nil, mailbackend.Authentication{}},
+		{"inbound, forged below From", inboundBlock + ceoFields + forgedField, mailbackend.Authentication{SPF: "fail", DKIM: "fail", DMARC: "fail"}},
+		{"inbound, forged first line", inboundBlock + forgedField + ceoFields, mailbackend.Authentication{SPF: "fail", DKIM: "fail", DMARC: "fail"}},
+		{"submission", submissionBlock, mailbackend.Authentication{}},
+		{"forged by another server name", strings.Replace(inboundBlock, "Authentication-Results: mail.example.com;", "Authentication-Results: mx.example;", 1) + forgedField, mailbackend.Authentication{}},
+		{"look-alike name", strings.Replace(inboundBlock, "Authentication-Results: mail.example.com;", "Authentication-Results: mail.example.com.evil;", 1), mailbackend.Authentication{}},
+		{"none", "", mailbackend.Authentication{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := authResultsServer(t, tc.fields)
+			srv := authResultsServer(t, tc.block)
 			defer srv.Close()
 			mail := Mail{Client: &Client{BaseURL: srv.URL, APIKey: "key"}, AuthservID: "MAIL.example.com"}
 			got, err := mail.Get(context.Background(), "alice-id", "msg")
@@ -148,7 +202,7 @@ func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
 			}
 		})
 	}
-	srv := authResultsServer(t, []string{"mail.example.com; spf=pass"})
+	srv := authResultsServer(t, inboundBlock)
 	defer srv.Close()
 	got, err := Mail{Client: &Client{BaseURL: srv.URL, APIKey: "key"}}.Get(context.Background(), "alice-id", "msg")
 	if err != nil || got.Authentication != (mailbackend.Authentication{}) {

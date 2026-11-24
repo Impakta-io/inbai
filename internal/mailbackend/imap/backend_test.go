@@ -79,12 +79,10 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 				say(write, "%s OK\r\n", tag)
 			case cmd == "UID SEARCH ALL" || strings.HasPrefix(cmd, "UID SEARCH TEXT"):
 				say(write, "* SEARCH 8\r\n%s OK\r\n", tag)
-			case strings.Contains(cmd, "AUTHENTICATION-RESULTS"):
-				if !strings.Contains(cmd, "REPLY-TO") {
-					t.Errorf("get did not ask for Reply-To: %s", cmd)
-				}
-				header := "Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=fail\r\nFrom: Ada <ada@example.com>\r\nReply-To: Help <help@example.com>\r\n"
-				say(write, "* 1 FETCH (UID 8 FLAGS (\\Junk) BODY[HEADER.FIELDS (AUTHENTICATION-RESULTS)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
+			case strings.Contains(cmd, "BODY.PEEK[HEADER])"):
+				header := "Received: from mx.sender.example by mail.example.com with ESMTPS id 1;\r\n\tTue, 24 Nov 2026 12:00:00 +0000\r\n" +
+					"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=fail\r\nFrom: Ada <ada@example.com>\r\nReply-To: Help <help@example.com>\r\n\r\n"
+				say(write, "* 1 FETCH (UID 8 FLAGS (\\Junk) BODY[HEADER] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
 			case strings.HasPrefix(cmd, "UID FETCH") && strings.Contains(cmd, "HEADER"):
 				header := "Subject: Hello\r\n\r\n"
 				say(write, "* 1 FETCH (UID 8 BODY[HEADER.FIELDS (SUBJECT)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
@@ -248,8 +246,8 @@ func getWithHeader(t *testing.T, authservID, header string) mailbackend.Authenti
 			switch {
 			case strings.HasPrefix(cmd, "LOGIN"), strings.HasPrefix(cmd, "SELECT"):
 				say(write, "%s OK\r\n", tag)
-			case strings.Contains(cmd, "AUTHENTICATION-RESULTS"):
-				say(write, "* 1 FETCH (UID 8 FLAGS () BODY[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM REPLY-TO)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
+			case strings.Contains(cmd, "BODY.PEEK[HEADER])"):
+				say(write, "* 1 FETCH (UID 8 FLAGS () BODY[HEADER] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
 			case strings.HasPrefix(cmd, "UID FETCH"):
 				say(write, "* 1 FETCH (UID 8 BODY[TEXT] {4}\r\nbody)\r\n%s OK\r\n", tag)
 			case strings.HasPrefix(cmd, "LOGOUT"):
@@ -271,6 +269,9 @@ func getWithHeader(t *testing.T, authservID, header string) mailbackend.Authenti
 }
 
 func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
+	const received = "Received: from mx.bank.example (mx.bank.example [192.0.2.1])\r\n" +
+		"\tby mail.example.com with ESMTPS id 4C0599E33A00001;\r\n" +
+		"\tTue, 24 Nov 2026 15:55:42 +0000\r\n"
 	cases := []struct {
 		name   string
 		header string
@@ -278,7 +279,8 @@ func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
 	}{
 		{
 			"forged below ours",
-			"Authentication-Results: mail.example.com; spf=fail smtp.mailfrom=bank.example;\r\n" +
+			received +
+				"Authentication-Results: mail.example.com; spf=fail smtp.mailfrom=bank.example;\r\n" +
 				"\tdkim=fail header.d=bank.example; dmarc=fail header.from=bank.example\r\n" +
 				"From: Bank <help@bank.example>\r\n" +
 				"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
@@ -286,23 +288,56 @@ func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
 		},
 		{
 			"a method ours did not record",
-			"Authentication-Results: mail.example.com; spf=fail\r\n" +
+			received +
+				"Authentication-Results: mail.example.com; spf=fail\r\n" +
 				"Authentication-Results: mx.example; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
 			mailbackend.Authentication{SPF: "fail"},
 		},
 		{
 			"forged only",
-			"Authentication-Results: mx.example; spf=pass; dkim=pass; dmarc=pass\r\n" +
+			received +
+				"Authentication-Results: mx.example; spf=pass; dkim=pass; dmarc=pass\r\n" +
 				"authentication-results: mail.example.com.evil; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
 			mailbackend.Authentication{},
 		},
 		{
+			"another server's field above ours",
+			received +
+				"Authentication-Results: mx.example; spf=pass\r\n" +
+				"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
+			mailbackend.Authentication{},
+		},
+		{
 			"comments and reasons",
-			"From: Ada <ada@example.com>\r\n" +
-				"AUTHENTICATION-RESULTS: Mail.Example.Com (stalwart);\r\n" +
+			"AUTHENTICATION-RESULTS: Mail.Example.Com (stalwart);\r\n" +
 				" spf=none (dkim=pass) reason=\"dmarc=pass\";\r\n" +
-				" dkim=fail header.d=a.example; dkim=pass header.d=b.example\r\n\r\n",
+				" dkim=fail header.d=a.example; dkim=pass header.d=b.example\r\n" +
+				received +
+				"From: Ada <ada@example.com>\r\n\r\n",
 			mailbackend.Authentication{SPF: "none", DKIM: "pass"},
+		},
+		{
+			// An authenticated submission: the server signed it and wrote no
+			// trace fields, so the sender's field is the top-most one.
+			"submission",
+			"DKIM-Signature: v=1; a=rsa-sha256; d=example.com; s=s1; h=From:To; b=abc=\r\n" +
+				"Received: from relay.outside.example by mail.example.com with ESMTP id 1;\r\n" +
+				"\tTue, 24 Nov 2026 12:00:00 +0000\r\n" +
+				"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n" +
+				"From: CEO <ceo@outside.example>\r\n\r\n",
+			mailbackend.Authentication{},
+		},
+		{
+			"forged below the sender's From",
+			"From: CEO <ceo@outside.example>\r\n" + received +
+				"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
+			mailbackend.Authentication{},
+		},
+		{
+			"no Received field",
+			"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n" +
+				"From: CEO <ceo@outside.example>\r\n\r\n",
+			mailbackend.Authentication{},
 		},
 	}
 	for _, tc := range cases {

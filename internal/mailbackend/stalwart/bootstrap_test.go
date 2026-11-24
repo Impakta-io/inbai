@@ -40,6 +40,13 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 				t.Errorf("settings %v", update)
 			}
 			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			update := args["update"].(map[string]any)["singleton"].(map[string]any)
+			want := `{"addAuthResultsHeader":{"else":"true","match":{}}}`
+			if got, _ := json.Marshal(update); string(got) != want {
+				t.Errorf("mta stage data %s, want %s", got, want)
+			}
+			writeMethod(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{}})
 		case "x:Role/set":
@@ -109,6 +116,7 @@ func TestBootstrapCreatesDomainRolesAccountsAndKey(t *testing.T) {
 	want := []string{
 		"x:Domain/set",
 		"x:SystemSettings/set",
+		"x:MtaStageData/set",
 		"x:Role/query",
 		"x:Role/set",
 		"x:Role/query",
@@ -161,6 +169,8 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 			})
 		case "x:SystemSettings/set":
 			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			writeMethod(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role", "service-role"}})
 		case "x:Role/get":
@@ -252,6 +262,8 @@ func TestBootstrapGrantsMissingPermissionsToExistingRoles(t *testing.T) {
 			}})
 		case "x:SystemSettings/set":
 			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			writeMethod(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role", "service-role", "operator-role"}})
 		case "x:Role/get":
@@ -329,6 +341,8 @@ func TestBootstrapReportsARefusedRoleUpdate(t *testing.T) {
 			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
 		case "x:SystemSettings/set":
 			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			writeMethod(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role"}})
 		case "x:Role/get":
@@ -363,6 +377,8 @@ func TestBootstrapResetsAnExistingOperatorPassword(t *testing.T) {
 			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
 		case "x:SystemSettings/set":
 			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			writeMethod(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"r"}})
 		case "x:Role/get":
@@ -456,6 +472,36 @@ func TestBootstrapRejectsAFailedCreate(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalidProperties") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBootstrapStopsWhenTheAuthResultsSettingIsRefused(t *testing.T) {
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, _ := oneCall(t, r.Body)
+		methods = append(methods, name)
+		switch name {
+		case "x:Domain/set":
+			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
+		case "x:SystemSettings/set":
+			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:MtaStageData/set":
+			writeMethod(w, name, "m", map[string]any{"notUpdated": map[string]any{
+				"singleton": map[string]any{"type": "invalidProperties", "description": "addAuthResultsHeader"},
+			}})
+		default:
+			t.Errorf("went on to %s after the setting was refused", name)
+			http.Error(w, "unexpected", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := Bootstrap(context.Background(), &Client{BaseURL: srv.URL, User: "admin", Password: "pw"}, Input{
+		Domain:           "example.com",
+		OperatorPassword: "operator-secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "addAuthResultsHeader") {
+		t.Fatalf("err = %v, methods %v", err, methods)
 	}
 }
 
