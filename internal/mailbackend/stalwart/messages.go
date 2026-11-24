@@ -54,6 +54,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 
 // DeleteMessage removes one message from the account.
 // A message that is already gone counts as deleted, as it does for the IMAP backend.
+// Any other notDestroyed entry is a mailbackend.RefusedError.
 func DeleteMessage(ctx context.Context, client *Client, accountID, messageID string) error {
 	if client == nil {
 		return fmt.Errorf("missing stalwart client")
@@ -70,14 +71,19 @@ func DeleteMessage(ctx context.Context, client *Client, accountID, messageID str
 	}
 	var body struct {
 		NotDestroyed map[string]struct {
-			Type string `json:"type"`
+			Type        string `json:"type"`
+			Description string `json:"description"`
 		} `json:"notDestroyed"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return err
 	}
-	if missing, ok := body.NotDestroyed[messageID]; ok && missing.Type == "notFound" {
-		return nil
+	if missing, ok := body.NotDestroyed[messageID]; ok {
+		if missing.Type == "notFound" {
+			return nil
+		}
+		refused := &mailbackend.RefusedError{Type: missing.Type, Description: missing.Description}
+		return fmt.Errorf("stalwart did not delete the message: stalwart %s: %w", messageID, refused)
 	}
 	if err := destroyedID(raw, messageID); err != nil {
 		return fmt.Errorf("stalwart did not delete the message: %w", err)

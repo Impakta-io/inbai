@@ -6,10 +6,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/version"
@@ -110,5 +112,27 @@ func TestIMAPServeRequiresDomainAndAccounts(t *testing.T) {
 	})
 	if code != 2 || !strings.Contains(stderr.String(), "account file") {
 		t.Fatalf("accounts exit %d stderr %s", code, stderr.String())
+	}
+}
+
+func TestHTTPServerBoundsSlowAndIdleConnections(t *testing.T) {
+	server := newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+	if server.Addr != "127.0.0.1:0" || server.Handler == nil {
+		t.Fatalf("server %+v", server)
+	}
+	// The longest legitimate handler is a 25 second long poll or MCP wait.
+	// Go cancels the request context when ReadTimeout passes mid-handler.
+	longest := 25 * time.Second
+	if server.ReadHeaderTimeout <= 0 || server.ReadHeaderTimeout > server.ReadTimeout {
+		t.Fatalf("read header timeout %s, read timeout %s", server.ReadHeaderTimeout, server.ReadTimeout)
+	}
+	if server.ReadTimeout < 2*longest {
+		t.Fatalf("read timeout %s would cut a long poll", server.ReadTimeout)
+	}
+	if server.WriteTimeout < server.ReadTimeout {
+		t.Fatalf("write timeout %s is shorter than the read timeout %s", server.WriteTimeout, server.ReadTimeout)
+	}
+	if server.IdleTimeout <= 0 {
+		t.Fatalf("idle timeout %s", server.IdleTimeout)
 	}
 }

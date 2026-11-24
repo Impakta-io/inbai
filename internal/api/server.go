@@ -92,7 +92,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
-	mcp.ServeHTTP(w, r, mcp.ServiceBox{Service: s.Service, Caller: s.requestCaller(r)})
+	mcp.ServeHTTP(w, r, mcp.ServiceBox{
+		Service: s.Service,
+		Caller:  s.requestCaller(r),
+		Public:  func(err error) error { return toolError(w, err) },
+	})
 }
 
 func (s *Server) requestCaller(r *http.Request) service.Caller {
@@ -131,12 +135,25 @@ func (s *Server) writeUnauthorized(w http.ResponseWriter) {
 	writeProblem(w, http.StatusUnauthorized, "Unauthorized", "bearer token is missing or rejected")
 }
 
+// tokenBodyLimit bounds the /oauth/token form. A client_credentials request is
+// a grant type, a client id, and a secret. The route is read before the caller
+// is authenticated.
+const tokenBodyLimit = 4 << 10
+
 func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
 	if s.Directory == nil {
 		http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, tokenBodyLimit)
 	if err := r.ParseForm(); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"error":"invalid_request"}`))
+			return
+		}
 		http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 		return
 	}
@@ -758,7 +775,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	if err := s.Service.Ready(r.Context()); err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "Not ready", err.Error())
+		logError(w, err)
+		writeProblem(w, http.StatusServiceUnavailable, "Not ready", "event database is not reachable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -782,25 +800,57 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// serviceProblems maps the service sentinels to a status and title. Their
+// text is written for the caller and is shown as the problem detail.
+var serviceProblems = []struct {
+	err    error
+	status int
+	title  string
+}{
+	{service.ErrForbidden, http.StatusForbidden, "Forbidden"},
+	{service.ErrQuota, http.StatusTooManyRequests, "Quota exceeded"},
+	{service.ErrInvalid, http.StatusBadRequest, "Bad request"},
+	{service.ErrNotFound, http.StatusNotFound, "Not found"},
+	{service.ErrUnavailable, http.StatusServiceUnavailable, "Event store unavailable"},
+	{service.ErrSuppressed, http.StatusConflict, "Suppressed"},
+	{service.ErrUnsupported, http.StatusNotImplemented, "Not implemented"},
+}
+
 func writeServiceError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, service.ErrForbidden):
-		writeProblem(w, http.StatusForbidden, "Forbidden", err.Error())
-	case errors.Is(err, service.ErrQuota):
-		writeProblem(w, http.StatusTooManyRequests, "Quota exceeded", err.Error())
-	case errors.Is(err, service.ErrInvalid):
-		writeProblem(w, http.StatusBadRequest, "Bad request", err.Error())
-	case errors.Is(err, service.ErrNotFound):
-		writeProblem(w, http.StatusNotFound, "Not found", err.Error())
-	case errors.Is(err, service.ErrUnavailable):
-		writeProblem(w, http.StatusServiceUnavailable, "Event store unavailable", err.Error())
-	case errors.Is(err, service.ErrSuppressed):
-		writeProblem(w, http.StatusConflict, "Suppressed", err.Error())
-	case errors.Is(err, service.ErrUnsupported):
-		writeProblem(w, http.StatusNotImplemented, "Not implemented", err.Error())
-	default:
-		writeProblem(w, http.StatusBadGateway, "Mail backend failed", err.Error())
+	for _, known := range serviceProblems {
+		if errors.Is(err, known.err) {
+			writeProblem(w, known.status, known.title, err.Error())
+			return
+		}
 	}
+	writeProblem(w, http.StatusBadGateway, "Mail backend failed", hiddenDetail(w, err))
+}
+
+// hiddenDetail is the problem detail for an error outside the service
+// sentinels. The error text can name backend hosts, accounts, and database
+// errors, so it goes to the request log line and the caller gets the request
+// id. A refusal by the mail server is the exception: its reason is shown.
+func hiddenDetail(w http.ResponseWriter, err error) string {
+	id := logError(w, err)
+	var refused *mailbackend.RefusedError
+	if errors.As(err, &refused) {
+		return "mail server refused the request: " + refused.Error()
+	}
+	if id == "" {
+		return "internal error"
+	}
+	return "internal error, see the server log for request id " + id
+}
+
+// toolError is the error an MCP tool caller sees. It is the same text
+// writeServiceError puts in the problem detail.
+func toolError(w http.ResponseWriter, err error) error {
+	for _, known := range serviceProblems {
+		if errors.Is(err, known.err) {
+			return err
+		}
+	}
+	return errors.New(hiddenDetail(w, err))
 }
 
 func writeProblem(w http.ResponseWriter, status int, title, detail string) {

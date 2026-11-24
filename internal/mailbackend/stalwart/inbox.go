@@ -196,7 +196,8 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 
 // createdOnly returns the id Stalwart created for key. Unlike createdID, it
 // treats every notCreated entry as a failure, so an existing object is never
-// mistaken for one this call made.
+// mistaken for one this call made. A notCreated entry is a
+// mailbackend.RefusedError carrying the SetError type and description.
 func createdOnly(raw json.RawMessage, key string) (string, error) {
 	if raw == nil {
 		return "", fmt.Errorf("stalwart %s: missing response", key)
@@ -206,11 +207,7 @@ func createdOnly(raw json.RawMessage, key string) (string, error) {
 		return "", err
 	}
 	if missing, ok := body.NotCreated[key]; ok {
-		detail := missing.Type
-		if missing.Description != "" {
-			detail = missing.Type + ": " + missing.Description
-		}
-		return "", fmt.Errorf("stalwart %s: %s", key, detail)
+		return "", fmt.Errorf("stalwart %s: %w", key, &mailbackend.RefusedError{Type: missing.Type, Description: missing.Description})
 	}
 	created, ok := body.Created[key]
 	if !ok {

@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -96,8 +95,7 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		Log:           stderr,
 	}).Handler()
 	writef(stdout, "listening on %s\n", addr)
-	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil {
+	if err := newHTTPServer(addr, handler).ListenAndServe(); err != nil {
 		writef(stderr, "serve: %s\n", err)
 		return 1
 	}

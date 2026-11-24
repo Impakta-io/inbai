@@ -26,7 +26,7 @@ inbai mcp serve
 
 ## Tools
 
-Every tool takes `inbox`, the Stalwart account id. A missing grant returns a tool error and does not read or submit mail.
+Every tool takes `inbox`, the Stalwart account id. A missing grant returns a tool error and does not read or submit mail. A tool error has the same text as the REST problem `detail`: a refused send names the mail server's reason, and any other mail or database failure names a request id for the operator's log instead of the error.
 
 | Tool | Required arguments | What it does |
 | --- | --- | --- |

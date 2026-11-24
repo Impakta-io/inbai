@@ -9,6 +9,8 @@ info:
     Operator HTTP API served by inbaid. Routes live under /v1.
     Create and send accept an Idempotency-Key header.
     Errors use RFC 9457 problem details.
+    A 502 detail is the mail server's reason when it refused the request.
+    Otherwise it names the X-Request-Id to find in the server log, not the error.
     The caller is an operator bearer token or an agent access token.
 servers:
   - url: http://127.0.0.1:8787
@@ -53,6 +55,8 @@ paths:
                     type: integer
         "401":
           description: Invalid client
+        "413":
+          description: The form is larger than 4 KiB
   /v1/agents:
     post:
       operationId: createAgent
@@ -606,7 +610,7 @@ paths:
         "200":
           description: Ready
         "503":
-          description: Not ready
+          description: Not ready. The detail names the dependency that did not answer, not its error.
   /metrics:
     get:
       operationId: metrics

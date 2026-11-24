@@ -16,7 +16,9 @@ Create and send take an optional `Idempotency-Key` header. Repeating a completed
 
 The server's product defaults allow 50 submitted messages per inbox per UTC day, 500 per sender domain per UTC day, 5000 per workspace per UTC day, and 30 per recipient domain per UTC minute. An operator can adjust those limits with `INBAI_QUOTA_INBOX_DAILY`, `INBAI_QUOTA_DOMAIN_DAILY`, `INBAI_QUOTA_WORKSPACE_DAILY`, and `INBAI_RATE_RECIPIENT_PER_MINUTE`. The next send is `429`. A failed submit does not consume the quota. When `INBAI_DATABASE_URL` is set, the counters are in PostgreSQL and stay there after `inbaid` restarts. Without that URL they stay in the process. `GET /v1/retention` and `PUT /v1/retention` read and set how many days mail is kept. Zero keeps it. `POST /v1/retention/run` deletes mail older than that period. A message with no received time is kept.
 
-Errors use `application/problem+json` with `type`, `title`, `status`, and `detail`.
+Errors use `application/problem+json` with `type`, `title`, `status`, and `detail`. A `400`, `403`, `404`, `409`, `429`, `501`, or event-store `503` says why in `detail`. When the mail server refuses a send or a delete, the response is `502` and `detail` is `mail server refused the request:` followed by the server's reason, such as `overQuota` or `forbiddenFrom`. Any other failure is `502` with `detail` `internal error, see the server log for request id <id>`. The id is the response's `X-Request-Id`, and the operator finds the cause on that request's log line. An MCP tool error shows the same text.
+
+The token form at `POST /oauth/token` is at most 4 KiB. A larger body is `413` with `{"error":"invalid_request"}`.
 
 ## Exchange a client credential
 
