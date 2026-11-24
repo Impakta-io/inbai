@@ -89,7 +89,7 @@ Before you open a pull request, run:
 make build test lint docs-check
 ```
 
-Continuous integration runs the build and tests on Linux, macOS, and Windows, runs the linters, checks the docs, and rejects a pull request whose commits lack `Signed-off-by`.
+Continuous integration runs the build and tests on Linux, macOS, and Windows, runs the PostgreSQL-backed tests against a throwaway database, runs the linters, checks the docs, and rejects a pull request whose commits lack `Signed-off-by`. A maintainer merges through the merge queue, which runs the same checks on the pull request combined with everything queued ahead of it, so a branch does not need updating by hand after another merge.
 
 ## More guides
 

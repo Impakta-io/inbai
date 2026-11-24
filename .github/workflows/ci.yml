@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests each pull request on top of the ones ahead of it.
+  merge_group:
 
 permissions:
   contents: read
@@ -56,6 +58,35 @@ jobs:
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
       - name: Make
         run: make build test lint docs-check
+
+  # Tests in internal/store, internal/service, internal/events and
+  # test/integration skip without INBAI_TEST_DATABASE. This job runs them
+  # against a throwaway PostgreSQL. They empty the inbAI tables, so packages
+  # run one at a time (-p 1).
+  postgres:
+    name: postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: inbai-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      INBAI_TEST_DATABASE: postgres://postgres:inbai-ci@127.0.0.1:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Test against PostgreSQL
+        run: go test -race -count=1 -p 1 ./...
 
   dco:
     name: dco
