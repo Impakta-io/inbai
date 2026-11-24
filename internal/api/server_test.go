@@ -19,11 +19,9 @@ import (
 func TestCreateListAndSend(t *testing.T) {
 	mail := &fakeMail{id: "alice-id", messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body"}}}
 	srv := httptest.NewServer((&Server{
-		Service:  service.New(mail),
-		Token:    "operator-token",
-		Domain:   "example.com",
-		DomainID: "dom",
-		RoleID:   "role",
+		Service: service.New(mail),
+		Token:   "operator-token",
+		Domain:  "example.com",
 	}).Handler())
 	defer srv.Close()
 
@@ -102,7 +100,7 @@ func TestGenerateAndSendAnAttachment(t *testing.T) {
 	svc := service.New(mail)
 	svc.SetSyncLimit(1)
 	srv := httptest.NewServer((&Server{
-		Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role",
+		Service: svc, Token: "operator-token", Domain: "example.com",
 	}).Handler())
 	defer srv.Close()
 	res := call(t, srv.URL, http.MethodPost, "/v1/inboxes/generate", "operator-token", `{"prefix":"u","count":1}`, "")

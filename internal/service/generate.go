@@ -55,8 +55,6 @@ type Job struct {
 type GenerateRequest struct {
 	Prefix     string
 	Domain     string
-	DomainID   string
-	RoleID     string
 	Count      int
 	QuotaBytes int64
 	Wait       bool
@@ -76,8 +74,6 @@ type BulkPayload struct {
 	JobID      string `json:"jobId"`
 	Prefix     string `json:"prefix"`
 	Domain     string `json:"domain"`
-	DomainID   string `json:"domainId"`
-	RoleID     string `json:"roleId"`
 	Count      int    `json:"count"`
 	QuotaBytes int64  `json:"quotaBytes,omitempty"`
 }
@@ -108,8 +104,8 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	if req.Count < 1 || req.Count > maxGenerate {
 		return GenerateResult{}, fmt.Errorf("%w: count must be from 1 to %d", ErrInvalid, maxGenerate)
 	}
-	if req.Domain == "" || req.DomainID == "" || req.RoleID == "" {
-		return GenerateResult{}, fmt.Errorf("%w: generate needs a domain and a role", ErrInvalid)
+	if req.Domain == "" {
+		return GenerateResult{}, fmt.Errorf("%w: generate needs a domain", ErrInvalid)
 	}
 	if req.QuotaBytes < 0 {
 		return GenerateResult{}, fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
@@ -131,8 +127,6 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	specs := make([]mailbackend.InboxSpec, req.Count)
 	for i := range specs {
 		specs[i] = mailbackend.InboxSpec{
-			DomainID:   req.DomainID,
-			RoleID:     req.RoleID,
 			Local:      fmt.Sprintf("%s%05d", prefix, i),
 			QuotaBytes: quotaBytes,
 		}
@@ -166,8 +160,6 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 			JobID:      id,
 			Prefix:     prefix,
 			Domain:     req.Domain,
-			DomainID:   req.DomainID,
-			RoleID:     req.RoleID,
 			Count:      req.Count,
 			QuotaBytes: quotaBytes,
 		})
@@ -199,8 +191,6 @@ func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
 	specs := make([]mailbackend.InboxSpec, payload.Count)
 	for i := range specs {
 		specs[i] = mailbackend.InboxSpec{
-			DomainID:   payload.DomainID,
-			RoleID:     payload.RoleID,
 			Local:      fmt.Sprintf("%s%05d", payload.Prefix, i),
 			QuotaBytes: quotaBytes,
 		}

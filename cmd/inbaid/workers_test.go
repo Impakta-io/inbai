@@ -78,7 +78,7 @@ func TestWorkerRunsBulkCursorAndRetentionJobs(t *testing.T) {
 	worker := newWorker(q, svc, feed, mail, 30, nil, store.Retention{}, &stderr)
 
 	bulkRaw, err := json.Marshal(service.BulkPayload{
-		JobID: "j1", Prefix: "u", Domain: "example.com", DomainID: "d", RoleID: "r", Count: 2,
+		JobID: "j1", Prefix: "u", Domain: "example.com", Count: 2,
 	})
 	if err != nil {
 		t.Fatal(err)

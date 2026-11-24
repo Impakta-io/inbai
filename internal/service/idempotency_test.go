@@ -5,6 +5,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"sync"
@@ -14,8 +16,50 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
 	"github.com/Impakta-io/inbai/internal/store"
 )
+
+// placedMail is a backend that names where it creates inboxes, as stalwart.Mail does.
+type placedMail struct {
+	*fakeMail
+}
+
+func (placedMail) InboxPlacement() (string, string) { return "dom", "inbox-role" }
+
+var _ inboxPlacer = stalwart.Mail{}
+
+func TestCreateKeyStoredWithSpecPlacementStillMatches(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		ctx := context.Background()
+		mail := placedMail{fakeMail: &fakeMail{created: "new-id"}}
+		svc := open(mail)
+		// The hash a server stored when the API put the domain and role ids in each InboxSpec.
+		sum := sha256.Sum256([]byte(`{"op":"create","domainId":"dom","roleId":"inbox-role","local":"alice","quotaBytes":0}`))
+		stored := hex.EncodeToString(sum[:])
+		if got := createHash(mail, mailbackend.InboxSpec{Local: "alice"}); got != stored {
+			t.Fatalf("create hash %s, want the stored %s", got, stored)
+		}
+		hold, _, _, err := svc.reserve(ctx, kindCreate, idempotencyKey(operator, "alice", "old"), stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.complete(ctx, hold, "old-id"); err != nil {
+			t.Fatal(err)
+		}
+		id, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: "alice"}, "old")
+		if err != nil || id != "old-id" || mail.creates != 0 {
+			t.Fatalf("repeat of a stored create id %q err %v creates %d", id, err, mail.creates)
+		}
+		if _, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: "alice", QuotaBytes: 1}, "old"); !errors.Is(err, ErrKeyReused) {
+			t.Fatalf("different create err = %v, want ErrKeyReused", err)
+		}
+		// A backend that names no placement hashes the same create differently.
+		if createHash(&fakeMail{}, mailbackend.InboxSpec{Local: "alice"}) == stored {
+			t.Fatal("unplaced backend matched a placed create")
+		}
+	})
+}
 
 // gateMail is a backend whose Deliver waits on release when gated, so a test can hold a send in flight.
 type gateMail struct {

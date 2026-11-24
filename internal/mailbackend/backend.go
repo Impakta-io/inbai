@@ -34,11 +34,11 @@ func (e *RefusedError) Error() string {
 	return e.Type + ": " + e.Description
 }
 
-// InboxSpec is an address to create in a domain.
+// InboxSpec is an address to create in the backend's domain. Local is the
+// part before the @. Where the account goes on the mail server, such as a
+// domain or role record, is the backend's own configuration.
 // QuotaBytes sets the account disk storage quota in bytes when greater than zero.
 type InboxSpec struct {
-	DomainID   string
-	RoleID     string
 	Local      string
 	QuotaBytes int64
 }

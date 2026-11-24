@@ -39,11 +39,9 @@ func TestStorageQuotaRoutes(t *testing.T) {
 		"inbox-1": {LimitBytes: 104857600, UsedBytes: 512},
 	}}
 	srv := &Server{
-		Service:  service.New(mail),
-		Token:    "secret",
-		Domain:   "mail.example",
-		DomainID: "d",
-		RoleID:   "r",
+		Service: service.New(mail),
+		Token:   "secret",
+		Domain:  "mail.example",
 	}
 	h := srv.Handler()
 

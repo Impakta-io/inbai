@@ -30,8 +30,6 @@ type Server struct {
 	Token         string
 	Issuer        string
 	Domain        string
-	DomainID      string
-	RoleID        string
 	IngestSecret  string
 	RetentionDays int
 	Log           io.Writer
@@ -349,8 +347,6 @@ func (s *Server) createInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.Service.CreateInbox(r.Context(), s.requestCaller(r), mailbackend.InboxSpec{
-		DomainID:   s.DomainID,
-		RoleID:     s.RoleID,
 		Local:      body.LocalPart,
 		QuotaBytes: body.QuotaBytes,
 	}, r.Header.Get("Idempotency-Key"))
@@ -539,12 +535,10 @@ func (s *Server) generateInboxes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.Service.Generate(r.Context(), s.requestCaller(r), service.GenerateRequest{
-		Prefix:   body.Prefix,
-		Domain:   s.Domain,
-		DomainID: s.DomainID,
-		RoleID:   s.RoleID,
-		Count:    body.Count,
-		Wait:     body.Count <= s.Service.SyncLimit(),
+		Prefix: body.Prefix,
+		Domain: s.Domain,
+		Count:  body.Count,
+		Wait:   body.Count <= s.Service.SyncLimit(),
 	}, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeServiceError(w, err)

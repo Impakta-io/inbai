@@ -17,18 +17,36 @@ type Mail struct {
 	// inbai init sets and stores as hostname in config.json. When it is
 	// empty, messages carry no SPF, DKIM, or DMARC result.
 	AuthservID string
+	// DomainID is the Stalwart id of the domain new inboxes are created in.
+	// LookupDomainID finds it from the domain name.
+	DomainID string
+	// RoleID is the Stalwart role every new inbox account gets: the inbox
+	// role inbai init creates and stores as inboxRoleId in config.json.
+	RoleID string
 }
 
 func (m Mail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (string, error) {
-	return CreateInbox(ctx, m.Client, InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local, QuotaBytes: spec.QuotaBytes})
+	return CreateInbox(ctx, m.Client, m.input(spec))
 }
 
 func (m Mail) CreateInboxes(ctx context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
 	in := make([]InboxInput, len(specs))
 	for i, spec := range specs {
-		in[i] = InboxInput{DomainID: spec.DomainID, RoleID: spec.RoleID, Local: spec.Local, QuotaBytes: spec.QuotaBytes}
+		in[i] = m.input(spec)
 	}
 	return CreateInboxes(ctx, m.Client, in)
+}
+
+// input places spec in the domain and role this Mail was built with.
+func (m Mail) input(spec mailbackend.InboxSpec) InboxInput {
+	return InboxInput{DomainID: m.DomainID, RoleID: m.RoleID, Local: spec.Local, QuotaBytes: spec.QuotaBytes}
+}
+
+// InboxPlacement returns the domain id and role id new inboxes are created
+// with. The service binds a create's Idempotency-Key to them, as it did when
+// it passed them in each InboxSpec, so a key stored then still matches.
+func (m Mail) InboxPlacement() (string, string) {
+	return m.DomainID, m.RoleID
 }
 
 func (m Mail) GetStorageQuota(ctx context.Context, accountID string) (mailbackend.StorageQuota, error) {

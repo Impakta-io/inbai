@@ -105,13 +105,13 @@ func TestBulkJobQueuedForAnotherReplica(t *testing.T) {
 	first.SetSyncLimit(1)
 
 	if _, err := first.Generate(ctx, Caller{Agent: "ada"}, GenerateRequest{
-		Prefix: "q", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "q", Domain: "example.com", Count: 2,
 	}, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("agent generate err %v", err)
 	}
 
 	got, err := first.Generate(ctx, Caller{Operator: true}, GenerateRequest{
-		Prefix: "q", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "q", Domain: "example.com", Count: 2,
 	}, "bulk-replica-key")
 	if err != nil || got.JobID == "" {
 		t.Fatalf("generate %+v err %v", got, err)
@@ -183,7 +183,7 @@ func TestQueuedJobIsReadOnlyByItsAgentOrAnOperator(t *testing.T) {
 		}
 	}
 	got, err := first.Generate(ctx, Caller{Agent: "jobs-ada"}, GenerateRequest{
-		Prefix: "j", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "j", Domain: "example.com", Count: 2,
 	}, "")
 	if err != nil || got.JobID == "" {
 		t.Fatalf("generate %+v err %v", got, err)

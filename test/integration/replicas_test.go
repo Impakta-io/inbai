@@ -83,8 +83,6 @@ func TestTwoReplicasShareStateAndJobs(t *testing.T) {
 			Token:         opToken,
 			Issuer:        issuer,
 			Domain:        "example.com",
-			DomainID:      "dom",
-			RoleID:        "role",
 			RetentionDays: 30,
 		}).Handler())
 		worker := jobs.New(db)

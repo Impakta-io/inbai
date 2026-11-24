@@ -40,7 +40,7 @@ func TestRunMeasuresASmallProfile(t *testing.T) {
 		}
 	}()
 	srv := httptest.NewServer((&api.Server{
-		Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role",
+		Service: svc, Token: "operator-token", Domain: "example.com",
 	}).Handler())
 	defer srv.Close()
 

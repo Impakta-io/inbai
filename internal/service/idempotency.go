@@ -165,15 +165,29 @@ func sendHash(op, messageID string, msg mailbackend.Outbound) string {
 	return hashJSON(req)
 }
 
+// inboxPlacer is a mail backend that creates every inbox in one fixed place
+// on its mail server and names that place with two opaque strings.
+type inboxPlacer interface {
+	InboxPlacement() (string, string)
+}
+
 // createHash is the request hash for an inbox create, taken before the default quota is applied.
-func createHash(spec mailbackend.InboxSpec) string {
+// Each InboxSpec once carried the backend's domain and role ids, and stored hashes include them
+// under the JSON names domainId and roleId. The backend supplies them now, through inboxPlacer,
+// so a create repeated with a key stored before then still matches. Another backend hashes them
+// as empty strings.
+func createHash(backend mailbackend.Backend, spec mailbackend.InboxSpec) string {
+	var first, second string
+	if placer, ok := backend.(inboxPlacer); ok {
+		first, second = placer.InboxPlacement()
+	}
 	return hashJSON(struct {
 		Op         string `json:"op"`
-		DomainID   string `json:"domainId"`
-		RoleID     string `json:"roleId"`
+		First      string `json:"domainId"`
+		Second     string `json:"roleId"`
 		Local      string `json:"local"`
 		QuotaBytes int64  `json:"quotaBytes"`
-	}{"create", spec.DomainID, spec.RoleID, spec.Local, spec.QuotaBytes})
+	}{"create", first, second, spec.Local, spec.QuotaBytes})
 }
 
 func hashJSON(v any) string {

@@ -198,7 +198,7 @@ func (takenMail) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpec)
 func TestDuplicateAndReservedInboxesAreConflicts(t *testing.T) {
 	svc := service.New(takenMail{fakeMail: &fakeMail{}})
 	svc.ReserveAccounts([]string{"operator", "service"}, []string{"op-id", "svc-id"})
-	handler := (&Server{Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role"}).Handler()
+	handler := (&Server{Service: svc, Token: "operator-token", Domain: "example.com"}).Handler()
 	for _, tc := range []struct {
 		method, path, body, detail string
 	}{
