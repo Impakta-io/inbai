@@ -24,7 +24,7 @@ make build test lint docs-check
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 ```
 
-Add `$(go env GOPATH)/bin` to `PATH` if the command is not found. The Makefile adds that directory for its own recipes.
+`make lint` finds `golangci-lint` on `PATH` or in `$(go env GOPATH)/bin`, so it works with the GNU Make 3.81 that macOS ships. If it is in neither, the target prints the install command above.
 
 ## Windows
 
