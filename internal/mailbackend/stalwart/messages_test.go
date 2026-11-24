@@ -132,3 +132,47 @@ func TestReplySetsThreadingHeaders(t *testing.T) {
 		t.Fatalf("deliver %v saw %v", err, sawReply)
 	}
 }
+
+func TestDeleteMessageReportsARefusal(t *testing.T) {
+	cases := map[string]struct {
+		result map[string]any
+		want   string
+	}{
+		"refused": {
+			result: map[string]any{"notDestroyed": map[string]any{"msg": map[string]any{"type": "forbidden", "description": "Read-only mailbox"}}},
+			want:   "stalwart msg: forbidden: Read-only mailbox",
+		},
+		"no result": {
+			result: map[string]any{},
+			want:   "missing destroy",
+		},
+		"already gone": {
+			result: map[string]any{"notDestroyed": map[string]any{"msg": map[string]any{"type": "notFound"}}},
+		},
+		"destroyed": {
+			result: map[string]any{"destroyed": []string{"msg"}},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				names, _ := allCalls(t, r.Body)
+				if names[0] != "Email/set" {
+					t.Errorf("method %s", names[0])
+				}
+				writeMethods(w, []any{[]any{"Email/set", tc.result, "e"}})
+			}))
+			defer srv.Close()
+			err := DeleteMessage(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, "alice-id", "msg")
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("delete %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("delete error %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

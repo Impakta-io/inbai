@@ -174,3 +174,112 @@ func writeMethods(w http.ResponseWriter, responses []any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"methodResponses": responses})
 }
+
+// deliverServer fakes Stalwart for Deliver. send answers the Email/set and
+// EmailSubmission/set pair. destroy answers a cleanup Email/set destroy;
+// destroyed records the ids Deliver asked to remove.
+func deliverServer(t *testing.T, send []any, destroy map[string]any, destroyed *[]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		names, args := allCalls(t, r.Body)
+		switch names[0] {
+		case "Identity/get":
+			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
+		case "Mailbox/get":
+			writeMethods(w, []any{[]any{"Mailbox/get", map[string]any{"list": []any{
+				map[string]any{"id": "sent-box", "role": "sent"},
+			}}, "m"}})
+		case "Email/set":
+			ids, ok := args[0]["destroy"].([]any)
+			if !ok {
+				writeMethods(w, send)
+				return
+			}
+			for _, id := range ids {
+				*destroyed = append(*destroyed, id.(string))
+			}
+			writeMethods(w, []any{[]any{"Email/set", destroy, "e"}})
+		default:
+			t.Errorf("methods %v", names)
+		}
+	}))
+}
+
+func deliverTo(srv *httptest.Server) error {
+	return Deliver(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, Delivery{
+		AccountID: "alice-id", From: "alice@example.com", To: "bob@example.com", Subject: "hi", Body: "hi",
+	})
+}
+
+var destroyedMsg = map[string]any{"destroyed": []string{"msg"}}
+
+func TestDeliverFailsWhenStalwartDoesNotStoreTheMessage(t *testing.T) {
+	var destroyed []string
+	srv := deliverServer(t, []any{
+		[]any{"Email/set", map[string]any{"notCreated": map[string]any{"m": map[string]any{
+			"type": "overQuota", "description": "Quota exceeded",
+		}}}, "e"},
+		[]any{"EmailSubmission/set", map[string]any{"notCreated": map[string]any{"s": map[string]any{
+			"type": "invalidProperties", "description": "emailId #m not found",
+		}}}, "s"},
+	}, destroyedMsg, &destroyed)
+	defer srv.Close()
+	err := deliverTo(srv)
+	if err == nil || !strings.Contains(err.Error(), "overQuota: Quota exceeded") {
+		t.Fatalf("deliver error %v", err)
+	}
+	if len(destroyed) != 0 {
+		t.Fatalf("destroyed %v when nothing was stored", destroyed)
+	}
+}
+
+func TestDeliverFailsAndRemovesTheCopyWhenSubmissionIsRefused(t *testing.T) {
+	var destroyed []string
+	srv := deliverServer(t, []any{
+		[]any{"Email/set", map[string]any{"created": map[string]any{"m": map[string]any{"id": "msg"}}}, "e"},
+		[]any{"EmailSubmission/set", map[string]any{"notCreated": map[string]any{"s": map[string]any{
+			"type": "forbiddenFrom", "description": "Sender not allowed",
+		}}}, "s"},
+	}, destroyedMsg, &destroyed)
+	defer srv.Close()
+	err := deliverTo(srv)
+	if err == nil || !strings.Contains(err.Error(), "forbiddenFrom: Sender not allowed") {
+		t.Fatalf("deliver error %v", err)
+	}
+	if strings.Contains(err.Error(), "not removed") {
+		t.Fatalf("deliver error %v reports a cleanup failure", err)
+	}
+	if strings.Join(destroyed, ",") != "msg" {
+		t.Fatalf("destroyed %v, want the stored copy", destroyed)
+	}
+}
+
+func TestDeliverKeepsTheSubmissionErrorWhenCleanupFails(t *testing.T) {
+	var destroyed []string
+	srv := deliverServer(t, []any{
+		[]any{"Email/set", map[string]any{"created": map[string]any{"m": map[string]any{"id": "msg"}}}, "e"},
+		[]any{"EmailSubmission/set", map[string]any{"notCreated": map[string]any{"s": map[string]any{
+			"type": "forbiddenToSend",
+		}}}, "s"},
+	}, map[string]any{"notDestroyed": map[string]any{"msg": map[string]any{"type": "forbidden"}}}, &destroyed)
+	defer srv.Close()
+	err := deliverTo(srv)
+	if err == nil || !strings.Contains(err.Error(), "stalwart s: forbiddenToSend") || !strings.Contains(err.Error(), "msg was not removed") {
+		t.Fatalf("deliver error %v", err)
+	}
+}
+
+func TestDeliverFailsWhenTheSubmissionResultIsMissing(t *testing.T) {
+	var destroyed []string
+	srv := deliverServer(t, []any{
+		[]any{"Email/set", map[string]any{"created": map[string]any{"m": map[string]any{"id": "msg"}}}, "e"},
+		[]any{"EmailSubmission/set", map[string]any{}, "s"},
+	}, destroyedMsg, &destroyed)
+	defer srv.Close()
+	if err := deliverTo(srv); err == nil || !strings.Contains(err.Error(), "missing result") {
+		t.Fatalf("deliver error %v", err)
+	}
+	if strings.Join(destroyed, ",") != "msg" {
+		t.Fatalf("destroyed %v, want the stored copy", destroyed)
+	}
+}

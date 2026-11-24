@@ -158,7 +158,7 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 		}
 		outbound["attachments"] = files
 	}
-	_, err = client.invokeMany(ctx, []jmapCall{
+	found, err := client.invokeMany(ctx, []jmapCall{
 		{Name: "Email/set", ID: "e", Args: map[string]any{
 			"accountId": msg.AccountID,
 			"create":    map[string]any{"m": outbound},
@@ -177,7 +177,49 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 			},
 		}},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	emailID, err := createdOnly(found["e"], "m")
+	if err != nil {
+		return fmt.Errorf("stalwart did not store the message: %w", err)
+	}
+	if _, err := createdOnly(found["s"], "s"); err != nil {
+		err = fmt.Errorf("stalwart did not submit the message: %w", err)
+		if cleanup := DeleteMessage(ctx, client, msg.AccountID, emailID); cleanup != nil {
+			return fmt.Errorf("%w (stored copy %s was not removed: %v)", err, emailID, cleanup)
+		}
+		return err
+	}
+	return nil
+}
+
+// createdOnly returns the id Stalwart created for key. Unlike createdID, it
+// treats every notCreated entry as a failure, so an existing object is never
+// mistaken for one this call made.
+func createdOnly(raw json.RawMessage, key string) (string, error) {
+	if raw == nil {
+		return "", fmt.Errorf("stalwart %s: missing response", key)
+	}
+	var body setResult
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return "", err
+	}
+	if missing, ok := body.NotCreated[key]; ok {
+		detail := missing.Type
+		if missing.Description != "" {
+			detail = missing.Type + ": " + missing.Description
+		}
+		return "", fmt.Errorf("stalwart %s: %s", key, detail)
+	}
+	created, ok := body.Created[key]
+	if !ok {
+		return "", fmt.Errorf("stalwart %s: missing result", key)
+	}
+	if created.ID == "" {
+		return "", fmt.Errorf("stalwart %s: missing id", key)
+	}
+	return created.ID, nil
 }
 
 func mailboxesByRole(ctx context.Context, client *Client, accountID string) (map[string]string, error) {
