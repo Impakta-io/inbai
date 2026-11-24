@@ -152,6 +152,30 @@ func TestDeliverFallsBackToInboxWhenSentMailboxIsMissing(t *testing.T) {
 	}
 }
 
+func TestCreateInboxRefusesAnAddressThatExists(t *testing.T) {
+	for _, tc := range []struct {
+		notCreated map[string]any
+		exists     bool
+	}{
+		// Stalwart 1.1.1 answers a duplicate name this way, with the existing account's id.
+		{map[string]any{"type": "primaryKeyViolation", "properties": []string{"email"}, "objectId": map[string]any{"object": "Account", "id": "d"}}, true},
+		{map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "d"}}, true},
+		{map[string]any{"type": "invalidProperties", "description": "bad name", "objectId": map[string]any{"id": "d"}}, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeMethods(w, []any{[]any{"x:Account/set", map[string]any{"notCreated": map[string]any{"a": tc.notCreated}}, "a"}})
+		}))
+		id, err := CreateInbox(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, InboxInput{DomainID: "dom", RoleID: "inbox-role", Local: "operator"})
+		srv.Close()
+		if id != "" || err == nil {
+			t.Fatalf("%v: returned id %q err %v, want no id and an error", tc.notCreated["type"], id, err)
+		}
+		if errors.Is(err, mailbackend.ErrExists) != tc.exists {
+			t.Errorf("%v: err %v, ErrExists want %v", tc.notCreated["type"], err, tc.exists)
+		}
+	}
+}
+
 func allCalls(t *testing.T, body io.Reader) ([]string, []map[string]any) {
 	t.Helper()
 	var req struct {

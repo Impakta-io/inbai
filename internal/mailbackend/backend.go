@@ -13,6 +13,10 @@ import (
 // server, such as a line break in a search query.
 var ErrInvalid = errors.New("invalid mail backend input")
 
+// ErrExists means the mail server already has an account with the address a
+// create asked for. The backend did not create or return that account.
+var ErrExists = errors.New("mail account already exists")
+
 // RefusedError means the mail server processed the request and refused one
 // operation in it, such as a send over quota or from a sender it does not
 // allow. Type and Description are the server's own reason, for example a JMAP
@@ -105,7 +109,10 @@ type Message struct {
 
 // Backend is how the service layer stores and sends mail.
 type Backend interface {
+	// CreateInbox returns the new account's id, or ErrExists when the address is taken.
 	CreateInbox(context.Context, InboxSpec) (string, error)
+	// CreateInboxes returns one id per spec, in order. An empty id means the
+	// address was already taken and the backend did not create that account.
 	CreateInboxes(context.Context, []InboxSpec) ([]string, error)
 	Deliver(context.Context, Outbound) error
 	// SenderAddresses returns the addresses the account may send as.

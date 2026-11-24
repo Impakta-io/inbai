@@ -164,14 +164,7 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role", "service-role"}})
 		case "x:Role/get":
-			writeMethod(w, name, "g", map[string]any{
-				"list": []map[string]any{
-					{"id": "inbox-role", "description": inboxRoleDescription},
-					{"id": "service-role", "description": serviceRoleDescription},
-					{"id": "operator-role", "description": operatorRoleDescription},
-				},
-			})
-			_ = args
+			writeMethod(w, name, "g", map[string]any{"list": currentRoles()})
 		case "x:Account/set":
 			if _, update := args["update"]; update {
 				operator := args["update"].(map[string]any)["op"].(map[string]any)
@@ -217,6 +210,150 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 	}
 }
 
+// currentRoles is a Role/get list of the three inbAI roles that already hold
+// every permission this version grants.
+func currentRoles() []map[string]any {
+	return []map[string]any{
+		{"id": "inbox-role", "description": inboxRoleDescription, "enabledPermissions": permSet(inboxPermissions)},
+		{"id": "service-role", "description": serviceRoleDescription, "enabledPermissions": permSet(servicePermissions)},
+		{"id": "operator-role", "description": operatorRoleDescription, "enabledPermissions": permSet(operatorPermissions)},
+	}
+}
+
+func without(names []string, drop ...string) map[string]bool {
+	out := permSet(names)
+	for _, name := range drop {
+		delete(out, name)
+	}
+	return out
+}
+
+func TestRolesGrantDeletePermissions(t *testing.T) {
+	inbox, service, operator := permSet(inboxPermissions), permSet(servicePermissions), permSet(operatorPermissions)
+	if !inbox["jmapEmailDestroy"] || !service["jmapEmailDestroy"] || !operator["jmapEmailDestroy"] {
+		t.Error("a role cannot destroy email, so message delete and retention fail")
+	}
+	if !service["sysAccountDestroy"] || !operator["sysAccountDestroy"] {
+		t.Error("the service role cannot destroy accounts, so inbox delete fails")
+	}
+	if inbox["sysAccountDestroy"] {
+		t.Error("the inbox role can destroy accounts")
+	}
+}
+
+func TestBootstrapGrantsMissingPermissionsToExistingRoles(t *testing.T) {
+	updates := map[string]map[string]any{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, args := oneCall(t, r.Body)
+		switch name {
+		case "x:Domain/set":
+			writeMethod(w, name, "d", map[string]any{"notCreated": map[string]any{
+				"d1": map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "dom"}},
+			}})
+		case "x:SystemSettings/set":
+			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:Role/query":
+			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role", "service-role", "operator-role"}})
+		case "x:Role/get":
+			// An install from before this change: no destroy permissions, and
+			// one permission an operator added to the inbox role by hand.
+			oldInbox := without(inboxPermissions, "jmapEmailDestroy")
+			oldInbox["jmapVacationResponseGet"] = true
+			writeMethod(w, name, "g", map[string]any{"list": []map[string]any{
+				{"id": "inbox-role", "description": inboxRoleDescription, "enabledPermissions": oldInbox},
+				{"id": "service-role", "description": serviceRoleDescription, "enabledPermissions": without(servicePermissions, "jmapEmailDestroy", "sysAccountDestroy")},
+				{"id": "operator-role", "description": operatorRoleDescription, "enabledPermissions": permSet(operatorPermissions)},
+			}})
+		case "x:Role/set":
+			if _, ok := args["create"]; ok {
+				t.Errorf("created a role that exists: %v", args)
+			}
+			update, _ := args["update"].(map[string]any)
+			for id, patch := range update {
+				updates[id] = patch.(map[string]any)
+				writeMethod(w, name, "p", map[string]any{"updated": map[string]any{id: nil}})
+			}
+		case "x:Account/set":
+			if _, ok := args["update"]; ok {
+				writeMethod(w, name, "u", map[string]any{"updated": map[string]any{"op": nil}})
+				return
+			}
+			writeMethod(w, name, "a", map[string]any{"notCreated": map[string]any{
+				"operator": map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "op"}},
+				"svc":      map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "svc-id"}},
+			}})
+		default:
+			t.Errorf("unexpected method %s", name)
+		}
+	}))
+	defer srv.Close()
+
+	result, err := Bootstrap(context.Background(), &Client{BaseURL: srv.URL, User: "admin", Password: "pw"}, Input{
+		Domain:           "example.com",
+		OperatorPassword: "operator-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.InboxRoleID != "inbox-role" || result.ServiceRoleID != "service-role" {
+		t.Fatalf("result %+v", result)
+	}
+	if len(updates) != 2 || updates["operator-role"] != nil {
+		t.Fatalf("updates %v, want the inbox and service roles only", updates)
+	}
+	for id, want := range map[string][]string{"inbox-role": inboxPermissions, "service-role": servicePermissions} {
+		if len(updates[id]) != 1 {
+			t.Errorf("%s patch %v changes more than enabledPermissions", id, updates[id])
+		}
+		perms, _ := updates[id]["enabledPermissions"].(map[string]any)
+		for _, name := range want {
+			if perms[name] != true {
+				t.Errorf("%s update lacks %s", id, name)
+			}
+		}
+	}
+	inboxPerms := updates["inbox-role"]["enabledPermissions"].(map[string]any)
+	if inboxPerms["jmapVacationResponseGet"] != true {
+		t.Error("the update dropped a permission the operator added")
+	}
+	if len(inboxPerms) != len(inboxPermissions)+1 {
+		t.Errorf("inbox role has %d permissions, want %d", len(inboxPerms), len(inboxPermissions)+1)
+	}
+}
+
+func TestBootstrapReportsARefusedRoleUpdate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, _ := oneCall(t, r.Body)
+		switch name {
+		case "x:Domain/set":
+			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
+		case "x:SystemSettings/set":
+			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:Role/query":
+			writeMethod(w, name, "q", map[string]any{"ids": []string{"inbox-role"}})
+		case "x:Role/get":
+			writeMethod(w, name, "g", map[string]any{"list": []map[string]any{
+				{"id": "inbox-role", "description": inboxRoleDescription, "enabledPermissions": without(inboxPermissions, "jmapEmailDestroy")},
+			}})
+		case "x:Role/set":
+			writeMethod(w, name, "p", map[string]any{"notUpdated": map[string]any{
+				"inbox-role": map[string]any{"type": "invalidProperties", "description": "unknown permission"},
+			}})
+		default:
+			t.Errorf("unexpected method %s", name)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := Bootstrap(context.Background(), &Client{BaseURL: srv.URL, User: "admin", Password: "pw"}, Input{
+		Domain:           "example.com",
+		OperatorPassword: "operator-secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown permission") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestBootstrapResetsAnExistingOperatorPassword(t *testing.T) {
 	var update map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,11 +366,7 @@ func TestBootstrapResetsAnExistingOperatorPassword(t *testing.T) {
 		case "x:Role/query":
 			writeMethod(w, name, "q", map[string]any{"ids": []string{"r"}})
 		case "x:Role/get":
-			writeMethod(w, name, "g", map[string]any{"list": []map[string]any{
-				{"id": "inbox-role", "description": inboxRoleDescription},
-				{"id": "service-role", "description": serviceRoleDescription},
-				{"id": "operator-role", "description": operatorRoleDescription},
-			}})
+			writeMethod(w, name, "g", map[string]any{"list": currentRoles()})
 		case "x:Account/set":
 			if raw, ok := args["update"]; ok {
 				update = raw.(map[string]any)["op"].(map[string]any)

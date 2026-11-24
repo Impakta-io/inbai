@@ -14,6 +14,8 @@ import (
 var accountBatch = 200
 
 // CreateInboxes creates many accounts. It sends one JMAP request per batch.
+// It returns one id per spec, in order. The id is empty for a spec whose
+// address an account already has: that account was not created or returned.
 func CreateInboxes(ctx context.Context, client *Client, specs []InboxInput) ([]string, error) {
 	if client == nil {
 		return nil, fmt.Errorf("missing stalwart client")
@@ -60,10 +62,14 @@ func createBatch(ctx context.Context, client *Client, specs []InboxInput) ([]str
 	}
 	ids := make([]string, len(keys))
 	for i, key := range keys {
-		ids[i], err = createdID(raw, key)
+		id, err := createdOnly(raw, key)
+		if accountExists(err) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
+		ids[i] = id
 	}
 	return ids, nil
 }

@@ -128,6 +128,7 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	}
 	mail := stalwart.Mail{Client: client, AuthservID: strings.TrimSpace(cfg.Hostname)}
 	svc := service.New(mail)
+	reserveAccounts(svc, cfg)
 	if err := applySendLimits(svc, getenv); err != nil {
 		writef(stderr, "send limits: %s\n", err)
 		return 2
@@ -191,6 +192,16 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       time.Minute,
 	}
+}
+
+// reserveAccounts tells the service which Stalwart accounts inbai init made
+// for itself: by the names Bootstrap gives them, and by the ids init wrote to
+// the config. They are not inboxes, so they are not listed, created, or deleted.
+func reserveAccounts(svc *service.Service, cfg config.File) {
+	svc.ReserveAccounts(
+		[]string{stalwart.OperatorAccountName, stalwart.ServiceAccountName},
+		[]string{cfg.OperatorAccountID, cfg.ServiceAccountID},
+	)
 }
 
 func retainLoop(svc *service.Service, days int, stderr io.Writer) {

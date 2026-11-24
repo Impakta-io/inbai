@@ -81,9 +81,9 @@ Run `inbai init` again before the first relay change on a server that was create
 inbai inbox create alice
 ```
 
-That creates `alice@example.com` when the config domain is `example.com`.
+That creates `alice@example.com` when the config domain is `example.com`. When an account already has that address, the command fails with a conflict and changes nothing. `operator` and `service` are refused the same way: `inbai init` created those accounts for itself, and they are not inboxes.
 
-`inbai inbox list` prints each address and account id. `--limit` sets the page size and `--cursor` asks for the next page. A line that starts with `next` is the cursor to pass back. `--json` prints the API response. `inbai inbox delete alice@example.com` removes that account and the address from the config file. Both commands use the operator token.
+`inbai inbox list` prints each address and account id. It leaves out the operator and service accounts. `--limit` sets the page size and `--cursor` asks for the next page. A line that starts with `next` is the cursor to pass back. `--json` prints the API response. `inbai inbox delete alice@example.com` removes that account and the address from the config file. The server refuses to delete the operator or service account, and the config file is not changed. Both commands use the operator token.
 
 `inbai inbox generate --count 10` asks `inbaid` to create `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. When the server returns a job, the command polls it and prints progress. It records every address it created in the config file, and reports any it skipped because they already exist (`--json` lists them under `existing`). If every address already exists, the command fails.
 

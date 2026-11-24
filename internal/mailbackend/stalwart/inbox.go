@@ -6,6 +6,7 @@ package stalwart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,6 +60,8 @@ type Attachment struct {
 }
 
 // CreateInbox creates a Stalwart account that can receive mail.
+// An account that already has the address is mailbackend.ErrExists: unlike
+// Bootstrap, it never returns the id of an account it did not create.
 func CreateInbox(ctx context.Context, client *Client, in InboxInput) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("missing stalwart client")
@@ -82,7 +85,22 @@ func CreateInbox(ctx context.Context, client *Client, in InboxInput) (string, er
 	if err != nil {
 		return "", err
 	}
-	return createdID(raw, "a")
+	id, err := createdOnly(raw, "a")
+	if accountExists(err) {
+		return "", fmt.Errorf("account %s: %w", local, mailbackend.ErrExists)
+	}
+	return id, err
+}
+
+// accountExists reports whether err is Stalwart refusing an account create
+// because the address is taken. Stalwart 1.1 answers primaryKeyViolation;
+// alreadyExists is the JMAP name other servers use.
+func accountExists(err error) bool {
+	var refused *mailbackend.RefusedError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	return refused.Type == "primaryKeyViolation" || refused.Type == "alreadyExists"
 }
 
 // Deliver submits a message as the account. Stalwart delivers it.
