@@ -5,8 +5,13 @@ package mailbackend
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrInvalid means the input holds bytes a backend must not write to its mail
+// server, such as a line break in a search query.
+var ErrInvalid = errors.New("invalid mail backend input")
 
 // InboxSpec is an address to create in a domain.
 // QuotaBytes sets the account disk storage quota in bytes when greater than zero.

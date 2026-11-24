@@ -101,6 +101,11 @@ func (b *Backend) Download(context.Context, string, string) ([]byte, error) {
 
 // Deliver submits one message over SMTP using the account password.
 func (b *Backend) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
+	for _, file := range msg.Attachments {
+		if err := noLineBreaks("attachment type", file.Type); err != nil {
+			return err
+		}
+	}
 	login, err := b.login(msg.AccountID)
 	if err != nil {
 		return err
@@ -153,7 +158,11 @@ func (b *Backend) List(ctx context.Context, account string, page mailbackend.Pag
 
 // Search returns messages whose text matches the query.
 func (b *Backend) Search(ctx context.Context, account, query string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
-	return b.fetchSearch(ctx, account, "TEXT "+quote(query), page)
+	quoted, err := quote(query)
+	if err != nil {
+		return nil, "", fmt.Errorf("search query: %w", err)
+	}
+	return b.fetchSearch(ctx, account, "TEXT "+quoted, page)
 }
 
 // Get reads one message body. The id is the IMAP UID.
@@ -327,7 +336,15 @@ func (b *Backend) with(ctx context.Context, account string, fn func(*session) er
 	if err := s.greet(); err != nil {
 		return err
 	}
-	if _, err := s.command("LOGIN", quote(login.User), quote(login.Password)); err != nil {
+	user, err := quote(login.User)
+	if err != nil {
+		return err
+	}
+	password, err := quote(login.Password)
+	if err != nil {
+		return err
+	}
+	if _, err := s.command("LOGIN", user, password); err != nil {
 		return err
 	}
 	defer func() { _, _ = s.command("LOGOUT") }()
