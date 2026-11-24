@@ -18,10 +18,22 @@ type Memory struct {
 	nextDel    int64
 	cursors    map[string]memCursor
 	byAddress  map[string]string
-	events     []Record
+	events     []memEvent
 	subs       map[string]Subscription
 	deliveries []memDelivery
 	blocked    map[string]string
+	// sending is the delivery in flight for each subscription and when its lease ends.
+	sending map[string]memSending
+}
+
+type memEvent struct {
+	Record
+	at time.Time
+}
+
+type memSending struct {
+	delivery int64
+	until    time.Time
 }
 
 type memCursor struct {
@@ -38,6 +50,8 @@ type memDelivery struct {
 	done    bool
 	failed  bool
 	reason  string
+	// finished is when the delivery was acknowledged or failed.
+	finished time.Time
 }
 
 func (m *Memory) init() {
@@ -46,6 +60,9 @@ func (m *Memory) init() {
 		m.byAddress = map[string]string{}
 		m.subs = map[string]Subscription{}
 		m.blocked = map[string]string{}
+	}
+	if m.sending == nil {
+		m.sending = map[string]memSending{}
 	}
 }
 
@@ -127,7 +144,7 @@ func (m *Memory) Put(_ context.Context, inbox, address, state string, records []
 		m.nextEvent++
 		record.ID = m.nextEvent
 		record.Inbox = inbox
-		m.events = append(m.events, record)
+		m.events = append(m.events, memEvent{Record: record, at: time.Now()})
 		for _, sub := range m.subs {
 			if sub.Inbox != inbox || sub.Disabled != "" {
 				continue
@@ -149,7 +166,7 @@ func (m *Memory) Since(_ context.Context, inbox string, after int64, limit int) 
 	var out []Record
 	for _, record := range m.events {
 		if record.Inbox == inbox && record.ID > after {
-			out = append(out, record)
+			out = append(out, record.Record)
 			if len(out) == limit {
 				break
 			}
@@ -216,6 +233,7 @@ func (m *Memory) Unsubscribe(_ context.Context, id string) error {
 	defer m.mu.Unlock()
 	m.init()
 	delete(m.subs, id)
+	delete(m.sending, id)
 	kept := m.deliveries[:0]
 	for _, item := range m.deliveries {
 		if item.subID != id {
@@ -226,7 +244,7 @@ func (m *Memory) Unsubscribe(_ context.Context, id string) error {
 	return nil
 }
 
-func (m *Memory) Disable(_ context.Context, id, reason string, _ time.Time) error {
+func (m *Memory) Disable(_ context.Context, id, reason string, now time.Time) error {
 	if reason == "" {
 		reason = "disabled"
 	}
@@ -246,11 +264,13 @@ func (m *Memory) Disable(_ context.Context, id, reason string, _ time.Time) erro
 		if item.subID == id && !item.done && !item.failed {
 			item.failed = true
 			item.reason = reason
+			item.finished = now
 		}
 	}
 	return nil
 }
 
+// Claim leases the oldest due delivery whose subscription has none in flight.
 func (m *Memory) Claim(_ context.Context, now time.Time) (Delivery, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -260,13 +280,17 @@ func (m *Memory) Claim(_ context.Context, now time.Time) (Delivery, bool, error)
 		if item.done || item.failed || item.next.After(now) {
 			continue
 		}
+		if busy, ok := m.sending[item.subID]; ok && busy.until.After(now) {
+			continue
+		}
 		item.attempt++
-		item.next = now.Add(30 * time.Second)
+		item.next = now.Add(claimLease)
+		m.sending[item.subID] = memSending{delivery: item.id, until: item.next}
 		sub := m.subs[item.subID]
 		var event Record
 		for _, record := range m.events {
 			if record.ID == item.eventID {
-				event = record
+				event = record.Record
 				break
 			}
 		}
@@ -278,38 +302,33 @@ func (m *Memory) Claim(_ context.Context, now time.Time) (Delivery, bool, error)
 	return Delivery{}, false, nil
 }
 
-func (m *Memory) Ack(_ context.Context, id int64, _ time.Time) error {
-	return m.finish(id, true)
+func (m *Memory) Ack(_ context.Context, id int64, now time.Time) error {
+	return m.finish(id, func(item *memDelivery) { item.done, item.finished = true, now })
 }
 
 func (m *Memory) Retry(_ context.Context, id int64, next time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i := range m.deliveries {
-		if m.deliveries[i].id == id {
-			m.deliveries[i].next = next
-			return nil
-		}
-	}
-	return nil
+	return m.finish(id, func(item *memDelivery) { item.next = next })
 }
 
-func (m *Memory) Fail(_ context.Context, id int64, _ time.Time) error {
-	return m.finish(id, false)
+func (m *Memory) Fail(_ context.Context, id int64, now time.Time) error {
+	return m.finish(id, func(item *memDelivery) { item.failed, item.finished = true, now })
 }
 
-func (m *Memory) finish(id int64, ok bool) error {
+// finish changes one delivery and clears its subscription's in-flight mark when it names that delivery.
+func (m *Memory) finish(id int64, change func(*memDelivery)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.init()
 	for i := range m.deliveries {
-		if m.deliveries[i].id == id {
-			if ok {
-				m.deliveries[i].done = true
-			} else {
-				m.deliveries[i].failed = true
-			}
-			return nil
+		item := &m.deliveries[i]
+		if item.id != id {
+			continue
 		}
+		change(item)
+		if busy, ok := m.sending[item.subID]; ok && busy.delivery == id {
+			delete(m.sending, item.subID)
+		}
+		return nil
 	}
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,7 +24,23 @@ import (
 	"github.com/Impakta-io/inbai/internal/store"
 )
 
-const maxAttempts = 5
+// retrySchedule is the wait after each failed attempt: 30 seconds, 2 and 10 minutes for a
+// receiver that blipped or is redeploying, then 1, 6 and 24 hours so a receiver that is down
+// for most of a day still gets the event. The last attempt is about 31 hours after the first.
+var retrySchedule = [...]time.Duration{
+	30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour,
+}
+
+// maxAttempts is the first attempt plus one retry per step of retrySchedule.
+const maxAttempts = len(retrySchedule) + 1
+
+// DefaultWebhookWorkers is how many webhooks one process posts at the same time.
+// Each holds no database connection while it waits on the receiver, so a receiver that
+// takes the whole 10 second timeout ties up one worker and nothing else.
+const DefaultWebhookWorkers = 16
+
+// webhookPoll is how often an idle delivery loop asks for due deliveries.
+const webhookPoll = time.Second
 
 // Feed turns JMAP changes into an ordered log and signed webhook deliveries.
 type Feed struct {
@@ -32,6 +49,9 @@ type Feed struct {
 	backoff  func(attempt int) time.Duration
 	appended atomic.Int64
 	posted   atomic.Int64
+
+	workers int
+	poll    time.Duration
 
 	allowPrivate bool
 	client       *http.Client
@@ -57,17 +77,33 @@ func (f *Feed) SetGate(gate Gate) {
 // New returns a feed over a durable log.
 func New(log store.Log) *Feed {
 	return &Feed{
-		log:    log,
-		client: NewWebhookClient(false),
-		now:    time.Now,
-		backoff: func(attempt int) time.Duration {
-			shift := attempt - 1
-			if shift > 4 {
-				shift = 4
-			}
-			return time.Second << shift
-		},
+		log:     log,
+		client:  NewWebhookClient(false),
+		now:     time.Now,
+		backoff: retryAfter,
+		workers: DefaultWebhookWorkers,
+		poll:    webhookPoll,
 	}
+}
+
+// retryAfter is the wait after failed attempt number attempt, counting from 1.
+func retryAfter(attempt int) time.Duration {
+	step := min(max(attempt, 1), len(retrySchedule)) - 1
+	return retrySchedule[step]
+}
+
+// SetWorkers sets how many webhooks RunWebhooks posts at the same time. Call it before
+// delivery starts. A value below one keeps the default.
+func (f *Feed) SetWorkers(n int) {
+	if n < 1 {
+		n = DefaultWebhookWorkers
+	}
+	f.workers = n
+}
+
+// Workers is how many webhooks RunWebhooks posts at the same time.
+func (f *Feed) Workers() int {
+	return f.workers
 }
 
 // SetAllowPrivate lets an operator allow http and private webhook targets.
@@ -270,13 +306,19 @@ func (f *Feed) DeliverOnce(ctx context.Context, client *http.Client) (bool, erro
 	if err != nil || !ok {
 		return false, err
 	}
+	return true, f.deliver(ctx, client, delivery)
+}
+
+// deliver posts one claimed delivery and records the outcome, which also lets the
+// subscription's next delivery be claimed.
+func (f *Feed) deliver(ctx context.Context, client *http.Client, delivery store.Delivery) error {
 	if f.gate != nil {
 		allowed, reason, err := f.gate.MayDeliver(ctx, delivery.Agent, delivery.Operator, delivery.Event.Inbox)
 		if err != nil {
-			return true, errors.Join(err, f.failOrRetry(ctx, delivery))
+			return errors.Join(err, f.failOrRetry(ctx, delivery))
 		}
 		if !allowed {
-			return true, f.log.Disable(ctx, delivery.SubscriptionID, reason, f.now())
+			return f.log.Disable(ctx, delivery.SubscriptionID, reason, f.now())
 		}
 	}
 	if client == nil {
@@ -284,27 +326,29 @@ func (f *Feed) DeliverOnce(ctx context.Context, client *http.Client) (bool, erro
 	}
 	body, err := json.Marshal(delivery.Event)
 	if err != nil {
-		return false, err
+		return errors.Join(err, f.failOrRetry(ctx, delivery))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, delivery.URL, bytes.NewReader(body))
 	if err != nil {
-		return false, err
+		return errors.Join(err, f.failOrRetry(ctx, delivery))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Inbai-Signature", Sign(delivery.Secret, body))
 	res, err := client.Do(req)
 	if err != nil {
-		return true, f.failOrRetry(ctx, delivery)
+		return f.failOrRetry(ctx, delivery)
 	}
 	defer func() { _ = res.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		f.posted.Add(1)
-		return true, f.log.Ack(ctx, delivery.ID, f.now())
+		return f.log.Ack(ctx, delivery.ID, f.now())
 	}
-	return true, f.failOrRetry(ctx, delivery)
+	return f.failOrRetry(ctx, delivery)
 }
 
+// failOrRetry schedules the next attempt from retrySchedule in the stored next_at, so a
+// restart neither loses nor hurries it. After the last attempt the delivery fails for good.
 func (f *Feed) failOrRetry(ctx context.Context, delivery store.Delivery) error {
 	if delivery.Attempt >= maxAttempts {
 		return f.log.Fail(ctx, delivery.ID, f.now())
@@ -314,10 +358,9 @@ func (f *Feed) failOrRetry(ctx context.Context, delivery store.Delivery) error {
 
 // Run sweeps mailboxes and posts webhooks until the context ends.
 func (f *Feed) Run(ctx context.Context, watch mailbackend.Watcher, client *http.Client) {
+	go f.RunWebhooks(ctx, client)
 	sweep := time.NewTicker(30 * time.Second)
-	post := time.NewTicker(time.Second)
 	defer sweep.Stop()
-	defer post.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -326,34 +369,57 @@ func (f *Feed) Run(ctx context.Context, watch mailbackend.Watcher, client *http.
 			if watch != nil {
 				_ = f.Sweep(ctx, watch)
 			}
-		case <-post.C:
-			for range 20 {
-				ok, err := f.DeliverOnce(ctx, client)
-				if err != nil || !ok {
-					break
-				}
-			}
 		}
 	}
 }
 
-// RunWebhooks claims and posts due webhook deliveries until the context ends.
+// RunWebhooks claims and posts due webhook deliveries until the context ends, then waits
+// for the posts in flight. Up to the worker count are posted at once. The store hands out
+// at most one delivery per subscription at a time, across every process sharing it, so a
+// slow receiver holds one worker and delays only its own deliveries.
 func (f *Feed) RunWebhooks(ctx context.Context, client *http.Client) {
-	post := time.NewTicker(time.Second)
-	defer post.Stop()
+	slots := make(chan struct{}, max(f.workers, 1))
+	// done wakes the loop when a post finishes, because that subscription's next delivery
+	// may now be claimable.
+	done := make(chan struct{}, 1)
+	var posting sync.WaitGroup
+	defer posting.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-post.C:
-			for range 20 {
-				ok, err := f.DeliverOnce(ctx, client)
-				if err != nil || !ok {
-					break
-				}
-			}
+		case slots <- struct{}{}:
 		}
+		delivery, ok, err := f.log.Claim(ctx, f.now())
+		if err != nil || !ok {
+			<-slots
+			if !f.idle(ctx, done) {
+				return
+			}
+			continue
+		}
+		posting.Go(func() {
+			_ = f.deliver(ctx, client, delivery)
+			<-slots
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		})
 	}
+}
+
+// idle waits for the poll interval or a finished post. It is false when ctx ended.
+func (f *Feed) idle(ctx context.Context, done <-chan struct{}) bool {
+	timer := time.NewTimer(f.poll)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-done:
+	case <-timer.C:
+	}
+	return true
 }
 
 // Counters returns events appended and webhooks posted.

@@ -145,8 +145,13 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			writef(stderr, "webhooks: %s\n", err)
 			return 2
 		}
+		keep, err := pruneRetention(getenv)
+		if err != nil {
+			writef(stderr, "retention: %s\n", err)
+			return 2
+		}
 		go feed.RunWebhooks(context.Background(), nil)
-		go newWorker(log, svc, feed, mail, cfg.RetentionDays, stderr).Run(context.Background())
+		go newWorker(log, svc, feed, mail, cfg.RetentionDays, log, keep, stderr).Run(context.Background())
 	} else {
 		go retainLoop(svc, cfg.RetentionDays, stderr)
 	}

@@ -225,6 +225,15 @@ var addedColumns = []string{
 	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'done'`,
 	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT ''`,
 	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS reserved_at timestamptz NOT NULL DEFAULT now()`,
+	// Webhook delivery and pruning. mail_event.at is when the event was logged; an event stored
+	// before the column existed counts from the upgrade. sending_delivery and sending_until mark
+	// the one delivery in flight for a subscription until it finishes or its lease ends.
+	`ALTER TABLE mail_event ADD COLUMN IF NOT EXISTS at timestamptz NOT NULL DEFAULT now()`,
+	`ALTER TABLE webhook_subscription ADD COLUMN IF NOT EXISTS sending_delivery bigint`,
+	`ALTER TABLE webhook_subscription ADD COLUMN IF NOT EXISTS sending_until timestamptz`,
+	`CREATE INDEX IF NOT EXISTS webhook_delivery_event ON webhook_delivery (event_id)`,
+	`CREATE INDEX IF NOT EXISTS webhook_delivery_pending ON webhook_delivery (subscription_id, id)
+    WHERE done_at IS NULL AND failed_at IS NULL`,
 }
 
 func ensureColumns(ctx context.Context, pool *pgxpool.Pool) error {
@@ -463,6 +472,14 @@ WHERE subscription_id = $1 AND done_at IS NULL AND failed_at IS NULL`, id, reaso
 	return tx.Commit(ctx)
 }
 
+// Claim leases the oldest due delivery whose subscription has none in flight, and marks
+// the subscription busy until the delivery finishes or the lease ends.
+//
+// Only the subscription row is locked, with SKIP LOCKED, and only a subscription's oldest
+// due delivery is a candidate, so a claim never skips ahead within one subscription.
+// When another process marked the subscription first, the lock sees the new row and its
+// sending_until fails the condition, so two processes never send for one subscription at
+// the same time.
 func (p *Postgres) Claim(ctx context.Context, now time.Time) (Delivery, bool, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -472,14 +489,25 @@ func (p *Postgres) Claim(ctx context.Context, now time.Time) (Delivery, bool, er
 	var delivery Delivery
 	err = tx.QueryRow(ctx, `
 WITH claimed AS (
-    SELECT id FROM webhook_delivery
-    WHERE done_at IS NULL AND failed_at IS NULL AND next_at <= $1
-    ORDER BY id
-    FOR UPDATE SKIP LOCKED
+    SELECT delivery.id, delivery.subscription_id FROM webhook_delivery AS delivery
+    JOIN webhook_subscription AS subscription ON subscription.id = delivery.subscription_id
+    WHERE delivery.done_at IS NULL AND delivery.failed_at IS NULL AND delivery.next_at <= $1
+      AND (subscription.sending_until IS NULL OR subscription.sending_until <= $1)
+      AND NOT EXISTS (
+          SELECT 1 FROM webhook_delivery AS earlier
+          WHERE earlier.subscription_id = delivery.subscription_id AND earlier.id < delivery.id
+            AND earlier.done_at IS NULL AND earlier.failed_at IS NULL AND earlier.next_at <= $1)
+    ORDER BY delivery.id
+    FOR UPDATE OF subscription SKIP LOCKED
     LIMIT 1
+), busy AS (
+    UPDATE webhook_subscription AS subscription
+    SET sending_delivery = claimed.id, sending_until = $2
+    FROM claimed
+    WHERE subscription.id = claimed.subscription_id
 ), updated AS (
     UPDATE webhook_delivery AS delivery
-    SET attempt = delivery.attempt + 1, next_at = $1 + interval '30 seconds'
+    SET attempt = delivery.attempt + 1, next_at = $2
     FROM claimed
     WHERE delivery.id = claimed.id
     RETURNING delivery.id, delivery.attempt, delivery.subscription_id, delivery.event_id
@@ -489,7 +517,7 @@ SELECT updated.id, updated.attempt, subscription.id, subscription.agent, subscri
        event.id, event.inbox, event.message_id, event.kind
 FROM updated
 JOIN webhook_subscription AS subscription ON subscription.id = updated.subscription_id
-JOIN mail_event AS event ON event.id = updated.event_id`, now).Scan(
+JOIN mail_event AS event ON event.id = updated.event_id`, now, now.Add(claimLease)).Scan(
 		&delivery.ID, &delivery.Attempt, &delivery.SubscriptionID, &delivery.Agent, &delivery.Operator,
 		&delivery.URL, &delivery.Secret,
 		&delivery.Event.ID, &delivery.Event.Inbox, &delivery.Event.MessageID, &delivery.Event.Kind,
@@ -506,18 +534,27 @@ JOIN mail_event AS event ON event.id = updated.event_id`, now).Scan(
 	return delivery, true, nil
 }
 
+// releaseSending clears the subscription's in-flight mark when it still names this delivery.
+// It runs in the same statement as the change to the delivery.
+const releaseSending = `
+UPDATE webhook_subscription SET sending_delivery = NULL, sending_until = NULL
+WHERE id IN (SELECT subscription_id FROM changed) AND sending_delivery = $1`
+
 func (p *Postgres) Ack(ctx context.Context, id int64, now time.Time) error {
-	_, err := p.pool.Exec(ctx, `UPDATE webhook_delivery SET done_at = $2 WHERE id = $1`, id, now)
+	_, err := p.pool.Exec(ctx, `
+WITH changed AS (UPDATE webhook_delivery SET done_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, now)
 	return err
 }
 
 func (p *Postgres) Retry(ctx context.Context, id int64, next time.Time) error {
-	_, err := p.pool.Exec(ctx, `UPDATE webhook_delivery SET next_at = $2 WHERE id = $1`, id, next)
+	_, err := p.pool.Exec(ctx, `
+WITH changed AS (UPDATE webhook_delivery SET next_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, next)
 	return err
 }
 
 func (p *Postgres) Fail(ctx context.Context, id int64, now time.Time) error {
-	_, err := p.pool.Exec(ctx, `UPDATE webhook_delivery SET failed_at = $2 WHERE id = $1`, id, now)
+	_, err := p.pool.Exec(ctx, `
+WITH changed AS (UPDATE webhook_delivery SET failed_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, now)
 	return err
 }
 
@@ -584,13 +621,13 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	rows.Close()
-	rows, err = tx.Query(ctx, `SELECT id, inbox, message_id, kind FROM mail_event ORDER BY id`)
+	rows, err = tx.Query(ctx, `SELECT id, inbox, message_id, kind, at FROM mail_event ORDER BY id`)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	for rows.Next() {
-		var event Record
-		if err := rows.Scan(&event.ID, &event.Inbox, &event.MessageID, &event.Kind); err != nil {
+		var event EventRow
+		if err := rows.Scan(&event.ID, &event.Inbox, &event.MessageID, &event.Kind, &event.At); err != nil {
 			rows.Close()
 			return Snapshot{}, err
 		}
@@ -601,6 +638,10 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	rows.Close()
+	// The sequence outlives pruned events. Restoring it keeps every consumer cursor behind new ids.
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(pg_sequence_last_value(pg_get_serial_sequence('mail_event', 'id')::regclass), 0)`).Scan(&snap.EventSequence); err != nil {
+		return Snapshot{}, err
+	}
 	rows, err = tx.Query(ctx, `SELECT `+subscriptionColumns+` FROM webhook_subscription ORDER BY id`)
 	if err != nil {
 		return Snapshot{}, err
@@ -695,7 +736,12 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		}
 	}
 	for _, event := range snap.Events {
-		if _, err := tx.Exec(ctx, `INSERT INTO mail_event (id, inbox, message_id, kind) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4)`, event.ID, event.Inbox, event.MessageID, event.Kind); err != nil {
+		// A file written before events had a time leaves at empty, and the event counts from the restore.
+		var at any
+		if !event.At.IsZero() {
+			at = event.At
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO mail_event (id, inbox, message_id, kind, at) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()))`, event.ID, event.Inbox, event.MessageID, event.Kind, at); err != nil {
 			return err
 		}
 	}
@@ -739,7 +785,7 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 	if err := writeQueue(ctx, tx, snap); err != nil {
 		return err
 	}
-	if err := setIdentity(ctx, tx, "mail_event", "id", maxID(snap.Events)); err != nil {
+	if err := setIdentity(ctx, tx, "mail_event", "id", max(maxID(snap.Events), snap.EventSequence)); err != nil {
 		return err
 	}
 	if err := setIdentity(ctx, tx, "webhook_delivery", "id", maxDelivery(snap.Deliveries)); err != nil {
@@ -748,7 +794,7 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 	return tx.Commit(ctx)
 }
 
-func maxID(events []Record) int64 {
+func maxID(events []EventRow) int64 {
 	var max int64
 	for _, event := range events {
 		if event.ID > max {
