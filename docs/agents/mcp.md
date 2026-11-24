@@ -2,7 +2,7 @@ Status: current — `inbaid` serves the mail tools over Streamable HTTP, and `in
 
 # MCP
 
-`inbaid` serves MCP at `POST /mcp`. The transport has no protocol session: each request is one JSON-RPC message, and the response is `application/json`. `GET /mcp` is rejected. A client that already holds an access token sends it as `Authorization: Bearer`. A missing or rejected token is `401`, with `WWW-Authenticate` pointing at `/.well-known/oauth-protected-resource`.
+`inbaid` serves MCP at `POST /mcp`. The transport has no protocol session: each request is one JSON-RPC message, and the response is `application/json`. `GET /mcp` is rejected. A client that already holds an access token sends it as `Authorization: Bearer`. A missing or rejected token is `401`, with `WWW-Authenticate` pointing at `/.well-known/oauth-protected-resource`. If the server cannot read whether the agent is suspended, the answer is `503`, as on REST.
 
 The protocol revision is `2026-07-28`.
 

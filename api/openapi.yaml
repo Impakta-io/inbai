@@ -12,6 +12,7 @@ info:
     A 502 detail is the mail server's reason when it refused the request.
     Otherwise it names the X-Request-Id to find in the server log, not the error.
     The caller is an operator bearer token or an agent access token.
+    An access token is 503 when the server cannot read whether its agent is suspended.
 servers:
   - url: http://127.0.0.1:8787
 security:
@@ -114,6 +115,8 @@ paths:
         "204":
           description: Suspended
         "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
   /v1/grants/{agent}/{inbox}/{permission}:
     delete:

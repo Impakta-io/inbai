@@ -66,6 +66,14 @@ func TestPostgresKeepsGrantsQuotaAndCredentials(t *testing.T) {
 	if err != nil || !found || agent != "ada" || string(hash) != "hash" || operator {
 		t.Fatalf("client %s %q op %v found %v err %v", agent, hash, operator, found, err)
 	}
+	exists, err := second.AgentExists(ctx, "ada")
+	if err != nil || !exists {
+		t.Fatalf("ada exists %v err %v", exists, err)
+	}
+	exists, err = second.AgentExists(ctx, "bob")
+	if err != nil || exists {
+		t.Fatalf("bob exists %v err %v", exists, err)
+	}
 	if err := second.SuspendAgent(ctx, "ada"); err != nil {
 		t.Fatal(err)
 	}

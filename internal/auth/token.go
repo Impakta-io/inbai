@@ -15,14 +15,25 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/Impakta-io/inbai/internal/store"
 )
 
 const tokenTTL = 10 * time.Minute
 
 // ErrRejected is returned when a credential or token is not accepted.
 var ErrRejected = errors.New("rejected")
+
+// ErrUnavailable is returned when the credential store cannot be read.
+// The credential or token is not accepted. The caller may retry.
+var ErrUnavailable = errors.New("credential store is unavailable")
+
+// Store is the PostgreSQL state a Directory keeps. *store.Postgres implements it.
+type Store interface {
+	SaveClient(ctx context.Context, id, agent string, hash []byte, operator bool) error
+	Client(ctx context.Context, id string) (agent string, hash []byte, operator bool, ok bool, err error)
+	AgentExists(ctx context.Context, agent string) (bool, error)
+	SuspendAgent(ctx context.Context, agent string) error
+	AgentSuspended(ctx context.Context, agent string) (bool, error)
+}
 
 // Directory issues client credentials and verifies access tokens.
 // A token names the caller. It does not authorize an inbox.
@@ -31,7 +42,7 @@ type Directory struct {
 	audience string
 	now      func() time.Time
 
-	db        *store.Postgres
+	db        Store
 	mu        sync.Mutex
 	clients   map[string]storedClient
 	suspended map[string]bool
@@ -63,7 +74,7 @@ func NewDirectory(key []byte, audience string) *Directory {
 }
 
 // SetDB stores client credentials and suspensions in PostgreSQL.
-func (d *Directory) SetDB(db *store.Postgres) {
+func (d *Directory) SetDB(db Store) {
 	d.db = db
 }
 
@@ -111,7 +122,14 @@ func (d *Directory) Exchange(id, secret string) (string, int, error) {
 		client, ok = d.clients[id]
 		d.mu.Unlock()
 	}
-	if !ok || !hmac.Equal(sum[:], client.hash) || d.Suspended(client.agent) {
+	if !ok || !hmac.Equal(sum[:], client.hash) {
+		return "", 0, ErrRejected
+	}
+	suspended, err := d.Suspended(client.agent)
+	if err != nil {
+		return "", 0, err
+	}
+	if suspended {
 		return "", 0, ErrRejected
 	}
 	token, err := d.sign(claims{
@@ -127,34 +145,58 @@ func (d *Directory) Exchange(id, secret string) (string, int, error) {
 }
 
 // Suspend stops an agent from exchanging a secret or using an existing token.
-func (d *Directory) Suspend(agent string) {
+// found is false when no credential names the agent. Nothing is stored then.
+// The suspension is stored when err is nil and found is true.
+func (d *Directory) Suspend(agent string) (found bool, err error) {
 	if d.db != nil {
-		_ = d.db.SuspendAgent(context.Background(), agent)
-		return
-	}
-	d.mu.Lock()
-	d.suspended[agent] = true
-	d.mu.Unlock()
-}
-
-// Suspended reports whether the agent is stopped.
-func (d *Directory) Suspended(agent string) bool {
-	if d.db != nil {
-		ok, err := d.db.AgentSuspended(context.Background(), agent)
-		return err == nil && ok
+		ctx := context.Background()
+		found, err := d.db.AgentExists(ctx, agent)
+		if err != nil || !found {
+			return false, err
+		}
+		if err := d.db.SuspendAgent(ctx, agent); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.suspended[agent]
+	for _, client := range d.clients {
+		if client.agent == agent {
+			d.suspended[agent] = true
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Suspended reports whether the agent is stopped.
+// err wraps ErrUnavailable when the suspension state cannot be read.
+func (d *Directory) Suspended(agent string) (bool, error) {
+	if d.db != nil {
+		ok, err := d.db.AgentSuspended(context.Background(), agent)
+		if err != nil {
+			return false, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+		return ok, nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.suspended[agent], nil
 }
 
 // Verify checks the signature, audience, expiry, and suspension of an access token.
+// A token is not accepted when its suspension state cannot be read. err wraps ErrUnavailable then.
 func (d *Directory) Verify(token string) (subject string, operator bool, err error) {
 	body, err := d.parse(token)
 	if err != nil {
 		return "", false, err
 	}
-	if d.Suspended(body.Subject) {
+	suspended, err := d.Suspended(body.Subject)
+	if err != nil {
+		return "", false, err
+	}
+	if suspended {
 		return "", false, ErrRejected
 	}
 	return body.Subject, body.Operator, nil

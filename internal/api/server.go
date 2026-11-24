@@ -118,6 +118,10 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (service.C
 		return service.Caller{}, false
 	}
 	subject, operator, err := s.Directory.Verify(got)
+	if errors.Is(err, auth.ErrUnavailable) {
+		writeProblem(w, http.StatusServiceUnavailable, "Credential store unavailable", "suspension state could not be read; retry the request")
+		return service.Caller{}, false
+	}
 	if err != nil {
 		s.writeUnauthorized(w)
 		return service.Caller{}, false

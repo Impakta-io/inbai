@@ -181,6 +181,13 @@ SELECT agent, secret_hash, operator FROM agent_credential WHERE id = $1`, id).Sc
 	return agent, hash, operator, err == nil, err
 }
 
+// AgentExists reports whether a stored credential names the agent.
+func (p *Postgres) AgentExists(ctx context.Context, agent string) (bool, error) {
+	var ok bool
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_credential WHERE agent = $1)`, agent).Scan(&ok)
+	return ok, err
+}
+
 // SuspendAgent records that the agent may no longer exchange a secret or use a token.
 func (p *Postgres) SuspendAgent(ctx context.Context, agent string) error {
 	_, err := p.pool.Exec(ctx, `

@@ -126,9 +126,10 @@ func (s *Service) SetSendLimits(inboxDaily, domainDaily, workspaceDaily, recipie
 }
 
 // Identities creates and suspends agent credentials. The token still only names the caller.
+// Suspend reports found as false when no credential names the agent.
 type Identities interface {
 	Create(agent string, operator bool) (id, secret string, err error)
-	Suspend(agent string)
+	Suspend(agent string) (found bool, err error)
 }
 
 // SetDB stores grants, quotas, idempotency keys, and jobs in PostgreSQL.
@@ -219,6 +220,8 @@ func (s *Service) ProvisionAgent(caller Caller, identities Identities, agent str
 }
 
 // SuspendAgent stops an agent. Only an operator may do that.
+// The audit row is written after the suspension is stored.
+// An agent that no credential names is ErrNotFound.
 func (s *Service) SuspendAgent(caller Caller, identities Identities, agent string) error {
 	if !caller.Operator {
 		return ErrForbidden
@@ -226,7 +229,13 @@ func (s *Service) SuspendAgent(caller Caller, identities Identities, agent strin
 	if identities == nil || agent == "" {
 		return fmt.Errorf("%w: credentials are not configured", ErrInvalid)
 	}
-	identities.Suspend(agent)
+	found, err := identities.Suspend(agent)
+	if err != nil {
+		return fmt.Errorf("suspend %s: %w", agent, err)
+	}
+	if !found {
+		return fmt.Errorf("%w: agent %s has no credential", ErrNotFound, agent)
+	}
 	return s.record(context.Background(), caller, "agent.suspend", agent)
 }
 
