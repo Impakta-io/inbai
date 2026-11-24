@@ -162,6 +162,8 @@ func TestServeRefusesShortSecrets(t *testing.T) {
 				"INBAI_DOMAIN":         "example.com",
 				"INBAI_IMAP_ADDRESS":   "127.0.0.1:1",
 				"INBAI_SMTP_ADDRESS":   "127.0.0.1:1",
+				"INBAI_IMAP_SECURITY":  "none",
+				"INBAI_SMTP_SECURITY":  "none",
 				"INBAI_IMAP_ACCOUNTS":  accounts,
 			}
 			code := run([]string{"serve", "--config", missing}, &stdout, &stderr, func(k string) string { return env[k] })

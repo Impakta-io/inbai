@@ -4,7 +4,6 @@
 package imap
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -12,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/smtp"
 	"os"
 	"sort"
 	"strconv"
@@ -30,11 +28,20 @@ type Login struct {
 
 // Config selects the IMAP and SMTP servers and the account file.
 // The account file is a JSON object of account id to user and password.
+//
+// IMAPSecurity and SMTPSecurity are tls, starttls, or none. Empty is the
+// default for the port: 993 and 465 are tls, 143, 587, and 25 are starttls.
+// Another port needs an explicit value. none is refused for a host that is
+// not loopback unless AllowPlaintext is set. InsecureTLS skips certificate
+// verification.
 type Config struct {
-	IMAP     string
-	SMTP     string
-	TLS      bool
-	Accounts string
+	IMAP           string
+	SMTP           string
+	IMAPSecurity   string
+	SMTPSecurity   string
+	AllowPlaintext bool
+	InsecureTLS    bool
+	Accounts       string
 	// AuthservID is the authserv-id the mail server writes in the
 	// Authentication-Results fields it adds, usually its hostname. Only that
 	// server's results are reported. When it is empty, none are.
@@ -42,12 +49,16 @@ type Config struct {
 }
 
 // Backend reads and submits mail for accounts named in the account file.
+// Open sets both security modes. An empty mode, which only a Backend built
+// in this package's tests has, is plaintext.
 type Backend struct {
-	imap     string
-	smtp     string
-	tls      bool
-	accounts map[string]Login
-	dial     func(context.Context, string, string) (net.Conn, error)
+	imap         string
+	smtp         string
+	imapSecurity Security
+	smtpSecurity Security
+	tlsBase      *tls.Config
+	accounts     map[string]Login
+	dial         func(context.Context, string, string) (net.Conn, error)
 
 	authservID string
 }
@@ -56,6 +67,14 @@ type Backend struct {
 func Open(cfg Config) (*Backend, error) {
 	if cfg.IMAP == "" || cfg.SMTP == "" || cfg.Accounts == "" {
 		return nil, errors.New("imap: address and account file are required")
+	}
+	imapSecurity, err := resolveSecurity("INBAI_IMAP_SECURITY", cfg.IMAPSecurity, cfg.IMAP, imapPorts, cfg.AllowPlaintext)
+	if err != nil {
+		return nil, err
+	}
+	smtpSecurity, err := resolveSecurity("INBAI_SMTP_SECURITY", cfg.SMTPSecurity, cfg.SMTP, smtpPorts, cfg.AllowPlaintext)
+	if err != nil {
+		return nil, err
 	}
 	raw, err := os.ReadFile(cfg.Accounts)
 	if err != nil {
@@ -68,7 +87,20 @@ func Open(cfg Config) (*Backend, error) {
 	if len(accounts) == 0 {
 		return nil, errors.New("imap: account file is empty")
 	}
-	return &Backend{imap: cfg.IMAP, smtp: cfg.SMTP, tls: cfg.TLS, accounts: accounts, authservID: strings.TrimSpace(cfg.AuthservID)}, nil
+	return &Backend{
+		imap:         cfg.IMAP,
+		smtp:         cfg.SMTP,
+		imapSecurity: imapSecurity,
+		smtpSecurity: smtpSecurity,
+		tlsBase:      &tls.Config{InsecureSkipVerify: cfg.InsecureTLS}, //nolint:gosec // only when the operator sets INBAI_IMAP_TLS_INSECURE=1
+		accounts:     accounts,
+		authservID:   strings.TrimSpace(cfg.AuthservID),
+	}, nil
+}
+
+// Security returns the IMAP and SMTP modes Open chose.
+func (b *Backend) Security() (imapMode, smtpMode Security) {
+	return b.imapSecurity, b.smtpSecurity
 }
 
 // CreateInbox reports that this backend cannot provision a mailbox.
@@ -129,24 +161,12 @@ func (b *Backend) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	if err != nil {
 		return err
 	}
-	conn, err := b.connect(ctx, b.smtp)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-	host, _, err := net.SplitHostPort(b.smtp)
-	if err != nil {
-		return err
-	}
-	client, err := smtp.NewClient(conn, host)
+	client, host, err := b.openSMTP(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = client.Close() }()
-	if err := client.Hello("inbai"); err != nil {
-		return err
-	}
-	if err := client.Auth(smtp.PlainAuth("", login.User, login.Password, host)); err != nil {
+	if err := client.Auth(b.smtpAuth(login, host)); err != nil {
 		return err
 	}
 	from := msg.From
@@ -154,20 +174,20 @@ func (b *Backend) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 		from = login.User
 	}
 	if err := client.Mail(from); err != nil {
-		return err
+		return refused("MAIL", err)
 	}
 	if err := client.Rcpt(msg.To); err != nil {
-		return err
+		return refused("RCPT", err)
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return err
+		return refused("DATA", err)
 	}
 	if _, err := writer.Write(messageBytes(msg, from)); err != nil {
 		_ = writer.Close()
 		return err
 	}
-	return writer.Close()
+	return refused("DATA", writer.Close())
 }
 
 // List returns the inbox messages with their subjects, newest first.
@@ -382,15 +402,11 @@ func (b *Backend) with(ctx context.Context, account string, fn func(*session) er
 	if err != nil {
 		return err
 	}
-	conn, err := b.connect(ctx, b.imap)
+	conn, s, err := b.openIMAP(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	s := &session{r: bufio.NewReader(conn), w: conn}
-	if err := s.greet(); err != nil {
-		return err
-	}
 	user, err := quote(login.User)
 	if err != nil {
 		return err
@@ -446,28 +462,6 @@ func (b *Backend) login(account string) (Login, error) {
 		return Login{}, fmt.Errorf("imap: unknown account %s", account)
 	}
 	return login, nil
-}
-
-func (b *Backend) connect(ctx context.Context, addr string) (net.Conn, error) {
-	if b.dial != nil {
-		return b.dial(ctx, "tcp", addr)
-	}
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil || !b.tls {
-		return conn, err
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	secure := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
-	if err := secure.HandshakeContext(ctx); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	return secure, nil
 }
 
 func messageBytes(msg mailbackend.Outbound, from string) []byte {
