@@ -38,9 +38,14 @@ The response header `X-Request-Id` is the same value. Send that header when you 
 
 ## Init times out
 
-Docker-mode `inbai init` pulls images first and prints Docker's progress. Stalwart then has 5 minutes to answer. When it does not, init prints the last 50 lines of `docker compose logs` and stops.
+Docker-mode `inbai init` pulls images first and prints Docker's progress. Stalwart then has 5 minutes to answer. When it does not, init prints the Stalwart container's state (for example `stalwart exited with code 2`), then the last 40 lines of the Stalwart log, then the last 15 lines of the PostgreSQL log, and stops. It ends with a hint chosen from those logs:
 
-A common cause is a volume left by an earlier install with the same Compose project. Its PostgreSQL database keeps the password it was created with, so Stalwart cannot sign in with the new one. Look for `password authentication failed` in the logs. Init prints the exact command to remove those volumes. It has this form:
+- **`Permission denied` in the Stalwart log:** a mount is not writable by the container user. Fix the owner or mode of the mounted directory, then run `inbai init` again.
+- **`password authentication failed` in the PostgreSQL log:** see the next paragraph.
+- **Stalwart exited with neither:** read the Stalwart log above the hint.
+- **Anything else:** Stalwart did not answer in time; read both logs.
+
+A common cause of the password failure is a volume left by an earlier install with the same Compose project. Its PostgreSQL database keeps the password it was created with, so Stalwart cannot sign in with the new one. Init prints the exact command to remove those volumes only in this case. It has this form:
 
 ```sh
 docker compose -p inbai -f "<config-dir>/stack/compose.yaml" down -v

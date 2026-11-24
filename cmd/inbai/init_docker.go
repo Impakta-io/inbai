@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -288,20 +291,95 @@ func (s dockerStack) wait(ctx context.Context, what, rawURL string, insecure boo
 	}
 	logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	logs, logErr := runCompose(logCtx, s.dir, nil, nil, "-f", "compose.yaml", "logs", "--no-color", "--tail", "50")
+	state := s.stalwartState(logCtx)
+	stalwartLog, stalwartErr := s.serviceLogs(logCtx, "stalwart", 40)
+	postgresLog, postgresErr := s.serviceLogs(logCtx, "postgres", 15)
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s did not answer within %s: %v\n", what, readyTimeout, err)
-	if logErr != nil {
-		fmt.Fprintf(&b, "docker compose logs failed: %v\n", logErr)
+	if state.text != "" {
+		fmt.Fprintf(&b, "%s\n", state.text)
 	}
-	if tail := lastLines(string(logs), 50); tail != "" {
-		fmt.Fprintf(&b, "Last lines of docker compose logs:\n%s\n", tail)
+	writeLogSection(&b, "Stalwart log (last 40 lines):", stalwartLog, stalwartErr)
+	writeLogSection(&b, "PostgreSQL log (last 15 lines):", postgresLog, postgresErr)
+
+	switch {
+	case strings.Contains(postgresLog, "password authentication failed"):
+		fmt.Fprintf(&b, "PostgreSQL rejected the password. If an earlier install used Compose project %s, its volumes may hold a different PostgreSQL password.\n", s.project)
+		b.WriteString("Removing them deletes that install's mail and accounts. To remove them, run:\n")
+		fmt.Fprintf(&b, "  docker compose -p %s -f %q down -v\n", s.project, filepath.Join(s.dir, "compose.yaml"))
+		b.WriteString("Then run inbai init again.")
+	case strings.Contains(stalwartLog, "Permission denied"):
+		b.WriteString("Stalwart could not write to a path it needs: a mount is not writable by the container user. Check the owner and mode of the mounted directory and of the stack directory, then run inbai init again.")
+	case state.exited:
+		b.WriteString("Stalwart exited; see its log above.")
+	default:
+		b.WriteString("Stalwart did not answer in time; see the logs above.")
 	}
-	fmt.Fprintf(&b, "If an earlier install used Compose project %s, its volumes may hold a different PostgreSQL password.\n", s.project)
-	b.WriteString("Removing them deletes that install's mail and accounts. To remove them, run:\n")
-	fmt.Fprintf(&b, "  docker compose -p %s -f %q down -v\n", s.project, filepath.Join(s.dir, "compose.yaml"))
-	b.WriteString("Then run inbai init again.")
 	return errors.New(b.String())
+}
+
+func (s dockerStack) serviceLogs(ctx context.Context, service string, tail int) (string, error) {
+	out, err := runCompose(ctx, s.dir, nil, nil, "-f", "compose.yaml", "logs", "--no-color", "--tail", strconv.Itoa(tail), service)
+	return lastLines(string(out), tail), err
+}
+
+func writeLogSection(b *strings.Builder, heading, log string, err error) {
+	b.WriteString(heading + "\n")
+	if err != nil {
+		fmt.Fprintf(b, "docker compose logs failed: %v\n", err)
+	}
+	if log == "" {
+		log = "(no output)"
+	}
+	b.WriteString(log + "\n\n")
+}
+
+type serviceState struct {
+	text   string
+	exited bool
+}
+
+type composePS struct {
+	State    string
+	ExitCode int
+}
+
+// stalwartState asks Compose for the Stalwart container's state. It returns
+// the zero value when Compose cannot say.
+func (s dockerStack) stalwartState(ctx context.Context) serviceState {
+	out, err := runCompose(ctx, s.dir, nil, nil, "-f", "compose.yaml", "ps", "-a", "--format", "json", "stalwart")
+	if err != nil {
+		return serviceState{}
+	}
+	// Compose prints one object, one object per line, or an array.
+	var entries []composePS
+	trimmed := bytes.TrimSpace(out)
+	if bytes.HasPrefix(trimmed, []byte("[")) {
+		if json.Unmarshal(trimmed, &entries) != nil {
+			return serviceState{}
+		}
+	} else {
+		dec := json.NewDecoder(bytes.NewReader(trimmed))
+		for dec.More() {
+			var e composePS
+			if dec.Decode(&e) != nil {
+				break
+			}
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) == 0 || entries[0].State == "" {
+		return serviceState{}
+	}
+	switch e := entries[0]; e.State {
+	case "exited", "dead":
+		return serviceState{text: fmt.Sprintf("stalwart exited with code %d", e.ExitCode), exited: true}
+	case "restarting":
+		return serviceState{text: "stalwart is restarting", exited: true}
+	default:
+		return serviceState{text: "stalwart is " + e.State}
+	}
 }
 
 func stackEnv(project, pgPassword string, opts dockerInitOptions) string {
