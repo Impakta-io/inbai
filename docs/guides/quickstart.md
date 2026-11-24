@@ -19,14 +19,14 @@ You need Docker with the Compose plugin (`docker compose`) running locally.
 Run `inbai init` with your domain:
 
 ```sh
-inbai init --domain example.com
+inbai init --domain inbai.test
 ```
 
 This writes a local Compose stack for PostgreSQL and Stalwart, starts Stalwart in recovery mode, creates the domain, roles, accounts, service API key, and operator token in `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. No environment variables are required.
 
 By default, local Docker mode binds loopback-only ports (`8443` for HTTPS, `2525` for SMTP, `5870` for submission, `5433` for PostgreSQL) so it will not clash with local services. Pass `--public` on a Linux server to bind ports `25`, `587`, and `443` on all interfaces, or use [deploy/compose](../../deploy/compose/README.md) to run `inbaid` inside Compose as well.
 
-Print the DNS zone if you are setting up a real domain:
+`inbai.test` is a reserved name that never resolves, so it suits a local trial. `init` refuses to change the domain recorded in `config.json`. For a real domain, run `inbai init` with that domain on a fresh config instead. To print its DNS zone:
 
 ```sh
 inbai domain add
@@ -46,8 +46,8 @@ In a second terminal:
 
 ```sh
 inbai inbox create alice
-inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
-inbai message list alice@example.com
+inbai message send --from alice@inbai.test --to alice@inbai.test --subject hello --body hello
+inbai message list alice@inbai.test
 ```
 
 `message list` prints the subject and a preview. Mail from the public internet arrives only after the DNS records are published and Stalwart accepts the delivery.

@@ -16,11 +16,7 @@ go test ./...
 - A documentation-only change needs `make docs-check`, not a new Go test.
 - Policy in `internal/service` needs a test that shows a caller without a grant is refused, and a caller with a grant is allowed. The stricter rules are in [internal/service/AGENTS.md](../../internal/service/AGENTS.md).
 
-## Suites that are not here yet
+## Suites outside unit tests
 
-Two directories are reserved:
-
-- [test/integration](../../test/integration/README.md) will run the server against Stalwart in containers.
-- [test/isolation](../../test/isolation/README.md) will prove that one agent cannot read or send as another.
-
-Both run in CI once they exist. Until then, `go test ./...` does not look inside them, because they hold no Go packages.
+- [test/integration](../../test/integration/README.md) holds `live_test.go` and `replicas_test.go`. They run `inbaid` against Stalwart in containers and against a shared PostgreSQL database. Each skips unless `INBAI_INTEGRATION=1` or `INBAI_TEST_DATABASE` is set, so `go test ./...` passes without them. CI sets neither.
+- [test/isolation](../../test/isolation/README.md) holds no Go files. It describes `TestAgentTokenCannotReadAnotherInbox` in `internal/api`, which runs with `go test ./...`.
