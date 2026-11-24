@@ -363,7 +363,7 @@ func messageReply(args []string, stdout, stderr io.Writer, getenv func(string) s
 		return 2
 	}
 	if fs.NArg() != 2 || *to == "" {
-		writef(stderr, "usage: inbai message reply <address> <message-id> --to <address> [--body <text>]\n")
+		writef(stderr, "usage: inbai message reply --to <address> [--body <text>] <address> <message-id>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
