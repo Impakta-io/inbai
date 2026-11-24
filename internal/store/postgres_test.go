@@ -46,6 +46,12 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 	if err != nil || len(records) != 1 || records[0].MessageID != "m" {
 		t.Fatalf("records %+v err %v", records, err)
 	}
+	if head, err := second.Head(ctx, "inbox-a"); err != nil || head != records[0].ID {
+		t.Fatalf("head %d err %v", head, err)
+	}
+	if head, err := second.Head(ctx, "inbox-b"); err != nil || head != 0 {
+		t.Fatalf("empty head %d err %v", head, err)
+	}
 	inbox, ok, err := second.InboxByAddress(ctx, "ada@example.com")
 	if err != nil || !ok || inbox != "inbox-a" {
 		t.Fatalf("inbox %s ok %v err %v", inbox, ok, err)

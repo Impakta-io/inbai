@@ -44,6 +44,7 @@ type Log interface {
 	Forget(context.Context, string) error
 	Put(context.Context, string, string, string, []Record) error
 	Since(context.Context, string, int64, int) ([]Record, error)
+	Head(context.Context, string) (int64, error)
 	Subscribe(context.Context, Subscription) error
 	Claim(context.Context, time.Time) (Delivery, bool, error)
 	Ack(context.Context, int64, time.Time) error

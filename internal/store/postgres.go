@@ -314,6 +314,13 @@ WHERE inbox = $1 AND id > $2 ORDER BY id LIMIT $3`, inbox, after, limit)
 	return out, rows.Err()
 }
 
+// Head returns the id of the newest event for an inbox, or 0 when it has none.
+func (p *Postgres) Head(ctx context.Context, inbox string) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx, `SELECT COALESCE(MAX(id), 0) FROM mail_event WHERE inbox = $1`, inbox).Scan(&id)
+	return id, err
+}
+
 func (p *Postgres) Subscribe(ctx context.Context, sub Subscription) error {
 	_, err := p.pool.Exec(ctx, `
 INSERT INTO webhook_subscription (id, agent, inbox, url, secret) VALUES ($1, $2, $3, $4, $5)`,

@@ -345,15 +345,6 @@ func (c apiClient) setAllowlist(ctx context.Context, inbox string, senders []str
 	return out, err
 }
 
-func (c apiClient) events(ctx context.Context, accountID string, after int64, timeout int) ([]apiEvent, error) {
-	path := fmt.Sprintf("/v1/events?inbox=%s&after=%d&timeout=%d", url.QueryEscape(accountID), after, timeout)
-	var out struct {
-		Events []apiEvent `json:"events"`
-	}
-	_, err := c.call(ctx, http.MethodGet, path, nil, &out)
-	return out.Events, err
-}
-
 func (c apiClient) call(ctx context.Context, method, path string, in, out any) (int, error) {
 	status, raw, err := c.callRaw(ctx, method, path, in)
 	if err != nil {

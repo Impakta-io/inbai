@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,35 @@ func TestIngestHintFeedsTheCursor(t *testing.T) {
 	list := call(t, srv.URL, http.MethodGet, "/v1/suppressions", "operator-token", "", "")
 	if list.StatusCode != http.StatusOK || !strings.Contains(readBody(t, list), "bad@example.com") {
 		t.Fatalf("list %d", list.StatusCode)
+	}
+}
+
+func TestEventsLatestWaitsFromTheHeadAndReturnsTheCursor(t *testing.T) {
+	log := &store.Memory{}
+	svc := service.New(&fakeMail{})
+	svc.SetFeed(events.New(log))
+	srv := httptest.NewServer((&Server{Service: svc, Token: "operator-token"}).Handler())
+	defer srv.Close()
+	if err := log.Put(context.Background(), "alice-id", "", "s1", []store.Record{{MessageID: "m-1", Kind: "created"}, {MessageID: "m-2", Kind: "created"}}); err != nil {
+		t.Fatal(err)
+	}
+	res := call(t, srv.URL, http.MethodGet, "/v1/events?inbox=alice-id&latest=true&timeout=0", "operator-token", "", "")
+	if body := readBody(t, res); res.StatusCode != http.StatusOK || body != `{"after":2,"events":[]}`+"\n" {
+		t.Fatalf("latest %d %q", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/events?inbox=alice-id&after=1&timeout=0", "operator-token", "", "")
+	if body := readBody(t, res); res.StatusCode != http.StatusOK || strings.Contains(body, "m-1") || !strings.Contains(body, "m-2") || !strings.Contains(body, `"after":2`) {
+		t.Fatalf("after %d %s", res.StatusCode, body)
+	}
+	res = call(t, srv.URL, http.MethodGet, "/v1/events?inbox=alice-id&after=5&timeout=0", "operator-token", "", "")
+	if body := readBody(t, res); res.StatusCode != http.StatusOK || !strings.Contains(body, `"after":5`) {
+		t.Fatalf("unchanged %d %s", res.StatusCode, body)
+	}
+	for _, query := range []string{"latest=true&after=1", "latest=maybe"} {
+		res = call(t, srv.URL, http.MethodGet, "/v1/events?inbox=alice-id&timeout=0&"+query, "operator-token", "", "")
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", query, res.StatusCode, readBody(t, res))
+		}
 	}
 }
 

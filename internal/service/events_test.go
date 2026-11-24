@@ -33,6 +33,31 @@ func TestEventsWithoutAGrantDoNotReadTheLog(t *testing.T) {
 	}
 }
 
+func TestEventHeadWithoutAGrantDoesNotReadTheLog(t *testing.T) {
+	log := &countingLog{Log: &store.Memory{}}
+	svc := New(&eventMail{})
+	svc.SetFeed(events.New(log))
+	if err := log.Put(context.Background(), "inbox-a", "", "s1", []store.Record{{MessageID: "m1", Kind: "created"}, {MessageID: "m2", Kind: "created"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Put(context.Background(), "inbox-b", "", "s1", []store.Record{{MessageID: "m3", Kind: "created"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.EventHead(context.Background(), Caller{Agent: "ada"}, "inbox-b"); !errors.Is(err, ErrForbidden) || log.heads != 0 {
+		t.Fatalf("err %v heads %d", err, log.heads)
+	}
+	head, err := svc.EventHead(context.Background(), Caller{Agent: "ada"}, "inbox-a")
+	if err != nil || head != 2 || log.heads != 1 {
+		t.Fatalf("head %d err %v heads %d", head, err, log.heads)
+	}
+	if _, err := New(&eventMail{}).EventHead(context.Background(), Caller{Operator: true}, "inbox-a"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("no feed %v", err)
+	}
+}
+
 func TestIngestHintAppendsAChange(t *testing.T) {
 	log := &store.Memory{}
 	feed := events.New(log)
@@ -101,6 +126,12 @@ func TestWebhookAllowPrivateIsAnOperatorSetting(t *testing.T) {
 type countingLog struct {
 	store.Log
 	since int
+	heads int
+}
+
+func (c *countingLog) Head(ctx context.Context, inbox string) (int64, error) {
+	c.heads++
+	return c.Log.Head(ctx, inbox)
 }
 
 func (c *countingLog) Since(ctx context.Context, inbox string, after int64, limit int) ([]store.Record, error) {
