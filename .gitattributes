@@ -1,0 +1,6 @@
+# Files embedded into the inbai binary or mounted into Linux containers must
+# keep LF line endings on every platform, or /bin/sh fails on a CRLF checkout.
+*.sh text eol=lf
+cmd/inbai/stack/* text eol=lf
+deploy/compose/* text eol=lf
+deploy/compose/initdb/* text eol=lf
