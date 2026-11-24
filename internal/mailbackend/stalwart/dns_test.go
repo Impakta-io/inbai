@@ -5,6 +5,7 @@ package stalwart
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,29 +13,18 @@ import (
 	"testing"
 )
 
-func TestZoneFileReadsTheDomainAndCreatesItWhenMissing(t *testing.T) {
-	const zone = "example.com. MX 10 mail.example.com.\n"
-	var sawBearer bool
+func TestZoneFileReadsAndNeverCreatesAMissingDomain(t *testing.T) {
 	var methods []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "Bearer shown-once" {
-			sawBearer = true
-		}
 		name, args := decodeCall(t, r.Body)
 		methods = append(methods, name)
 		switch name {
 		case "x:Domain/query":
 			filter := args["filter"].(map[string]any)
-			if filter["name"] != "example.com" {
+			if filter["name"] != "gmail.com" {
 				t.Errorf("filter %v", filter)
 			}
 			writeMethod(w, name, "q", map[string]any{"ids": []string{}})
-		case "x:Domain/set":
-			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
-		case "x:Domain/get":
-			writeMethod(w, name, "g", map[string]any{"list": []any{
-				map[string]any{"id": "dom", "name": "example.com", "dnsZoneFile": zone},
-			}})
 		default:
 			t.Errorf("method %s", name)
 			http.Error(w, "unexpected", http.StatusBadRequest)
@@ -42,18 +32,38 @@ func TestZoneFileReadsTheDomainAndCreatesItWhenMissing(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ZoneFile(context.Background(), &Client{BaseURL: srv.URL, APIKey: "shown-once"}, "example.com")
-	if err != nil {
+	_, err := ZoneFile(context.Background(), &Client{BaseURL: srv.URL, APIKey: "k"}, "gmail.com")
+	if !errors.Is(err, ErrDomainNotConfigured) {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Join(methods, ",") != "x:Domain/query" {
+		t.Fatalf("methods %v", methods)
+	}
+}
+
+func TestCreateDomainCreatesOnlyTheNamedDomain(t *testing.T) {
+	var created []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, args := decodeCall(t, r.Body)
+		if name != "x:Domain/set" {
+			t.Errorf("method %s", name)
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		for _, item := range args["create"].(map[string]any) {
+			created = append(created, item.(map[string]any)["name"].(string))
+		}
+		writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
+	}))
+	defer srv.Close()
+	if err := CreateDomain(context.Background(), &Client{BaseURL: srv.URL, APIKey: "k"}, "example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if got != zone {
-		t.Fatalf("zone %q", got)
+	if strings.Join(created, ",") != "example.com" {
+		t.Fatalf("created %v", created)
 	}
-	if !sawBearer {
-		t.Fatal("request did not use the API key")
-	}
-	if strings.Join(methods, ",") != "x:Domain/query,x:Domain/set,x:Domain/get" {
-		t.Fatalf("methods %v", methods)
+	if err := CreateDomain(context.Background(), &Client{BaseURL: srv.URL, APIKey: "k"}, "nodot"); err == nil {
+		t.Fatal("accepted a name that is not a DNS name")
 	}
 }
 

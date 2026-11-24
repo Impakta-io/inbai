@@ -153,3 +153,17 @@ func (f *fakeProbe) TLS(_ context.Context, address, _ string) error {
 	}
 	return f.tlsErr[address]
 }
+
+func TestIPv6AddressIsNotCheckedAndDoesNotFail(t *testing.T) {
+	probe := healthyProbe()
+	probe.ip["mail.example.com"] = append(probe.ip["mail.example.com"], net.ParseIP("2001:db8::10"))
+	probe.ptr["2001:db8::10"] = []string{"mail.example.com."}
+	lines := Run(context.Background(), []Record{{Name: "example.com", Type: "MX", Value: "10 mail.example.com"}}, "", probe)
+	text := join(lines)
+	if !strings.Contains(text, "Blocklist 2001:db8::10: not checked") {
+		t.Fatalf("missing IPv6 line in\n%s", text)
+	}
+	if !Healthy(lines) {
+		t.Fatalf("a dual-stack host was reported unhealthy:\n%s", text)
+	}
+}

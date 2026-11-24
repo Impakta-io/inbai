@@ -115,3 +115,30 @@ func (refusedProbe) TLS(context.Context, string, string) error { return nil }
 type errRefused struct{}
 
 func (errRefused) Error() string { return "connection refused" }
+
+func TestDoctorReportsAMissingDomainWithoutCreatingIt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := methodName(t, r.Body)
+		if name != "x:Domain/query" {
+			t.Errorf("doctor called %s", name)
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		writeInit(w, name, "q", map[string]any{"ids": []string{}})
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw := []byte(`{"domain":"example.com","hostname":"mail.example.com","stalwartUrl":"` + srv.URL + `","apiKey":"shown-once"}` + "\n")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"doctor", "--domain", "gmail.com", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	if code != 1 {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+	want := "domain is not configured in Stalwart; fix: run inbai domain add --domain gmail.com"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout %s", stdout.String())
+	}
+}
