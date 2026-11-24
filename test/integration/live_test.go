@@ -37,12 +37,13 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	cfgDir := t.TempDir()
 	cfg := filepath.Join(cfgDir, "config.json")
 	password := secret()
+	operatorToken := "inb_" + secret()
 	compose := filepath.Join(root, "deploy", "compose")
 	env := []string{
 		"PG_PASSWORD=" + secret(),
 		"STALWART_RECOVERY_MODE=1",
 		"STALWART_RECOVERY_ADMIN_PASSWORD=" + password,
-		"INBAI_OPERATOR_TOKEN=integration-token",
+		"INBAI_OPERATOR_TOKEN=" + operatorToken,
 		"INBAI_CONFIG_DIR=" + cfgDir,
 	}
 	t.Cleanup(func() {
@@ -64,7 +65,7 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	waitURL(t, "https://127.0.0.1/jmap/", true)
 	waitURL(t, "http://127.0.0.1:8787/healthz", false)
 
-	cli := []string{"INBAI_OPERATOR_TOKEN=integration-token"}
+	cli := []string{"INBAI_OPERATOR_TOKEN=" + operatorToken}
 	createdOut := must(t, root, cli, filepath.Join(bin, "inbai"), "inbox", "create", "--config", cfg, "--json", "alice")
 	var alice struct {
 		ID      string `json:"id"`

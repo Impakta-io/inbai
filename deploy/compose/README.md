@@ -27,7 +27,7 @@ Keep the two values somewhere safe. `docker compose up` stops with a message whe
 
 A leaked value then opens one door and not all three. The entrypoints accept any characters in `PG_PASSWORD` except a newline, carriage return or tab. They escape the value for the Stalwart JSON file and percent-encode it for the `inbaid` database URL. `openssl rand -hex 24` avoids the question.
 
-`INBAI_OPERATOR_TOKEN` is optional. When it is unset, `inbai init` generates an operator token and stores it in `config.json`, which both `inbaid` and `inbai` read automatically. Set `INBAI_OPERATOR_TOKEN` only if you want to choose or override the token.
+`INBAI_OPERATOR_TOKEN` is optional. When it is unset, `inbai init` generates an operator token and stores it in `config.json`, which both `inbaid` and `inbai` read automatically. Set `INBAI_OPERATOR_TOKEN` only if you want to choose or override the token. It must be at least 32 characters, for example `openssl rand -hex 32`. `inbai init` and `inbaid` refuse a shorter one.
 
 On macOS, set `INBAI_CONFIG_DIR` to `"$HOME/Library/Application Support/inbai"` instead. That is the directory `inbai init` writes unless `--config` selects another file. `INBAI_CONFIG_DIR` must be that directory, and the file inside it must be named `config.json`.
 
@@ -42,7 +42,7 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 The service account uses the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes. The operator account can also change the outbound route. The service account cannot.
 
-The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service receives `PG_PASSWORD` and its entrypoint builds the database URL `postgres://stalwart:<percent-encoded password>@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. The signing key is stored in that database, so another `inbaid` process that uses the same database and `--addr` verifies the same tokens. Set `INBAI_SIGNING_KEY` on every process only when you want to choose the key. That value must match the key already stored. Without a database, a missing key is printed once.
+The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service receives `PG_PASSWORD` and its entrypoint builds the database URL `postgres://stalwart:<percent-encoded password>@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. The signing key is stored in that database, so another `inbaid` process that uses the same database and `--addr` verifies the same tokens. Set `INBAI_SIGNING_KEY` on every process only when you want to choose the key. That value must match the key already stored. `INBAI_SIGNING_KEY` must be at least 32 bytes, for example `openssl rand -hex 32`. Without a database, a missing key is generated in memory and never printed.
 
 Leave recovery mode before creating an inbox. `inbaid` answers mail routes only after Stalwart is serving HTTPS.
 

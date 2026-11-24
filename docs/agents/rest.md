@@ -6,7 +6,7 @@ The contract is [api/openapi.yaml](../../api/openapi.yaml). `inbaid serve` liste
 
 ## Operator token and agent tokens
 
-Set `INBAI_OPERATOR_TOKEN` before starting the server. That bearer token acts as the operator. An agent exchanges a client id and secret at `POST /oauth/token` with `grant_type=client_credentials` and then sends the access token as `Authorization: Bearer`. The token lives ten minutes and only names the agent. Grants decide what the agent may do. A missing or rejected token is `401` with a problem document and a `WWW-Authenticate` header that points at the protected-resource metadata. If the server cannot read whether the agent is suspended, the token is not accepted and the answer is `503`. Retry the same token later.
+Set `INBAI_OPERATOR_TOKEN` before starting the server. It must be at least 32 characters, for example the output of `openssl rand -hex 32`. That bearer token acts as the operator. An agent exchanges a client id and secret at `POST /oauth/token` with `grant_type=client_credentials` and then sends the access token as `Authorization: Bearer`. The token lives ten minutes and only names the agent. Grants decide what the agent may do. A missing or rejected token is `401` with a problem document and a `WWW-Authenticate` header that points at the protected-resource metadata. If the server cannot read whether the agent is suspended, the token is not accepted and the answer is `503`. Retry the same token later.
 
 ## Routes
 

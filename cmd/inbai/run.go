@@ -123,6 +123,14 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stderr, "read config: %s\n", err)
 		return 1
 	}
+	if existing.OperatorToken == "" && getenv != nil {
+		if supplied := strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN")); supplied != "" {
+			if err := config.CheckOperatorToken(supplied); err != nil {
+				writef(stderr, "init: %s\n", err)
+				return 2
+			}
+		}
+	}
 	if existing.Domain != "" && existing.Domain != *domain {
 		writef(stderr, "config already records domain %s\n", existing.Domain)
 		return 1

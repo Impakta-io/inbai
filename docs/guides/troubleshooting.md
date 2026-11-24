@@ -52,6 +52,12 @@ That deletes the earlier install's mail, inboxes, and accounts. Run `inbai init`
 
 The service API key in `config.json` belonged to the deleted Stalwart database. Run `inbai init` again with the same domain. It sees that Stalwart refuses the key, issues a new one, and saves it. Then restart `inbaid`.
 
+## Secret too short on startup
+
+`inbaid serve` exits with code 2 when `INBAI_SIGNING_KEY` is shorter than 32 bytes or the operator token (`INBAI_OPERATOR_TOKEN`, or `operatorToken` in the config file) is shorter than 32 characters. A short signing key lets any agent holding an access token search for the key offline and then mint operator tokens. A short operator token can be guessed over the network. Generate a value that passes with `openssl rand -hex 32`. `inbai init` and `inbai login` refuse a shorter `INBAI_OPERATOR_TOKEN` for the same reason. Values that `inbai init` and `inbaid` generate are long enough.
+
+When the database already holds a signing key shorter than 32 bytes, because an older version stored a short `INBAI_SIGNING_KEY`, `inbaid` refuses to start and says so. Stop every `inbaid` process, then run `DELETE FROM signing_key;` in the `inbai` database and start again. `inbaid` stores a new random key, or the `INBAI_SIGNING_KEY` you set if it is at least 32 bytes. Access tokens issued before that stop working, and each agent gets a new one by exchanging its client secret.
+
 ## Signing key mismatch on startup
 
 When `INBAI_DATABASE_URL` is set, `inbaid` stores the access-token signing key in PostgreSQL. If you also set `INBAI_SIGNING_KEY`, it must match the stored key. A different value stops startup with `signing key does not match the database`. Unset `INBAI_SIGNING_KEY` to adopt the stored key, or set the same value on every replica.

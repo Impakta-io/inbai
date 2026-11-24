@@ -38,7 +38,7 @@ func TestServeRequiresOperatorToken(t *testing.T) {
 
 func TestServeReadsOperatorTokenFromConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	raw, err := json.Marshal(config.File{OperatorToken: "saved-token"})
+	raw, err := json.Marshal(config.File{OperatorToken: "0123456789abcdef0123456789abcdef0123"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestIMAPServeRequiresDomainAndAccounts(t *testing.T) {
 	code := run([]string{"serve"}, &stdout, &stderr, func(key string) string {
 		switch key {
 		case "INBAI_OPERATOR_TOKEN":
-			return "token"
+			return "0123456789abcdef0123456789abcdef0123"
 		case "INBAI_MAIL":
 			return "imap"
 		default:
@@ -101,7 +101,7 @@ func TestIMAPServeRequiresDomainAndAccounts(t *testing.T) {
 	code = run([]string{"serve"}, &stdout, &stderr, func(key string) string {
 		switch key {
 		case "INBAI_OPERATOR_TOKEN":
-			return "token"
+			return "0123456789abcdef0123456789abcdef0123"
 		case "INBAI_MAIL":
 			return "imap"
 		case "INBAI_DOMAIN":
@@ -134,5 +134,53 @@ func TestHTTPServerBoundsSlowAndIdleConnections(t *testing.T) {
 	}
 	if server.IdleTimeout <= 0 {
 		t.Fatalf("idle timeout %s", server.IdleTimeout)
+	}
+}
+
+func TestServeRefusesShortSecrets(t *testing.T) {
+	strong := "0123456789abcdef0123456789abcdef0123"
+	accounts := filepath.Join(t.TempDir(), "accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"ada":{"user":"ada@example.com","password":"secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	cases := []struct {
+		name, mail, token, key, want string
+	}{
+		{"jmap short key", "", strong, "short-key", "INBAI_SIGNING_KEY"},
+		{"jmap short token", "", "short-token", "", "INBAI_OPERATOR_TOKEN"},
+		{"imap short key", "imap", strong, "short-key", "INBAI_SIGNING_KEY"},
+		{"imap short token", "imap", "short-token", "", "INBAI_OPERATOR_TOKEN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			env := map[string]string{
+				"INBAI_MAIL":           tc.mail,
+				"INBAI_OPERATOR_TOKEN": tc.token,
+				"INBAI_SIGNING_KEY":    tc.key,
+				"INBAI_DOMAIN":         "example.com",
+				"INBAI_IMAP_ADDRESS":   "127.0.0.1:1",
+				"INBAI_SMTP_ADDRESS":   "127.0.0.1:1",
+				"INBAI_IMAP_ACCOUNTS":  accounts,
+			}
+			code := run([]string{"serve", "--config", missing}, &stdout, &stderr, func(k string) string { return env[k] })
+			if code != 2 || !strings.Contains(stderr.String(), tc.want) || !strings.Contains(stderr.String(), "minimum is 32") {
+				t.Fatalf("exit %d stderr %s", code, stderr.String())
+			}
+		})
+	}
+}
+
+func TestServeRefusesAShortTokenFromConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw, _ := json.Marshal(config.File{OperatorToken: "short"})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"serve", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	if code != 2 || !strings.Contains(stderr.String(), "minimum is 32") {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
 	}
 }
