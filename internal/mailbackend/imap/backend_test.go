@@ -6,12 +6,14 @@ package imap
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
@@ -231,4 +233,76 @@ func listen(t *testing.T, handle func(net.Conn)) string {
 
 func say(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
+}
+
+func TestSearchRefusesLineBreaksAndWritesNothing(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	addr := listen(t, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		write := bufio.NewWriter(conn)
+		read := bufio.NewReader(conn)
+		say(write, "* OK ready\r\n")
+		_ = write.Flush()
+		for {
+			line, err := read.ReadString('\n')
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			lines = append(lines, line)
+			mu.Unlock()
+			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			if strings.HasPrefix(cmd, "UID SEARCH") {
+				say(write, "* SEARCH\r\n")
+			}
+			say(write, "%s OK\r\n", tag)
+			_ = write.Flush()
+		}
+	})
+	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}}
+	for _, query := range []string{"a\r\nb001 UID STORE 1 +FLAGS (\\Deleted)", "a\nb", "a\rb", "a\x00b"} {
+		_, _, err := backend.Search(context.Background(), "ada", query, mailbackend.Page{})
+		if !errors.Is(err, mailbackend.ErrInvalid) {
+			t.Fatalf("query %q: err %v", query, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 0 {
+		t.Fatalf("wrote to the server: %q", lines)
+	}
+}
+
+func TestSearchQuotesAPlainQuery(t *testing.T) {
+	got, err := quote(`say "hi" \ there`)
+	if err != nil || got != `"say \"hi\" \\ there"` {
+		t.Fatalf("got %s err %v", got, err)
+	}
+}
+
+func TestDeliverRefusesLineBreaksInAttachmentType(t *testing.T) {
+	var mu sync.Mutex
+	connected := false
+	addr := listen(t, func(conn net.Conn) {
+		mu.Lock()
+		connected = true
+		mu.Unlock()
+		_ = conn.Close()
+	})
+	backend := &Backend{smtp: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}}
+	for _, kind := range []string{"text/plain\r\nX-Evil: 1", "text/plain\nX-Evil: 1", "text/plain\rX", "text/plain\x00"} {
+		err := backend.Deliver(context.Background(), mailbackend.Outbound{
+			AccountID: "ada", From: "ada@example.com", To: "bob@example.com", Subject: "Hello", Body: "text",
+			Attachments: []mailbackend.File{{Name: "note.txt", Type: kind, Data: []byte("file")}},
+		})
+		if !errors.Is(err, mailbackend.ErrInvalid) {
+			t.Fatalf("type %q: err %v", kind, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if connected {
+		t.Fatal("opened a connection for a refused message")
+	}
 }

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 type item struct {
@@ -90,8 +92,22 @@ func literalSize(line string) (int, bool) {
 	return n, true
 }
 
-func quote(value string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
+// quote returns value as an IMAP quoted string. A quoted string cannot hold
+// CR, LF, or NUL, so quote refuses them. Writing one would end the command and
+// start another on the same logged-in connection.
+func quote(value string) (string, error) {
+	if err := noLineBreaks("imap argument", value); err != nil {
+		return "", err
+	}
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`, nil
+}
+
+// noLineBreaks refuses a value with CR, LF, or NUL.
+func noLineBreaks(what, value string) error {
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return fmt.Errorf("%w: %s holds a line break or NUL", mailbackend.ErrInvalid, what)
+	}
+	return nil
 }
 
 func searchUIDs(items []item) []int {
