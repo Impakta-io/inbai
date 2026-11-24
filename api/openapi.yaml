@@ -456,6 +456,7 @@ paths:
     get:
       operationId: listMessages
       summary: List messages in an inbox. A q query parameter searches text.
+      description: Messages are newest first, and so are search results. The cursor continues with older messages.
       parameters:
         - name: q
           in: query

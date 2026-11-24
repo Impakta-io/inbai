@@ -164,7 +164,7 @@ func (b *Backend) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	return writer.Close()
 }
 
-// List returns the inbox messages with their subjects.
+// List returns the inbox messages with their subjects, newest first.
 func (b *Backend) List(ctx context.Context, account string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	return b.fetchSearch(ctx, account, "ALL", page)
 }
@@ -305,12 +305,7 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 		if err != nil {
 			return err
 		}
-		uids := searchUIDs(items)
-		ids := make([]string, len(uids))
-		for i, uid := range uids {
-			ids[i] = strconv.Itoa(uid)
-		}
-		kept, cursor, err := mailbackend.Slice(ids, func(id string) string { return id }, page)
+		kept, cursor, err := newestFirst(searchUIDs(items), page)
 		if err != nil {
 			return err
 		}
@@ -337,6 +332,43 @@ func (b *Backend) fetchSearch(ctx context.Context, account, criteria string, pag
 		return nil
 	})
 	return messages, next, err
+}
+
+// newestFirst orders UIDs from newest to oldest and returns the page that
+// follows the cursor. The cursor is the last UID returned. UIDs only grow, so a
+// message that arrives between pages is newer than every cursor and cannot
+// shift or repeat a page. A cursor UID that has since been deleted still works.
+func newestFirst(uids []int, page mailbackend.Page) ([]string, string, error) {
+	limit, err := page.Bound()
+	if err != nil {
+		return nil, "", err
+	}
+	before := -1
+	if page.After != "" {
+		before, err = strconv.Atoi(page.After)
+		if err != nil || before < 1 {
+			return nil, "", mailbackend.ErrPage
+		}
+	}
+	sorted := append([]int(nil), uids...)
+	sort.Sort(sort.Reverse(sort.IntSlice(sorted)))
+	var ids []string
+	more := false
+	for _, uid := range sorted {
+		if before >= 0 && uid >= before {
+			continue
+		}
+		if len(ids) == limit {
+			more = true
+			break
+		}
+		ids = append(ids, strconv.Itoa(uid))
+	}
+	next := ""
+	if more {
+		next = ids[len(ids)-1]
+	}
+	return ids, next, nil
 }
 
 func (b *Backend) with(ctx context.Context, account string, fn func(*session) error) error {

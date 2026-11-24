@@ -111,6 +111,9 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 		"accountId": accountID,
 		"limit":     limit + 1,
 		"filter":    combined,
+		// Newest first. The anchor is an id looked up in this sorted result, so a
+		// message that arrives between pages does not move the next page.
+		"sort": []map[string]any{{"property": "receivedAt", "isAscending": false}},
 	}
 	if page.After != "" {
 		args["anchor"] = page.After

@@ -466,3 +466,68 @@ func TestSenderAddressesIsTheLoginAddress(t *testing.T) {
 		t.Fatal("an unknown account has sender addresses")
 	}
 }
+
+func TestListIsNewestFirstAndPagesPastNewArrivals(t *testing.T) {
+	var mu sync.Mutex
+	uids := "3 1 5 2 4" // the server's order does not matter
+	addr := listen(t, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		write := bufio.NewWriter(conn)
+		read := bufio.NewReader(conn)
+		say(write, "* OK ready\r\n")
+		_ = write.Flush()
+		for {
+			line, err := read.ReadString('\n')
+			if err != nil {
+				return
+			}
+			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			switch {
+			case strings.HasPrefix(cmd, "UID SEARCH"):
+				mu.Lock()
+				say(write, "* SEARCH %s\r\n%s OK\r\n", uids, tag)
+				mu.Unlock()
+			case strings.HasPrefix(cmd, "UID FETCH"):
+				for _, uid := range strings.Split(strings.Fields(cmd)[2], ",") {
+					header := "Subject: s" + uid + "\r\n\r\n"
+					say(write, "* 1 FETCH (UID %s BODY[HEADER.FIELDS (SUBJECT)] {%d}\r\n%s)\r\n", uid, len(header), header)
+				}
+				say(write, "%s OK\r\n", tag)
+			case strings.HasPrefix(cmd, "LOGOUT"):
+				say(write, "* BYE\r\n%s OK\r\n", tag)
+				_ = write.Flush()
+				return
+			default:
+				say(write, "%s OK\r\n", tag)
+			}
+			_ = write.Flush()
+		}
+	})
+	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}}
+	ctx := context.Background()
+	ids := func(messages []mailbackend.Message) string {
+		var out []string
+		for _, m := range messages {
+			out = append(out, m.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	first, next, err := backend.List(ctx, "ada", mailbackend.Page{Limit: 2})
+	if err != nil || ids(first) != "5,4" || next != "4" {
+		t.Fatalf("first %s next %q err %v", ids(first), next, err)
+	}
+	mu.Lock()
+	uids += " 6" // a message arrives between pages
+	mu.Unlock()
+	second, next, err := backend.List(ctx, "ada", mailbackend.Page{After: next, Limit: 2})
+	if err != nil || ids(second) != "3,2" || next != "2" {
+		t.Fatalf("second %s next %q err %v", ids(second), next, err)
+	}
+	last, next, err := backend.Search(ctx, "ada", "x", mailbackend.Page{After: next, Limit: 2})
+	if err != nil || ids(last) != "1" || next != "" {
+		t.Fatalf("last %s next %q err %v", ids(last), next, err)
+	}
+	if _, _, err := backend.List(ctx, "ada", mailbackend.Page{After: "junk"}); !errors.Is(err, mailbackend.ErrPage) {
+		t.Fatalf("junk cursor %v", err)
+	}
+}

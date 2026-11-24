@@ -185,3 +185,36 @@ func TestDeleteMessageReportsARefusal(t *testing.T) {
 		})
 	}
 }
+
+func TestQueryMessagesSortsNewestFirstAndAnchorsAfterTheCursor(t *testing.T) {
+	var query map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		names, args := allCalls(t, r.Body)
+		switch names[0] {
+		case "Mailbox/query":
+			writeMethods(w, []any{[]any{"Mailbox/query", map[string]any{"ids": []string{"inbox-box"}}, "q"}})
+		case "Email/query":
+			query = args[0]
+			writeMethods(w, []any{[]any{"Email/query", map[string]any{"ids": []string{"c", "b", "a"}}, "q"}})
+		case "Email/get":
+			writeMethods(w, []any{[]any{"Email/get", map[string]any{"list": []any{}}, "g"}})
+		}
+	}))
+	defer srv.Close()
+	client := &Client{BaseURL: srv.URL, APIKey: "key"}
+	_, next, err := queryMessages(context.Background(), client, "alice-id", nil, mailbackend.Page{After: "d", Limit: 2}, false)
+	if err != nil || next != "b" {
+		t.Fatalf("next %q err %v", next, err)
+	}
+	sorts, _ := query["sort"].([]any)
+	if len(sorts) != 1 {
+		t.Fatalf("sort %#v", query["sort"])
+	}
+	first, _ := sorts[0].(map[string]any)
+	if first["property"] != "receivedAt" || first["isAscending"] != false {
+		t.Fatalf("sort %#v", first)
+	}
+	if query["anchor"] != "d" || query["anchorOffset"] != float64(1) || query["limit"] != float64(3) {
+		t.Fatalf("paging %#v", query)
+	}
+}
