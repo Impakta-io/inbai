@@ -63,13 +63,13 @@ Before each POST, `inbaid` checks that the agent that created the webhook still 
 
 ## Ingest hint
 
-Stalwart posts to `POST /v1/hooks/ingest` with `X-Inbai-Ingest` set to `INBAI_INGEST_SECRET`. The body is Stalwart's event list. `message-ingest` events are matched on `data.to`. The numeric `accountId` is not the JMAP account id. A slow sweep also asks for changes when no hint arrives.
+Stalwart posts to `POST /v1/hooks/ingest` with `X-Inbai-Ingest` set to `INBAI_INGEST_SECRET`. The body is Stalwart's event list. `message-ingest` events are matched on `data.to`. The numeric `accountId` is not the JMAP account id. A slow sweep also asks for changes when no hint arrives. This route is for Stalwart. An agent does not call it and does not use the ingest secret.
 
 ## Suppression
 
 A Stalwart `delivery.dsn-perm-fail` event is a hard bounce. `inbaid` stores the recipient and the `details` text, and a later send or reply to that address is rejected with 409 before quota is consumed. `delivery.dsn-temp-fail` and `delivery.failed` are temporary and do not suppress anyone. The address is matched case-insensitively. The first reason is kept.
 
-`GET /v1/suppressions` lists the addresses. Only an operator may call it. The list lives in the same PostgreSQL database as the event cursor, so it is still there after `inbaid` restarts.
+`GET /v1/suppressions` lists the addresses. It is operator only: an agent gets `403`. The list lives in the same PostgreSQL database as the event cursor, so it is still there after `inbaid` restarts.
 
 ## Operations
 

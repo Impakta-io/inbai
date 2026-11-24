@@ -2,7 +2,7 @@ Status: partial — install, domain setup, inbox creation, and a local send are 
 
 # Quickstart
 
-This walks an operator from a fresh install to one inbox. An agent connects with a client credential, described in the [agent overview](../agents/overview.md). MCP is described in [MCP](../agents/mcp.md).
+This walks an operator from a fresh install to one inbox. An agent connects with a client credential the operator issues, as in [Agent credentials](agents.md). The agent's side is in the [agent overview](../agents/overview.md). MCP is described in [MCP](../agents/mcp.md).
 
 ## Install
 
@@ -62,7 +62,7 @@ inbai message list alice@inbai.test
 
 `message list` prints the subject and a preview. Mail from the public internet arrives only after the DNS records are published and Stalwart accepts the delivery.
 
-The CLI uses the operator token that `init` stored as `operatorToken` in `<config-dir>/config.json`. The path for each OS is in [install](install.md#first-boot). To call the API with `curl`, export that value as `INBAI_OPERATOR_TOKEN`, or create an agent with `inbai agent create`, as in the [agent overview](../agents/overview.md). `inbai inbox list` prints each address and its account id, the `ACCOUNT_ID` the agent guides use.
+The CLI uses the operator token that `init` stored as `operatorToken` in `<config-dir>/config.json`. The path for each OS is in [install](install.md#first-boot). To call the API with `curl`, export that value as `INBAI_OPERATOR_TOKEN`, or create an agent with `inbai agent create`, as in [Agent credentials](agents.md). Do not give the operator token to an agent. `inbai inbox list` prints each address and its account id, the `ACCOUNT_ID` the agent guides use.
 
 ## Stop, remove, and rerun
 

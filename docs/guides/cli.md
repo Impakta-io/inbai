@@ -110,7 +110,7 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 ## agent
 
-`inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. The permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. `inbai agent grant ada '*' inbox:provision` lets that agent create inboxes. The inbox id for that permission is `*`. A read grant does not include it. `inbai agent revoke ada <inbox-id> read` removes one permission. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `inbai agent resume ada` lifts the suspension: the agent's secret works again, and so does an access token it got before the suspension, until that token expires. Grants are unchanged. A webhook the suspension disabled stays disabled, and the agent creates a new one. Resuming an agent that is not suspended succeeds. `--json` prints the result. All five commands use the operator token.
+`inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. The permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. `inbai agent grant ada '*' inbox:provision` lets that agent create inboxes. The inbox id for that permission is `*`. A read grant does not include it. `inbai agent revoke ada <inbox-id> read` removes one permission. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `inbai agent resume ada` lifts the suspension: the agent's secret works again, and so does an access token it got before the suspension, until that token expires. Grants are unchanged. A webhook the suspension disabled stays disabled, and the agent creates a new one. Resuming an agent that is not suspended succeeds. `--json` prints the result. All five commands use the operator token. The REST equivalents, and how to hand the credential to an agent without giving it the operator token, are in [Agent credentials](agents.md).
 
 ## audit
 
@@ -122,7 +122,7 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 ## mcp serve
 
-`inbai mcp serve` speaks MCP on stdin and stdout. It exchanges `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET` for an access token, or uses `INBAI_ACCESS_TOKEN` or `INBAI_OPERATOR_TOKEN` when one of those is already set. Without any of them it uses the credentials in the config file. The order is in [MCP](../agents/mcp.md#stdio). The tools and the HTTP endpoint are described in [MCP](../agents/mcp.md).
+`inbai mcp serve` speaks MCP on stdin and stdout. It exchanges `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET` for an access token, or uses `INBAI_ACCESS_TOKEN` or `INBAI_OPERATOR_TOKEN` when one of those is already set. Without any of them it uses the credentials in the config file. The order is in [MCP](../agents/mcp.md#stdio). The operator token in that order is for the operator's own use. Configure an agent's MCP client with the agent's client id and secret, as in [Agent credentials](agents.md#an-agents-mcp-setup). The tools and the HTTP endpoint are described in [MCP](../agents/mcp.md).
 
 ## backup and restore
 

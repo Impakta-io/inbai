@@ -4,6 +4,8 @@ Status: current
 
 These instructions are for an agent editing this repository. An agent that sends or receives mail follows [docs/agents](docs/agents/overview.md).
 
+An agent never reads `config.json` or any other inbAI or Stalwart config file, and never uses the operator token or the Stalwart API key. Whoever holds the operator token is the operator, with every permission on every inbox. If you need a credential or a grant, stop and ask the human operator to issue it with `inbai agent create` or `inbai agent grant`.
+
 ## Commands
 
 From the repository root, with Go 1.27.4 or newer:
