@@ -416,10 +416,24 @@ func (b *Backend) with(ctx context.Context, account string, fn func(*session) er
 		return err
 	}
 	if _, err := s.command("LOGIN", user, password); err != nil {
-		return err
+		return loginError(account, err)
 	}
 	defer func() { _, _ = s.command("LOGOUT") }()
 	return fn(s)
+}
+
+// loginError says which account and step failed. The text goes to the server
+// log and is not shown to the API caller. It never includes the password.
+func loginError(account string, err error) error {
+	var closed *closedError
+	var status *statusError
+	switch {
+	case errors.As(err, &closed):
+		return fmt.Errorf("imap: server closed the connection during LOGIN for account %q (check that this mailbox user may log in over IMAP)", account)
+	case errors.As(err, &status):
+		return fmt.Errorf("imap: server refused LOGIN for account %q: %s", account, strings.TrimSpace(status.text))
+	}
+	return fmt.Errorf("imap: LOGIN for account %q: %w", account, err)
 }
 
 func headerField(header, name string) string {

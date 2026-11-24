@@ -14,6 +14,8 @@ This backend is for a mail server that already has the mailboxes. It does not cr
 
 Keep that file mode `0600`.
 
+If every call fails and the server log says the server closed the connection during `LOGIN`, the account is not allowed to log in over IMAP. The accounts in the file must be allowed to. Inboxes created by inbAI's Stalwart mode are not, because Stalwart mode talks JMAP, so IMAP mode is for the mailboxes of an existing mail server.
+
 ```sh
 # At least 32 characters
 export INBAI_OPERATOR_TOKEN="$(openssl rand -hex 32)"
