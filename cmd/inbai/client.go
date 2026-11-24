@@ -177,58 +177,63 @@ func (c apiClient) setStorageQuota(ctx context.Context, inbox string, limitBytes
 	return out, err
 }
 
-func (c apiClient) generate(ctx context.Context, prefix string, count int, progress func(done, total int)) ([]apiInbox, error) {
+// generateResult is what bulk generate produced. Existing lists addresses the
+// server skipped because they were already taken; an older server never sends it.
+type generateResult struct {
+	Inboxes  []apiInbox `json:"inboxes"`
+	Existing []string   `json:"existing,omitempty"`
+}
+
+func (c apiClient) generate(ctx context.Context, prefix string, count int, progress func(done, total int)) (generateResult, error) {
 	status, raw, err := c.callRaw(ctx, http.MethodPost, "/v1/inboxes/generate", map[string]any{"prefix": prefix, "count": count})
 	if err != nil {
-		return nil, err
+		return generateResult{}, err
 	}
 	if status == http.StatusCreated {
-		var out struct {
-			Inboxes []apiInbox `json:"inboxes"`
-		}
+		var out generateResult
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, err
+			return generateResult{}, err
 		}
 		if progress != nil {
 			progress(len(out.Inboxes), len(out.Inboxes))
 		}
-		return out.Inboxes, nil
+		return out, nil
 	}
 	var accepted struct {
 		JobID string `json:"jobId"`
 	}
 	if err := json.Unmarshal(raw, &accepted); err != nil {
-		return nil, err
+		return generateResult{}, err
 	}
 	if accepted.JobID == "" {
-		return nil, fmt.Errorf("generate returned no job id")
+		return generateResult{}, fmt.Errorf("generate returned no job id")
 	}
 	for {
 		var job struct {
-			Status  string     `json:"status"`
-			Total   int        `json:"total"`
-			Created int        `json:"created"`
-			Inboxes []apiInbox `json:"inboxes"`
-			Error   string     `json:"error"`
+			generateResult
+			Status  string `json:"status"`
+			Total   int    `json:"total"`
+			Created int    `json:"created"`
+			Error   string `json:"error"`
 		}
 		if _, err := c.call(ctx, http.MethodGet, "/v1/jobs/"+pathSegment(accepted.JobID), nil, &job); err != nil {
-			return nil, err
+			return generateResult{}, err
 		}
 		if progress != nil {
 			progress(job.Created, job.Total)
 		}
 		switch job.Status {
 		case "done":
-			return job.Inboxes, nil
+			return job.generateResult, nil
 		case "failed":
 			if job.Error == "" {
 				job.Error = "generate failed"
 			}
-			return nil, fmt.Errorf("%s", job.Error)
+			return generateResult{}, fmt.Errorf("%s", job.Error)
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return generateResult{}, ctx.Err()
 		case <-time.After(c.pause()):
 		}
 	}
