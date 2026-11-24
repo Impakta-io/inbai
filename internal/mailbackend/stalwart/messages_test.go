@@ -22,7 +22,7 @@ func TestGetSearchAndDelete(t *testing.T) {
 			props, _ := args[0]["properties"].([]any)
 			for _, prop := range props {
 				if prop == "bodyValues" {
-					if _, ok := args[0]["fetchAllBodyValues"]; !ok {
+					if _, ok := args[0]["fetchTextBodyValues"]; !ok {
 						t.Errorf("get did not ask for body values")
 					}
 				}

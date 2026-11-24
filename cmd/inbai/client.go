@@ -377,6 +377,10 @@ func (c apiClient) callRaw(ctx context.Context, method, path string, in any) (in
 	return status, raw, err
 }
 
+// maxResponseBytes is above the 25 MB the server allows for an attachment, so a
+// legitimate download is never cut short. A larger response is an error.
+const maxResponseBytes = 32 << 20
+
 func (c apiClient) doRequest(ctx context.Context, method, path string, in any, token string) (int, []byte, error) {
 	var body io.Reader
 	if in != nil {
@@ -399,9 +403,12 @@ func (c apiClient) doRequest(ctx context.Context, method, path string, in any, t
 		return 0, nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return resp.StatusCode, nil, err
+	}
+	if len(raw) > maxResponseBytes {
+		return resp.StatusCode, nil, fmt.Errorf("response is larger than %d MiB", maxResponseBytes>>20)
 	}
 	if resp.StatusCode >= 300 {
 		var problem struct {
