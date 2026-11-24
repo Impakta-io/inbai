@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,6 +23,7 @@ type composeCall struct {
 	dir  string
 	env  []string
 	args []string
+	out  io.Writer
 }
 
 func TestInitDockerModeFullFlowAndIdempotency(t *testing.T) {
@@ -81,8 +83,8 @@ func TestInitDockerModeFullFlowAndIdempotency(t *testing.T) {
 
 	origRun := runCompose
 	t.Cleanup(func() { runCompose = origRun })
-	runCompose = func(_ context.Context, dir string, env []string, args ...string) ([]byte, error) {
-		calls = append(calls, composeCall{dir: dir, env: append([]string(nil), env...), args: append([]string(nil), args...)})
+	runCompose = func(_ context.Context, dir string, env []string, out io.Writer, args ...string) ([]byte, error) {
+		calls = append(calls, composeCall{dir: dir, env: append([]string(nil), env...), args: append([]string(nil), args...), out: out})
 		for _, kv := range env {
 			if strings.HasPrefix(kv, "STALWART_RECOVERY_ADMIN=admin:") {
 				recoveryPassword = strings.TrimPrefix(kv, "STALWART_RECOVERY_ADMIN=admin:")
@@ -110,14 +112,17 @@ func TestInitDockerModeFullFlowAndIdempotency(t *testing.T) {
 	if !strings.Contains(stdout.String(), "inbaid serve") {
 		t.Fatalf("stdout missing next step: %s", stdout.String())
 	}
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 compose calls (version, up recovery, up normal), got %d: %+v", len(calls), calls)
+	if len(calls) != 4 {
+		t.Fatalf("expected 4 compose calls (version, pull, up recovery, up normal), got %d: %+v", len(calls), calls)
 	}
-	if !containsEnv(calls[1].env, "STALWART_RECOVERY_MODE=1") {
-		t.Fatalf("second compose call should enable recovery mode: %+v", calls[1].env)
+	if strings.Join(calls[1].args, " ") != "-f compose.yaml pull --policy missing" || calls[1].out != io.Writer(&stderr) {
+		t.Fatalf("second compose call should pull images with progress on stderr: %+v", calls[1])
 	}
-	if !containsEnv(calls[2].env, "STALWART_RECOVERY_MODE=0") || !containsEnv(calls[2].env, "STALWART_RECOVERY_ADMIN=") {
-		t.Fatalf("third compose call should leave recovery mode: %+v", calls[2].env)
+	if !containsEnv(calls[2].env, "STALWART_RECOVERY_MODE=1") {
+		t.Fatalf("third compose call should enable recovery mode: %+v", calls[2].env)
+	}
+	if !containsEnv(calls[3].env, "STALWART_RECOVERY_MODE=0") || !containsEnv(calls[3].env, "STALWART_RECOVERY_ADMIN=") {
+		t.Fatalf("fourth compose call should leave recovery mode: %+v", calls[3].env)
 	}
 
 	stackDir := filepath.Join(dir, "stack")
@@ -250,7 +255,7 @@ func TestInitDockerPublicBindsStandardPorts(t *testing.T) {
 		runCompose = origRun
 		waitForURL = origWait
 	})
-	runCompose = func(_ context.Context, _ string, _ []string, _ ...string) ([]byte, error) {
+	runCompose = func(_ context.Context, _ string, _ []string, _ io.Writer, _ ...string) ([]byte, error) {
 		return []byte("ok"), nil
 	}
 	waitForURL = func(_ context.Context, _ string, _ bool) error { return nil }
@@ -290,7 +295,7 @@ func TestInitDockerPublicBindsStandardPorts(t *testing.T) {
 func TestInitDockerMissingDockerGivesClearError(t *testing.T) {
 	origRun := runCompose
 	t.Cleanup(func() { runCompose = origRun })
-	runCompose = func(_ context.Context, _ string, _ []string, _ ...string) ([]byte, error) {
+	runCompose = func(_ context.Context, _ string, _ []string, _ io.Writer, _ ...string) ([]byte, error) {
 		return nil, errors.New("executable file not found in $PATH")
 	}
 	var stdout, stderr bytes.Buffer
@@ -316,8 +321,8 @@ func TestInitDockerLeavesRecoveryOnBootstrapError(t *testing.T) {
 		runCompose = origRun
 		waitForURL = origWait
 	})
-	runCompose = func(_ context.Context, dir string, env []string, args ...string) ([]byte, error) {
-		calls = append(calls, composeCall{dir: dir, env: append([]string(nil), env...), args: append([]string(nil), args...)})
+	runCompose = func(_ context.Context, dir string, env []string, out io.Writer, args ...string) ([]byte, error) {
+		calls = append(calls, composeCall{dir: dir, env: append([]string(nil), env...), args: append([]string(nil), args...), out: out})
 		return []byte("ok"), nil
 	}
 	waitForURL = func(_ context.Context, _ string, _ bool) error { return nil }
@@ -332,7 +337,7 @@ func TestInitDockerLeavesRecoveryOnBootstrapError(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit 1, got %d", code)
 	}
-	if len(calls) != 3 || !containsEnv(calls[2].env, "STALWART_RECOVERY_MODE=0") {
+	if len(calls) != 4 || !containsEnv(calls[3].env, "STALWART_RECOVERY_MODE=0") {
 		t.Fatalf("expected recovery cleanup call, got %+v", calls)
 	}
 }

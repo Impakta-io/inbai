@@ -6,6 +6,7 @@ package stalwart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -178,6 +179,9 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 				if roles["operator-role"] != true {
 					t.Errorf("rerun roles %v", roles)
 				}
+				if _, ok := operator["credentials"]; ok {
+					t.Error("rerun changed the operator password without being asked")
+				}
 				writeMethod(w, name, "u", map[string]any{"updated": map[string]any{"op": nil}})
 				return
 			}
@@ -210,6 +214,95 @@ func TestBootstrapReusesExistingDomainAndRoles(t *testing.T) {
 		if method == "x:Role/set" || method == "x:ApiKey/set" {
 			t.Fatalf("created new objects: %v", methods)
 		}
+	}
+}
+
+func TestBootstrapResetsAnExistingOperatorPassword(t *testing.T) {
+	var update map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name, args := oneCall(t, r.Body)
+		switch name {
+		case "x:Domain/set":
+			writeMethod(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
+		case "x:SystemSettings/set":
+			writeMethod(w, name, "s", map[string]any{"updated": map[string]any{"singleton": nil}})
+		case "x:Role/query":
+			writeMethod(w, name, "q", map[string]any{"ids": []string{"r"}})
+		case "x:Role/get":
+			writeMethod(w, name, "g", map[string]any{"list": []map[string]any{
+				{"id": "inbox-role", "description": inboxRoleDescription},
+				{"id": "service-role", "description": serviceRoleDescription},
+				{"id": "operator-role", "description": operatorRoleDescription},
+			}})
+		case "x:Account/set":
+			if raw, ok := args["update"]; ok {
+				update = raw.(map[string]any)["op"].(map[string]any)
+				writeMethod(w, name, "u", map[string]any{"updated": map[string]any{"op": nil}})
+				return
+			}
+			writeMethod(w, name, "a", map[string]any{"notCreated": map[string]any{
+				"operator": map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "op"}},
+				"svc":      map[string]any{"type": "alreadyExists", "objectId": map[string]any{"id": "svc-id"}},
+			}})
+		default:
+			t.Errorf("unexpected method %s", name)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := Bootstrap(context.Background(), &Client{BaseURL: srv.URL, User: "admin", Password: "pw"}, Input{
+		Domain:                "example.com",
+		OperatorPassword:      "new-operator-secret",
+		ResetOperatorPassword: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, _ := update["credentials"].(map[string]any)
+	first, _ := creds["0"].(map[string]any)
+	if first["@type"] != "Password" || first["secret"] != "new-operator-secret" || len(creds) != 1 {
+		t.Fatalf("operator update %v", update)
+	}
+	roles := update["roles"].(map[string]any)["roleIds"].(map[string]any)
+	if roles["operator-role"] != true {
+		t.Fatalf("roles %v", roles)
+	}
+}
+
+func TestCheckAPIKeyTellsRejectedFromUnchecked(t *testing.T) {
+	for _, tc := range []struct {
+		status   int
+		ok       bool
+		rejected bool
+	}{
+		{http.StatusOK, true, false},
+		{http.StatusUnauthorized, false, true},
+		{http.StatusForbidden, false, true},
+		{http.StatusInternalServerError, false, false},
+		{http.StatusServiceUnavailable, false, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/jmap/" || r.Header.Get("Authorization") != "Bearer the-key" {
+				t.Errorf("request %s %s %q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+			}
+			if name, _ := oneCall(t, r.Body); name != "Core/echo" {
+				t.Errorf("method %s", name)
+			}
+			w.WriteHeader(tc.status)
+		}))
+		err := CheckAPIKey(context.Background(), &Client{BaseURL: srv.URL, APIKey: "the-key"})
+		srv.Close()
+		if (err == nil) != tc.ok || errors.Is(err, ErrAPIKeyRejected) != tc.rejected {
+			t.Errorf("HTTP %d: err %v", tc.status, err)
+		}
+	}
+
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	err := CheckAPIKey(context.Background(), &Client{BaseURL: url, APIKey: "the-key"})
+	if err == nil || errors.Is(err, ErrAPIKeyRejected) {
+		t.Fatalf("unreachable server: err %v", err)
 	}
 }
 

@@ -4,11 +4,15 @@
 package stalwart
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 )
 
@@ -20,12 +24,18 @@ const (
 )
 
 // Input is the operator's choice for the first boot.
+// ResetOperatorPassword sets OperatorPassword on an operator that already exists.
+// Without it, a rerun leaves that operator's password alone.
 type Input struct {
-	Domain           string
-	Hostname         string
-	OperatorPassword string
-	CreateAPIKey     bool
+	Domain                string
+	Hostname              string
+	OperatorPassword      string
+	ResetOperatorPassword bool
+	CreateAPIKey          bool
 }
+
+// ErrAPIKeyRejected means Stalwart answered and refused the API key.
+var ErrAPIKeyRejected = errors.New("stalwart rejected the API key")
 
 // Result is what the first boot created or found.
 type Result struct {
@@ -135,7 +145,7 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	operatorID, serviceID, err := ensureAccounts(ctx, client, domainID, operatorRole, serviceRole, in.OperatorPassword, serviceSecret)
+	operatorID, serviceID, err := ensureAccounts(ctx, client, domainID, operatorRole, serviceRole, in.OperatorPassword, serviceSecret, in.ResetOperatorPassword)
 	if err != nil {
 		return Result{}, err
 	}
@@ -150,8 +160,25 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 	if !in.CreateAPIKey {
 		return result, nil
 	}
+	secret, err := CreateAPIKey(ctx, client, serviceID)
+	if err != nil {
+		return Result{}, err
+	}
+	result.APIKey = secret
+	return result, nil
+}
+
+// CreateAPIKey issues a new API key for the service account and returns its secret.
+// Stalwart shows the secret once. The client must be the recovery administrator.
+func CreateAPIKey(ctx context.Context, client *Client, serviceAccountID string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("missing stalwart client")
+	}
+	if client.User == "" {
+		client.User = recoveryUser
+	}
 	raw, err := client.invoke(ctx, "k", "x:ApiKey/set", map[string]any{
-		"accountId": serviceID,
+		"accountId": serviceAccountID,
 		"create": map[string]any{
 			"k1": map[string]any{
 				"description": "inbAI",
@@ -161,14 +188,50 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 		},
 	})
 	if err != nil {
-		return Result{}, err
+		return "", err
 	}
-	secret, err := createdSecret(raw, "k1")
+	return createdSecret(raw, "k1")
+}
+
+// CheckAPIKey makes one authenticated JMAP call with client.APIKey.
+// It returns ErrAPIKeyRejected when Stalwart answers 401 or 403.
+// Any other failure, such as a network error or a 5xx, is returned as is:
+// the key was not checked, so the caller must not treat it as bad.
+func CheckAPIKey(ctx context.Context, client *Client) error {
+	if client == nil || client.APIKey == "" {
+		return fmt.Errorf("missing stalwart API key")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"using":       []string{"urn:ietf:params:jmap:core"},
+		"methodCalls": []jmapCall{{Name: "Core/echo", Args: map[string]any{}, ID: "e"}},
+	})
 	if err != nil {
-		return Result{}, err
+		return err
 	}
-	result.APIKey = secret
-	return result, nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(client.BaseURL, "/")+jmapPath, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+client.APIKey)
+	httpClient := client.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	_ = resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%w (HTTP %d)", ErrAPIKeyRejected, resp.StatusCode)
+	default:
+		return fmt.Errorf("stalwart Core/echo returned HTTP %d", resp.StatusCode)
+	}
 }
 
 func ensureDomain(ctx context.Context, client *Client, name string) (string, error) {
@@ -236,7 +299,7 @@ func ensureRole(ctx context.Context, client *Client, createKey, description stri
 	return createdID(raw, createKey)
 }
 
-func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole, serviceRole, operatorPassword, servicePassword string) (string, string, error) {
+func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole, serviceRole, operatorPassword, servicePassword string, resetOperatorPassword bool) (string, string, error) {
 	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
 		"create": map[string]any{
 			"operator": account("operator", domainID, operatorRole, operatorPassword),
@@ -259,15 +322,17 @@ func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole,
 		return "", "", err
 	}
 	if _, existed := body.NotCreated["operator"]; existed {
-		updated, err := client.invoke(ctx, "u", "x:Account/set", map[string]any{
-			"update": map[string]any{
-				operatorID: map[string]any{
-					"roles": map[string]any{
-						"@type":   "Custom",
-						"roleIds": map[string]bool{operatorRole: true},
-					},
-				},
+		patch := map[string]any{
+			"roles": map[string]any{
+				"@type":   "Custom",
+				"roleIds": map[string]bool{operatorRole: true},
 			},
+		}
+		if resetOperatorPassword {
+			patch["credentials"] = passwordCredentials(operatorPassword)
+		}
+		updated, err := client.invoke(ctx, "u", "x:Account/set", map[string]any{
+			"update": map[string]any{operatorID: patch},
 		})
 		if err != nil {
 			return "", "", err
@@ -281,18 +346,24 @@ func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole,
 
 func account(name, domainID, roleID, secret string) map[string]any {
 	return map[string]any{
-		"@type":    "User",
-		"name":     name,
-		"domainId": domainID,
-		"credentials": map[string]any{
-			"0": map[string]any{"@type": "Password", "secret": secret},
-		},
+		"@type":       "User",
+		"name":        name,
+		"domainId":    domainID,
+		"credentials": passwordCredentials(secret),
 		"roles": map[string]any{
 			"@type":   "Custom",
 			"roleIds": map[string]bool{roleID: true},
 		},
 		"permissions":      map[string]any{"@type": "Inherit"},
 		"encryptionAtRest": map[string]any{"@type": "Disabled"},
+	}
+}
+
+// passwordCredentials is an account's credential list with one password.
+// On an update it replaces the account's credentials.
+func passwordCredentials(secret string) map[string]any {
+	return map[string]any{
+		"0": map[string]any{"@type": "Password", "secret": secret},
 	}
 }
 

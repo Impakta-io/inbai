@@ -1,4 +1,4 @@
-Status: current — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. `inbaid` writes one JSON line per request. Common relay and startup errors are covered below.
+Status: current — `inbai doctor` reports DNS, reverse DNS, port 25, TLS, and blocklists. `inbaid` writes one JSON line per request. Common relay, init, and startup errors are covered below.
 
 # Troubleshooting
 
@@ -28,12 +28,29 @@ The response header `X-Request-Id` is the same value. Send that header when you 
 
 ## Relay authentication failures
 
-`inbai domain relay` authenticates to Stalwart as `operator@<domain>` using `INBAI_OPERATOR_PASSWORD` (or `INBAI_RECOVERY_PASSWORD`), not the service API key. Common failures:
+`inbai domain relay` authenticates to Stalwart as `operator@<domain>`, not with the service API key. It uses `INBAI_OPERATOR_PASSWORD` when set, then the operator password Docker-mode `inbai init` stored in `config.json`, then `INBAI_RECOVERY_PASSWORD`. Common failures:
 
-- **Permission denied from Stalwart on `domain relay`:** servers initialized before the operator role existed do not have MTA route permissions on `operator@<domain>`. Start Stalwart in recovery mode and run `inbai init` again to update the operator role, then leave recovery mode and retry `inbai domain relay`.
-- **401 from Stalwart on `domain relay`:** `INBAI_OPERATOR_PASSWORD` does not match the password set when `inbai init` ran.
+- **Permission denied from Stalwart on `domain relay`:** servers initialized before the operator role existed do not have MTA route permissions on `operator@<domain>`. Run `inbai init` again to update the operator role, then retry `inbai domain relay`. Docker mode handles recovery mode itself. An external Stalwart must be started in recovery mode first and left afterwards.
+- **`domain relay needs INBAI_OPERATOR_PASSWORD` after Docker-mode init:** the config was written by an older `inbai`, which did not keep the operator password. Run `inbai init` again with the same domain. It sets a new operator password and stores it.
+- **401 from Stalwart on `domain relay`:** the password does not match `operator@<domain>`. Unset `INBAI_OPERATOR_PASSWORD` to use the stored one, or, after external-mode init, export the value init used as `INBAI_RECOVERY_PASSWORD`.
 - **Missing relay password:** `inbai domain relay` reads the upstream SMTP password only from `INBAI_RELAY_PASSWORD`. It is not accepted as a flag.
 - **Upstream relay rejects mail or TLS fails:** check `--port` (default `587`), `--implicit-tls` for port `465`, and `--allow-invalid-certs` only for a private relay whose certificate is not publicly trusted.
+
+## Init times out
+
+Docker-mode `inbai init` pulls images first and prints Docker's progress. Stalwart then has 5 minutes to answer. When it does not, init prints the last 50 lines of `docker compose logs` and stops.
+
+A common cause is a volume left by an earlier install with the same Compose project. Its PostgreSQL database keeps the password it was created with, so Stalwart cannot sign in with the new one. Look for `password authentication failed` in the logs. Init prints the exact command to remove those volumes. It has this form:
+
+```sh
+docker compose -p inbai -f "<config-dir>/stack/compose.yaml" down -v
+```
+
+That deletes the earlier install's mail, inboxes, and accounts. Run `inbai init` again afterwards.
+
+## Requests fail with 401 after `docker compose down -v`
+
+The service API key in `config.json` belonged to the deleted Stalwart database. Run `inbai init` again with the same domain. It sees that Stalwart refuses the key, issues a new one, and saves it. Then restart `inbaid`.
 
 ## Signing key mismatch on startup
 

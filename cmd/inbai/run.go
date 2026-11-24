@@ -118,7 +118,7 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 			return 1
 		}
 	}
-	existing, err := readConfig(path)
+	existing, err := readStoredConfig(path)
 	if err != nil {
 		writef(stderr, "read config: %s\n", err)
 		return 1
@@ -127,13 +127,20 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stderr, "config already records domain %s\n", existing.Domain)
 		return 1
 	}
+	// Create the config directory before the stack directory inside it, so a
+	// new one gets 0700. MkdirAll leaves an existing directory's mode alone.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		writef(stderr, "config directory: %s\n", err)
+		return 1
+	}
 
 	var (
-		result         stalwart.Result
-		finalStalwart  string
-		finalDBURL     = existing.DatabaseURL
-		finalStackDir  = existing.StackDir
-		usedDockerMode = !useExternal
+		result           stalwart.Result
+		finalStalwart    string
+		finalDBURL       = existing.DatabaseURL
+		finalStackDir    = existing.StackDir
+		operatorPassword = existing.OperatorPassword
+		usedDockerMode   = !useExternal
 	)
 	if useExternal {
 		finalStalwart = *stalwartURL
@@ -173,9 +180,17 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		if !*asJSON {
 			progressOut = stderr
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		dockerRes, err := initDockerStack(ctx, dockerInitOptions{
+		// A config from an older inbai has no operator password. Make one and
+		// set it on the operator account, which may already exist.
+		resetOperator := operatorPassword == ""
+		if resetOperator {
+			operatorPassword, err = randomHex(24)
+			if err != nil {
+				writef(stderr, "generate operator password: %s\n", err)
+				return 1
+			}
+		}
+		dockerRes, err := initDockerStack(context.Background(), dockerInitOptions{
 			Domain:         *domain,
 			Hostname:       *hostname,
 			StackDir:       dir,
@@ -187,8 +202,11 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 			SubmissionPort: *submissionPort,
 			RecoveryPort:   *recoveryPort,
 			StalwartURL:    *stalwartURL,
-			Existing:       existing,
+			Existing:       existing.File,
 			Progress:       progressOut,
+
+			OperatorPassword:      operatorPassword,
+			ResetOperatorPassword: resetOperator,
 		})
 		if err != nil {
 			writef(stderr, "init: %s\n", err)
@@ -231,13 +249,18 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		StackDir:          finalStackDir,
 		RetentionDays:     config.DefaultRetentionDays,
 	}
-	if existing.APIKey != "" {
+	// A config with a domain came from an earlier init. Keep its retention,
+	// including 0, which inbai retention --days 0 writes to keep mail.
+	if existing.Domain != "" {
+		cfg.RetentionDays = existing.RetentionDays
+	}
+	if cfg.APIKey == "" {
 		cfg.APIKey = existing.APIKey
 	}
 	if existing.APIURL != "" {
 		cfg.APIURL = existing.APIURL
 	}
-	if err := writeConfig(path, cfg); err != nil {
+	if err := writeStoredConfig(path, storedConfig{File: cfg, OperatorPassword: operatorPassword}); err != nil {
 		writef(stderr, "write config: %s\n", err)
 		if result.APIKey != "" {
 			writef(stderr, "API key, shown once: %s\n", result.APIKey)
@@ -266,9 +289,14 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	writef(stdout, "Domain %s is ready.\n", cfg.Domain)
 	writef(stdout, "Operator login is operator@%s.\n", cfg.Domain)
 	writef(stdout, "Service account is service@%s.\n", cfg.Domain)
-	writef(stdout, "Message retention defaults to %d days.\n", cfg.RetentionDays)
+	if cfg.RetentionDays == 0 {
+		writef(stdout, "Messages are kept until they are deleted.\n")
+	} else {
+		writef(stdout, "Message retention is %d days.\n", cfg.RetentionDays)
+	}
 	writef(stdout, "Wrote %s\n", path)
 	if usedDockerMode {
+		writef(stdout, "The operator password is stored in %s.\n", path)
 		writef(stdout, "Stack files are in %s\n", cfg.StackDir)
 		writef(stdout, "Start the server with: inbaid serve\n")
 		writef(stdout, "Stop the stack with: docker compose -f %q down\n", filepath.Join(cfg.StackDir, "compose.yaml"))
@@ -289,23 +317,50 @@ func configFilePath(explicit string) (string, error) {
 	return filepath.Join(dir, "inbai", "config.json"), nil
 }
 
+// storedConfig is config.json as inbai writes it. The operator password lives
+// here, not in config.File, because only the CLI reads it. It is a secret,
+// like the API key, so the file mode stays 0600.
+type storedConfig struct {
+	config.File
+	OperatorPassword string `json:"operatorPassword,omitempty"`
+}
+
 func readConfig(path string) (config.File, error) {
+	stored, err := readStoredConfig(path)
+	return stored.File, err
+}
+
+func readStoredConfig(path string) (storedConfig, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return config.File{}, nil
+		return storedConfig{}, nil
 	}
 	if err != nil {
-		return config.File{}, err
+		return storedConfig{}, err
 	}
-	var cfg config.File
+	var cfg storedConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return config.File{}, err
+		return storedConfig{}, err
 	}
 	return cfg, nil
 }
 
+// writeConfig replaces the config file and keeps the operator password
+// already stored there.
 func writeConfig(path string, cfg config.File) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	stored, _ := readStoredConfig(path)
+	return writeStoredConfig(path, storedConfig{File: cfg, OperatorPassword: stored.OperatorPassword})
+}
+
+// syncConfigFile flushes the new config file before the rename. Tests replace it.
+var syncConfigFile = (*os.File).Sync
+
+// writeStoredConfig writes a temporary file next to path and renames it over
+// path, so a crash leaves either the old file or the new one. It does not lock:
+// two commands that write at once each succeed, and the last rename wins.
+func writeStoredConfig(path string, cfg storedConfig) (err error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
@@ -313,8 +368,34 @@ func writeConfig(path string, cfg config.File) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	// CreateTemp opens the file with mode 0600.
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	tmpPath := tmp.Name()
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(raw); err != nil {
+		return err
+	}
+	if err := syncConfigFile(tmp); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.Rename replaces an existing file on Windows as well.
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }

@@ -22,7 +22,7 @@ Run `inbai init` with your domain:
 inbai init --domain inbai.test
 ```
 
-This writes a local Compose stack for PostgreSQL and Stalwart, starts Stalwart in recovery mode, creates the domain, roles, accounts, service API key, and operator token in `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. No environment variables are required.
+This writes a local Compose stack for PostgreSQL and Stalwart, starts Stalwart in recovery mode, creates the domain, roles, accounts, service API key, operator password, and operator token in `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. No environment variables are required. The first run pulls the PostgreSQL and Stalwart images and prints Docker's progress.
 
 By default, local Docker mode binds loopback-only ports (`8443` for HTTPS, `2525` for SMTP, `5870` for submission, `5433` for PostgreSQL) so it will not clash with local services. Pass `--public` on a Linux server to bind ports `25`, `587`, and `443` on all interfaces, or use [deploy/compose](../../deploy/compose/README.md) to run `inbaid` inside Compose as well.
 
@@ -52,4 +52,8 @@ inbai message list alice@inbai.test
 
 `message list` prints the subject and a preview. Mail from the public internet arrives only after the DNS records are published and Stalwart accepts the delivery.
 
-To stop the local Docker stack later, run the `docker compose -f ... down` command printed by `inbai init` (add `-v` to remove the volumes).
+## Stop, remove, and rerun
+
+To stop the local Docker stack later, run the `docker compose -f ... down` command printed by `inbai init`. Add `-v` to remove the volumes. That deletes the mail, the inboxes, and the Stalwart accounts.
+
+`inbai init` is safe to run again with the same domain. It keeps the PostgreSQL password, the operator password, the operator token, and the retention period in `config.json`. It restarts Stalwart twice. After `down -v`, init checks the saved API key, sees that the new Stalwart refuses it, and saves a new one. Restart `inbaid` after a rerun that replaced the key.

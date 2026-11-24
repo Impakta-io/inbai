@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,7 +33,9 @@ var stackEntrypoint []byte
 //go:embed stack/01-inbai.sql
 var stackInitSQL []byte
 
-type composeRunner func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
+// composeRunner runs docker compose. With out set, it streams the command's
+// output there and returns no bytes. Otherwise it returns the combined output.
+type composeRunner func(ctx context.Context, dir string, env []string, out io.Writer, args ...string) ([]byte, error)
 
 type urlWaiter func(ctx context.Context, rawURL string, insecure bool) error
 
@@ -40,6 +43,9 @@ var (
 	runCompose   composeRunner = execDockerCompose
 	waitForURL   urlWaiter     = pollURL
 	pollInterval               = 500 * time.Millisecond
+	// pullTimeout bounds the image pull. readyTimeout bounds everything after it.
+	pullTimeout  = 30 * time.Minute
+	readyTimeout = 5 * time.Minute
 )
 
 type dockerInitOptions struct {
@@ -56,6 +62,11 @@ type dockerInitOptions struct {
 	StalwartURL    string
 	Existing       config.File
 	Progress       io.Writer
+
+	// OperatorPassword is set on operator@<domain>. ResetOperatorPassword
+	// also sets it when that account already exists.
+	OperatorPassword      string
+	ResetOperatorPassword bool
 }
 
 type dockerInitResult struct {
@@ -114,7 +125,10 @@ func initDockerStack(ctx context.Context, opts dockerInitOptions) (dockerInitRes
 	if err := opts.applyDefaults(); err != nil {
 		return dockerInitResult{}, err
 	}
-	if out, err := runCompose(ctx, ".", nil, "version"); err != nil {
+	if opts.OperatorPassword == "" {
+		return dockerInitResult{}, fmt.Errorf("operator password is empty")
+	}
+	if out, err := runCompose(ctx, ".", nil, nil, "version"); err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg != "" {
 			return dockerInitResult{}, fmt.Errorf("docker compose is required to start the local stack (%v: %s); install Docker or pass --url with %s", err, msg, recoveryPasswordEnv)
@@ -138,65 +152,70 @@ func initDockerStack(ctx context.Context, opts dockerInitOptions) (dockerInitRes
 		return dockerInitResult{}, fmt.Errorf("write stack files: %w", err)
 	}
 
+	// Pull first, with its own timeout, so a slow download is visible and
+	// does not use up the time Stalwart has to start.
+	progress(opts.Progress, "Pulling the PostgreSQL and Stalwart images...\n")
+	pullCtx, cancelPull := context.WithTimeout(ctx, pullTimeout)
+	out, err := runCompose(pullCtx, opts.StackDir, nil, opts.Progress, "-f", "compose.yaml", "pull", "--policy", "missing")
+	cancelPull()
+	if err != nil {
+		return dockerInitResult{}, fmt.Errorf("docker compose pull: %w\n%s", err, trimTail(string(out), 2000))
+	}
+
 	recoveryPassword, err := randomHex(24)
 	if err != nil {
 		return dockerInitResult{}, fmt.Errorf("generate recovery password: %w", err)
 	}
-	recoveryEnv := []string{
-		"STALWART_RECOVERY_MODE=1",
-		"STALWART_RECOVERY_ADMIN=admin:" + recoveryPassword,
-	}
-	normalEnv := []string{
-		"STALWART_RECOVERY_MODE=0",
-		"STALWART_RECOVERY_ADMIN=",
+	stack := dockerStack{
+		dir:              opts.StackDir,
+		project:          project,
+		recoveryURL:      fmt.Sprintf("http://127.0.0.1:%d", opts.RecoveryPort),
+		httpsURL:         strings.TrimRight(opts.StalwartURL, "/"),
+		recoveryPassword: recoveryPassword,
+		progress:         opts.Progress,
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	defer cancel()
+
+	var boot stalwart.Result
 	progress(opts.Progress, "Starting PostgreSQL and Stalwart with Docker Compose...\n")
-	if out, err := runCompose(ctx, opts.StackDir, recoveryEnv, "-f", "compose.yaml", "up", "-d"); err != nil {
-		return dockerInitResult{}, fmt.Errorf("docker compose up: %w\n%s", err, trimTail(string(out), 2000))
-	}
-
-	leaveRecovery := func(c context.Context) error {
-		out, err := runCompose(c, opts.StackDir, normalEnv, "-f", "compose.yaml", "up", "-d", "--force-recreate", "stalwart")
-		if err != nil {
-			return fmt.Errorf("restart stalwart out of recovery mode: %w\n%s", err, trimTail(string(out), 2000))
-		}
-		return nil
-	}
-
-	recoveryURL := fmt.Sprintf("http://127.0.0.1:%d", opts.RecoveryPort)
-	progress(opts.Progress, "Waiting for Stalwart recovery API...\n")
-	if err := waitForURL(ctx, recoveryURL+"/jmap/", false); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_ = leaveRecovery(cleanupCtx)
-		cancel()
-		return dockerInitResult{}, fmt.Errorf("wait for Stalwart recovery API: %w", err)
-	}
-
-	progress(opts.Progress, "Bootstrapping domain %s...\n", opts.Domain)
-	boot, err := stalwart.Bootstrap(ctx, &stalwart.Client{
-		BaseURL:  recoveryURL,
-		User:     "admin",
-		Password: recoveryPassword,
-	}, stalwart.Input{
-		Domain:           opts.Domain,
-		Hostname:         opts.Hostname,
-		OperatorPassword: recoveryPassword,
-		CreateAPIKey:     opts.Existing.APIKey == "",
+	err = stack.inRecovery(ctx, []string{"up", "-d"}, func() error {
+		progress(opts.Progress, "Bootstrapping domain %s...\n", opts.Domain)
+		var err error
+		boot, err = stalwart.Bootstrap(ctx, stack.admin(), stalwart.Input{
+			Domain:                opts.Domain,
+			Hostname:              opts.Hostname,
+			OperatorPassword:      opts.OperatorPassword,
+			ResetOperatorPassword: opts.ResetOperatorPassword,
+			CreateAPIKey:          opts.Existing.APIKey == "",
+		})
+		return err
 	})
 	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_ = leaveRecovery(cleanupCtx)
-		cancel()
 		return dockerInitResult{}, err
 	}
 
-	progress(opts.Progress, "Switching Stalwart to normal mode...\n")
-	if err := leaveRecovery(ctx); err != nil {
-		return dockerInitResult{}, err
-	}
-	if err := waitForURL(ctx, strings.TrimRight(opts.StalwartURL, "/")+"/jmap/", true); err != nil {
-		return dockerInitResult{}, fmt.Errorf("wait for Stalwart HTTPS API: %w", err)
+	// The stored key belongs to the Stalwart database that issued it. After
+	// docker compose down -v that database is gone. Issue a new key only when
+	// Stalwart answers and refuses the old one.
+	if opts.Existing.APIKey != "" {
+		err := stalwart.CheckAPIKey(ctx, &stalwart.Client{BaseURL: stack.httpsURL, APIKey: opts.Existing.APIKey, HTTP: insecureHTTP()})
+		switch {
+		case err == nil:
+		case errors.Is(err, stalwart.ErrAPIKeyRejected):
+			progress(opts.Progress, "Stalwart rejected the stored API key. Issuing a new one...\n")
+			err = stack.inRecovery(ctx, []string{"up", "-d", "--force-recreate", "stalwart"}, func() error {
+				key, err := stalwart.CreateAPIKey(ctx, stack.admin(), boot.ServiceAccountID)
+				boot.APIKey = key
+				return err
+			})
+			if err != nil {
+				return dockerInitResult{}, fmt.Errorf("replace the API key Stalwart rejected: %w", err)
+			}
+		default:
+			progress(opts.Progress, "Could not check the stored API key, so it is kept: %v\n", err)
+		}
 	}
 
 	return dockerInitResult{
@@ -205,6 +224,92 @@ func initDockerStack(ctx context.Context, opts dockerInitOptions) (dockerInitRes
 		StalwartURL: opts.StalwartURL,
 		StackDir:    opts.StackDir,
 	}, nil
+}
+
+// dockerStack is the local Compose stack while init runs.
+type dockerStack struct {
+	dir              string
+	project          string
+	recoveryURL      string
+	httpsURL         string
+	recoveryPassword string
+	progress         io.Writer
+}
+
+func (s dockerStack) admin() *stalwart.Client {
+	return &stalwart.Client{BaseURL: s.recoveryURL, User: "admin", Password: s.recoveryPassword}
+}
+
+// inRecovery runs docker compose with upArgs in recovery mode, waits for the
+// recovery API, calls fn, and restarts Stalwart in normal mode. It leaves
+// recovery mode when a step fails, too.
+func (s dockerStack) inRecovery(ctx context.Context, upArgs []string, fn func() error) error {
+	recoveryEnv := []string{
+		"STALWART_RECOVERY_MODE=1",
+		"STALWART_RECOVERY_ADMIN=admin:" + s.recoveryPassword,
+	}
+	if out, err := runCompose(ctx, s.dir, recoveryEnv, nil, append([]string{"-f", "compose.yaml"}, upArgs...)...); err != nil {
+		return fmt.Errorf("docker compose up: %w\n%s", err, trimTail(string(out), 2000))
+	}
+	cleanup := func() {
+		c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = s.leaveRecovery(c)
+	}
+	progress(s.progress, "Waiting for Stalwart recovery API...\n")
+	if err := s.wait(ctx, "Stalwart recovery API", s.recoveryURL+"/jmap/", false); err != nil {
+		cleanup()
+		return err
+	}
+	if err := fn(); err != nil {
+		cleanup()
+		return err
+	}
+	progress(s.progress, "Switching Stalwart to normal mode...\n")
+	if err := s.leaveRecovery(ctx); err != nil {
+		return err
+	}
+	return s.wait(ctx, "Stalwart HTTPS API", s.httpsURL+"/jmap/", true)
+}
+
+func (s dockerStack) leaveRecovery(ctx context.Context) error {
+	normalEnv := []string{
+		"STALWART_RECOVERY_MODE=0",
+		"STALWART_RECOVERY_ADMIN=",
+	}
+	out, err := runCompose(ctx, s.dir, normalEnv, nil, "-f", "compose.yaml", "up", "-d", "--force-recreate", "stalwart")
+	if err != nil {
+		return fmt.Errorf("restart stalwart out of recovery mode: %w\n%s", err, trimTail(string(out), 2000))
+	}
+	return nil
+}
+
+// wait waits for rawURL. When the time runs out, the error carries the end of
+// the stack's logs. They are read here, before a restart replaces the container.
+func (s dockerStack) wait(ctx context.Context, what, rawURL string, insecure bool) error {
+	err := waitForURL(ctx, rawURL, insecure)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("wait for %s: %w", what, err)
+	}
+	logCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	logs, logErr := runCompose(logCtx, s.dir, nil, nil, "-f", "compose.yaml", "logs", "--no-color", "--tail", "50")
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s did not answer within %s: %v\n", what, readyTimeout, err)
+	if logErr != nil {
+		fmt.Fprintf(&b, "docker compose logs failed: %v\n", logErr)
+	}
+	if tail := lastLines(string(logs), 50); tail != "" {
+		fmt.Fprintf(&b, "Last lines of docker compose logs:\n%s\n", tail)
+	}
+	fmt.Fprintf(&b, "If an earlier install used Compose project %s, its volumes may hold a different PostgreSQL password.\n", s.project)
+	b.WriteString("Removing them deletes that install's mail and accounts. To remove them, run:\n")
+	fmt.Fprintf(&b, "  docker compose -p %s -f %q down -v\n", s.project, filepath.Join(s.dir, "compose.yaml"))
+	b.WriteString("Then run inbai init again.")
+	return errors.New(b.String())
 }
 
 func stackEnv(project, pgPassword string, opts dockerInitOptions) string {
@@ -311,10 +416,15 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func execDockerCompose(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+func execDockerCompose(ctx context.Context, dir string, env []string, out io.Writer, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
+	if out != nil {
+		cmd.Stdout = out
+		cmd.Stderr = out
+		return nil, cmd.Run()
+	}
 	return cmd.CombinedOutput()
 }
 
@@ -354,6 +464,19 @@ func progress(w io.Writer, format string, args ...any) {
 	if w != nil {
 		_, _ = fmt.Fprintf(w, format, args...)
 	}
+}
+
+// lastLines returns the last n lines of s.
+func lastLines(s string, n int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func trimTail(s string, max int) string {

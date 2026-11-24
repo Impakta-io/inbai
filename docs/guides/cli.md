@@ -12,7 +12,7 @@ With no arguments, `inbai` prints `inbai 0.0.0-dev` and exits. `inbai version` p
 inbai init --domain example.com
 ```
 
-By default, Docker mode writes a Compose stack into `<config-dir>/stack`, generates a PostgreSQL password and an operator token, starts Stalwart in recovery mode with an ephemeral password (never written to disk), bootstraps the domain, writes `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. Loopback-only ports (`8443`, `2525`, `5870`, `5433`, `8080`) are used by default; pass `--public` on a server to bind ports `25`, `587`, and `443` on all interfaces, or override ports with `--pg-port`, `--https-port`, `--smtp-port`, `--submission-port`, and `--recovery-port`. `--stack-dir` chooses another directory for the Compose files.
+By default, Docker mode writes a Compose stack into `<config-dir>/stack`, generates a PostgreSQL password, an operator password, and an operator token, pulls any missing images, starts Stalwart in recovery mode with an ephemeral password (never written to disk), bootstraps the domain, writes `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. A config directory that init creates gets mode `0700`. An existing directory keeps its mode. Loopback-only ports (`8443`, `2525`, `5870`, `5433`, `8080`) are used by default; pass `--public` on a server to bind ports `25`, `587`, and `443` on all interfaces, or override ports with `--pg-port`, `--https-port`, `--smtp-port`, `--submission-port`, and `--recovery-port`. `--stack-dir` chooses another directory for the Compose files.
 
 To bootstrap an already-running Stalwart instance instead of starting Docker Compose, pass `--url` (or `--no-docker`) with `INBAI_RECOVERY_PASSWORD`:
 
@@ -21,9 +21,13 @@ export INBAI_RECOVERY_PASSWORD='the-recovery-password'
 inbai init --url http://127.0.0.1:8080 --domain example.com
 ```
 
-`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands (`https://127.0.0.1:8443` in local Docker mode, `https://127.0.0.1` with `--public` or external mode). `--config` sets the file path. `--json` prints the domain, the operator login, the retention default, and the config path. It never prints the service API key, the operator token, or the database URL. The command prints the 30-day retention default.
+`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands (`https://127.0.0.1:8443` in local Docker mode, `https://127.0.0.1` with `--public` or external mode). `--config` sets the file path. `--json` prints the domain, the operator login, the retention period, and the config path. It never prints the service API key, the operator token, the operator password, or the database URL. The command prints the retention period. A new install gets 30 days.
 
-Running init again reuses the domain, the roles, the accounts, the PostgreSQL password, the API key, and the operator token already saved on disk.
+Docker's pull progress goes to standard error. The pull has 30 minutes. After it, Stalwart has 5 minutes to answer. On a timeout, init prints the last 50 lines of `docker compose logs` and the command that removes volumes left by an earlier install with the same Compose project.
+
+Running init again reuses the domain, the roles, the accounts, the PostgreSQL password, the operator password, the operator token, and the retention period already saved on disk. A config without an operator password, written by an older `inbai`, gets a new one, and Docker mode sets it on `operator@<domain>`.
+
+In Docker mode, a rerun also checks the saved API key against Stalwart. If Stalwart answers 401 or 403, as it does after `docker compose down -v`, init issues a new key and saves it. If the check fails any other way, init keeps the key and says so.
 
 ## login
 
@@ -51,17 +55,18 @@ inbai login --url http://127.0.0.1:8787 --client-id <client-id>
 
 ## domain relay
 
-`inbai domain relay` sends mail for other domains through an authenticated SMTP relay. Mail for a domain this server hosts stays local. The password is `INBAI_RELAY_PASSWORD`. The operator password is `INBAI_OPERATOR_PASSWORD`, which is the same value `inbai init` used as `INBAI_RECOVERY_PASSWORD`. The command signs in as `operator@<domain>`. It does not use the service API key.
+`inbai domain relay` sends mail for other domains through an authenticated SMTP relay. Mail for a domain this server hosts stays local. The password is `INBAI_RELAY_PASSWORD`. The command signs in as `operator@<domain>`. It does not use the service API key.
+
+The operator password is `INBAI_OPERATOR_PASSWORD` when it is set. Otherwise the command uses the operator password that Docker-mode `inbai init` stored in `config.json`. After external-mode init, the operator password is the value init used as `INBAI_RECOVERY_PASSWORD`, so export one of the two.
 
 ```sh
-export INBAI_OPERATOR_PASSWORD='the-operator-password'
 export INBAI_RELAY_PASSWORD='the-relay-password'
 inbai domain relay --host smtp.example.net --user mailer
 ```
 
 `--port` defaults to 587. `--implicit-tls` is for a relay that uses TLS from the first byte. `--allow-invalid-certs` accepts a certificate that does not validate. `--json` prints the host, port, and user. It does not print the password. `inbai domain relay --off` sends other domains to their MX hosts again.
 
-Run `inbai init` again, with Stalwart in recovery mode, before the first relay change on a server that was created before this command. That run gives the operator the route permissions. The service account does not receive them.
+Run `inbai init` again before the first relay change on a server that was created before this command. Docker mode starts recovery mode itself. An external Stalwart must be in recovery mode first. That run gives the operator the route permissions. The service account does not receive them.
 
 ## doctor
 
