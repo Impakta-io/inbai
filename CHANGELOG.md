@@ -4,11 +4,13 @@ Status: current
 
 Versions follow semantic versioning. Pre-alpha releases are marked as such and callers should not depend on API stability yet. The release process is in [releasing.md](docs/contributing/releasing.md).
 
-## Unreleased
+## v0.1.0-alpha.5 (2026-11-24)
+
+Pre-alpha release. Changes since `v0.1.0-alpha.4`. No upgrade steps.
 
 ### Changed
 
-- The agent guide in `docs/agents` is written for agents and tells them never to use the operator token. The operator's steps for issuing and managing agent credentials moved to [Agent credentials](docs/guides/agents.md). The MCP `initialize` result carries the same rule as `instructions`.
+- The agent guide in `docs/agents` is written for agents and tells them never to use the operator token. The operator's steps for issuing and managing agent credentials moved to [Agent credentials](docs/guides/agents.md). The MCP `initialize` result carries the same rule as `instructions` (#102).
 
 ## v0.1.0-alpha.4 (2026-11-24)
 
