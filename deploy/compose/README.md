@@ -22,7 +22,7 @@ Keep the two values somewhere safe. `docker compose up` stops with a message whe
 | Variable | What it protects | Why it is its own value |
 | --- | --- | --- |
 | `PG_PASSWORD` | The PostgreSQL superuser `stalwart`, which owns every mailbox record and the inbAI database. | Only `postgres`, `stalwart` and `inbaid` need it, on the Compose network. Port 5432 is not published. |
-| `STALWART_RECOVERY_ADMIN_PASSWORD` | The Stalwart recovery administrator `admin`, which can change any account, domain and route. | It is the master key to the mail server, and the stack publishes ports 25, 587 and 443 on all interfaces. It should not also open the database. |
+| `STALWART_RECOVERY_ADMIN_PASSWORD` | The Stalwart recovery administrator `admin`, which can change any account, domain and route. | It is the master key to the mail server, and the stack publishes ports 25 and 443 on all interfaces. It should not also open the database. |
 | `INBAI_RECOVERY_PASSWORD` | `inbai init` signs in with it and then sets the same value as the password of `operator@<domain>`, the login that can change the outbound route. | See the note after the next command. |
 
 A leaked value then opens one door and not all three. The entrypoints accept any characters in `PG_PASSWORD` except a newline, carriage return or tab. They escape the value for the Stalwart JSON file and percent-encode it for the `inbaid` database URL. `openssl rand -hex 24` avoids the question.
@@ -51,6 +51,8 @@ export STALWART_RECOVERY_MODE=0
 docker compose up -d
 inbai domain add
 ```
+
+inbAI publishes SMTP on port 25 for inbound mail and HTTPS on port 443. Agents send mail through the inbAI API, not SMTP submission, so no submission port is published. Stalwart also listens on port 465 (submission with implicit TLS) inside its container, but the stack does not publish it.
 
 Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates, so `domain add` skips certificate verification when the stored URL is localhost. Copy the printed zone file into DNS. Run `inbai domain add` again to see which MX and TXT records are published.
 

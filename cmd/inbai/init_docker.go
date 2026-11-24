@@ -49,19 +49,18 @@ var (
 )
 
 type dockerInitOptions struct {
-	Domain         string
-	Hostname       string
-	StackDir       string
-	Project        string
-	Public         bool
-	PGPort         int
-	HTTPSPort      int
-	SMTPPort       int
-	SubmissionPort int
-	RecoveryPort   int
-	StalwartURL    string
-	Existing       config.File
-	Progress       io.Writer
+	Domain       string
+	Hostname     string
+	StackDir     string
+	Project      string
+	Public       bool
+	PGPort       int
+	HTTPSPort    int
+	SMTPPort     int
+	RecoveryPort int
+	StalwartURL  string
+	Existing     config.File
+	Progress     io.Writer
 
 	// OperatorPassword is set on operator@<domain>. ResetOperatorPassword
 	// also sets it when that account already exists.
@@ -90,9 +89,6 @@ func (o *dockerInitOptions) applyDefaults() error {
 		if o.SMTPPort == 0 {
 			o.SMTPPort = 25
 		}
-		if o.SubmissionPort == 0 {
-			o.SubmissionPort = 587
-		}
 	} else {
 		if o.HTTPSPort == 0 {
 			o.HTTPSPort = 8443
@@ -100,16 +96,12 @@ func (o *dockerInitOptions) applyDefaults() error {
 		if o.SMTPPort == 0 {
 			o.SMTPPort = 2525
 		}
-		if o.SubmissionPort == 0 {
-			o.SubmissionPort = 5870
-		}
 	}
 	for name, port := range map[string]int{
-		"pg-port":         o.PGPort,
-		"https-port":      o.HTTPSPort,
-		"smtp-port":       o.SMTPPort,
-		"submission-port": o.SubmissionPort,
-		"recovery-port":   o.RecoveryPort,
+		"pg-port":       o.PGPort,
+		"https-port":    o.HTTPSPort,
+		"smtp-port":     o.SMTPPort,
+		"recovery-port": o.RecoveryPort,
 	} {
 		if port < 1 || port > 65535 {
 			return fmt.Errorf("--%s must be between 1 and 65535", name)
@@ -324,7 +316,6 @@ func stackEnv(project, pgPassword string, opts dockerInitOptions) string {
 	fmt.Fprintf(&b, "PG_PASSWORD=%s\n", pgPassword)
 	fmt.Fprintf(&b, "PG_PORT=%d\n", opts.PGPort)
 	fmt.Fprintf(&b, "SMTP_BIND=%s\n", bind(opts.SMTPPort))
-	fmt.Fprintf(&b, "SUBMISSION_BIND=%s\n", bind(opts.SubmissionPort))
 	fmt.Fprintf(&b, "HTTPS_BIND=%s\n", bind(opts.HTTPSPort))
 	fmt.Fprintf(&b, "RECOVERY_PORT=%d\n", opts.RecoveryPort)
 	b.WriteString("STALWART_RECOVERY_MODE=0\n")
