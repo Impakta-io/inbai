@@ -47,9 +47,16 @@ func TestIngestHintFeedsTheCursor(t *testing.T) {
 		t.Fatalf("events %d %s", res.StatusCode, body)
 	}
 
-	hook := call(t, srv.URL, http.MethodPost, "/v1/webhooks", "operator-token", `{"inbox":"alice-id","url":"https://agent.example/hook"}`, "")
+	hook := call(t, srv.URL, http.MethodPost, "/v1/webhooks", "operator-token", `{"inbox":"alice-id","url":"https://198.51.100.7/hook"}`, "")
 	if hook.StatusCode != http.StatusCreated || !strings.Contains(readBody(t, hook), `"secret"`) {
 		t.Fatalf("webhook %d", hook.StatusCode)
+	}
+
+	for _, internal := range []string{"http://127.0.0.1:5432/", "https://169.254.169.254/latest", "https://10.0.0.2/hook"} {
+		refused := call(t, srv.URL, http.MethodPost, "/v1/webhooks", "operator-token", `{"inbox":"alice-id","url":"`+internal+`"}`, "")
+		if refused.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: webhook %d, want 400", internal, refused.StatusCode)
+		}
 	}
 
 	bounce, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/hooks/ingest", strings.NewReader(`{"events":[{"type":"delivery.dsn-temp-fail","data":{"to":"soft@example.com","details":"451 later"}},{"type":"delivery.dsn-perm-fail","data":{"to":"bad@example.com","details":"550 user unknown"}}]}`))

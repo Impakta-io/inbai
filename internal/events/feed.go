@@ -30,13 +30,17 @@ type Feed struct {
 	backoff  func(attempt int) time.Duration
 	appended atomic.Int64
 	posted   atomic.Int64
+
+	allowPrivate bool
+	client       *http.Client
 }
 
 // New returns a feed over a durable log.
 func New(log store.Log) *Feed {
 	return &Feed{
-		log: log,
-		now: time.Now,
+		log:    log,
+		client: NewWebhookClient(false),
+		now:    time.Now,
 		backoff: func(attempt int) time.Duration {
 			shift := attempt - 1
 			if shift > 4 {
@@ -45,6 +49,18 @@ func New(log store.Log) *Feed {
 			return time.Second << shift
 		},
 	}
+}
+
+// SetAllowPrivate lets an operator allow http and private webhook targets.
+// Call it before delivery starts. It is never set from a request.
+func (f *Feed) SetAllowPrivate(allow bool) {
+	f.allowPrivate = allow
+	f.client = NewWebhookClient(allow)
+}
+
+// AllowPrivate reports whether the operator allowed private webhook targets.
+func (f *Feed) AllowPrivate() bool {
+	return f.allowPrivate
 }
 
 // Sign returns the HMAC-SHA256 signature header value for a webhook body.
@@ -153,7 +169,7 @@ func (f *Feed) DeliverOnce(ctx context.Context, client *http.Client) (bool, erro
 		return false, err
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = f.client
 	}
 	body, err := json.Marshal(delivery.Event)
 	if err != nil {

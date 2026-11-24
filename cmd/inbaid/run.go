@@ -121,6 +121,10 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		directory.SetDB(log)
 		feed := events.New(log)
 		svc.SetFeed(feed)
+		if err := applyWebhookPolicy(feed, getenv); err != nil {
+			writef(stderr, "webhooks: %s\n", err)
+			return 2
+		}
 		go feed.RunWebhooks(context.Background(), nil)
 		go newWorker(log, svc, feed, stalwart.Mail{Client: client}, cfg.RetentionDays, stderr).Run(context.Background())
 	} else {
