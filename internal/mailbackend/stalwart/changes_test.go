@@ -5,10 +5,69 @@ package stalwart
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
+
+func TestMailChangesReportsLostChanges(t *testing.T) {
+	for problem, lost := range map[string]bool{"cannotCalculateChanges": true, "serverFail": false} {
+		t.Run(problem, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				names, _ := allCalls(t, r.Body)
+				if names[0] != "Email/changes" {
+					t.Errorf("method %s", names[0])
+				}
+				writeMethods(w, []any{[]any{"error", map[string]any{"type": problem, "description": "state s0"}, "c"}})
+			}))
+			defer srv.Close()
+			client := &Client{BaseURL: srv.URL, APIKey: "key"}
+			_, err := Mail{Client: client}.MailChanges(context.Background(), "acct", "s0")
+			if err == nil || errors.Is(err, mailbackend.ErrChangesLost) != lost {
+				t.Fatalf("err %v, want lost %v", err, lost)
+			}
+			if !strings.Contains(err.Error(), "stalwart c: "+problem+": state s0") {
+				t.Fatalf("err text %q", err.Error())
+			}
+		})
+	}
+}
+
+var _ mailbackend.InboxChecker = Mail{}
+
+func TestInboxExistsAsksForTheOneAccount(t *testing.T) {
+	cases := map[string]struct {
+		answer []any
+		exists bool
+		fails  bool
+	}{
+		"listed":    {answer: []any{"x:Account/get", map[string]any{"list": []any{map[string]any{"id": "e", "name": "ada"}}, "notFound": []any{}}, "a"}, exists: true},
+		"not found": {answer: []any{"x:Account/get", map[string]any{"list": []any{}, "notFound": []any{"e"}}, "a"}},
+		"silent":    {answer: []any{"x:Account/get", map[string]any{"list": []any{}}, "a"}, fails: true},
+		"refused":   {answer: []any{"error", map[string]any{"type": "forbidden"}, "a"}, fails: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				names, args := allCalls(t, r.Body)
+				ids, _ := args[0]["ids"].([]any)
+				if len(names) != 1 || names[0] != "x:Account/get" || len(ids) != 1 || ids[0] != "e" {
+					t.Errorf("calls %v args %v", names, args)
+				}
+				writeMethods(w, []any{tc.answer})
+			}))
+			defer srv.Close()
+			exists, err := Mail{Client: &Client{BaseURL: srv.URL, APIKey: "key"}}.InboxExists(context.Background(), "e")
+			if (err != nil) != tc.fails || exists != tc.exists {
+				t.Fatalf("exists %v err %v", exists, err)
+			}
+		})
+	}
+}
 
 func TestMailChangesUsesTheStoredState(t *testing.T) {
 	var sawSince string

@@ -244,13 +244,25 @@ func Decode(raw []byte) (Snapshot, error) {
 	return snap, nil
 }
 
+// eventShape reports whether an event's kind and message id fit together.
+// A created or destroyed event names a message. A resync event names none.
+func eventShape(event Record) bool {
+	switch event.Kind {
+	case "created", "destroyed":
+		return event.MessageID != ""
+	case "resync":
+		return event.MessageID == ""
+	}
+	return false
+}
+
 func (s Snapshot) check() error {
 	if s.Version != snapshotVersion {
 		return fmt.Errorf("snapshot version %d is not supported", s.Version)
 	}
 	events := map[int64]struct{}{}
 	for _, event := range s.Events {
-		if event.ID <= 0 || event.Inbox == "" || event.MessageID == "" || (event.Kind != "created" && event.Kind != "destroyed") {
+		if event.ID <= 0 || event.Inbox == "" || !eventShape(event) {
 			return fmt.Errorf("event %d is incomplete", event.ID)
 		}
 		if _, dup := events[event.ID]; dup {

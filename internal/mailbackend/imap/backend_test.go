@@ -255,8 +255,8 @@ func TestUIDValidityChangeDoesNotAdvance(t *testing.T) {
 		}
 	})
 	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada", Password: "secret"}}}
-	if _, err := backend.MailChanges(context.Background(), "ada", "4:8"); err == nil {
-		t.Fatal("accepted a new uidvalidity")
+	if _, err := backend.MailChanges(context.Background(), "ada", "4:8"); !errors.Is(err, mailbackend.ErrChangesLost) {
+		t.Fatalf("a new uidvalidity gave %v, want ErrChangesLost", err)
 	}
 }
 

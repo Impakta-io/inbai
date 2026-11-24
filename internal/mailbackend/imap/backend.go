@@ -255,7 +255,7 @@ func (b *Backend) MailState(ctx context.Context, account string) (string, error)
 }
 
 // MailChanges reports UIDs added since the stored uidnext.
-// A changed uidvalidity is an error, and the caller keeps the old cursor.
+// A changed uidvalidity is mailbackend.ErrChangesLost: the old uids mean nothing now.
 // Messages removed since the cursor are not reported.
 func (b *Backend) MailChanges(ctx context.Context, account, since string) (mailbackend.Delta, error) {
 	oldValidity, oldNext, err := parseState(since)
@@ -273,7 +273,7 @@ func (b *Backend) MailChanges(ctx context.Context, account, since string) (mailb
 			return err
 		}
 		if validity != oldValidity {
-			return errors.New("imap: mailbox uidvalidity changed")
+			return fmt.Errorf("imap: mailbox uidvalidity changed: %w", mailbackend.ErrChangesLost)
 		}
 		delta.State = formatState(validity, next)
 		if next <= oldNext {
