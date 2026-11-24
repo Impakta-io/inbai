@@ -229,6 +229,10 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
+          description: >-
+            Either a request with the same Idempotency-Key is still running, or the address cannot be
+            created. An account already has this local part, or the local part is operator or service,
+            which inbai init reserves. Nothing is created, and the Idempotency-Key is given back.
         "422":
           $ref: "#/components/responses/Problem"
         "429":
@@ -237,7 +241,10 @@ paths:
           $ref: "#/components/responses/Problem"
     get:
       operationId: listInboxes
-      summary: List accounts in the mail backend. An operator token is required.
+      summary: List inboxes. An operator token is required.
+      description: |
+        The operator and service accounts inbai init creates are not inboxes and are not listed.
+        A page can hold fewer inboxes than its limit and still have a next cursor.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageCursor"
@@ -272,7 +279,7 @@ paths:
           type: string
     delete:
       operationId: deleteInbox
-      summary: Delete one account. An operator token is required.
+      summary: Delete one inbox. An operator token is required.
       responses:
         "204":
           description: Deleted
@@ -280,6 +287,9 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+          description: The id is the operator or service account inbai init created. It is not an inbox and is not deleted.
         "502":
           $ref: "#/components/responses/Problem"
   /v1/inboxes/{id}/allowlist:
@@ -410,6 +420,11 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Inbox"
+                  existing:
+                    type: array
+                    description: Addresses an account already had. They were skipped, not created. Absent when there are none.
+                    items:
+                      type: string
         "202":
           description: Accepted as a job
           content:
@@ -426,6 +441,9 @@ paths:
           $ref: "#/components/responses/Problem"
         "401":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+          description: Every address already had an account. Nothing was created.
   /v1/jobs/{id}:
     get:
       operationId: getJob
@@ -1050,6 +1068,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Inbox"
+        existing:
+          type: array
+          description: Addresses an account already had. They were skipped, not created. Absent when there are none.
+          items:
+            type: string
     MessageList:
       type: object
       required: [messages]

@@ -6,6 +6,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -539,6 +541,141 @@ func auditRows(t *testing.T, svc *Service) []store.AuditRow {
 	return rows
 }
 
+func TestCreatingAnExistingAddressIsAConflict(t *testing.T) {
+	mail := &fakeMail{createErr: fmt.Errorf("stalwart a: %w", mailbackend.ErrExists)}
+	svc := New(mail)
+	id, err := svc.CreateInbox(context.Background(), Caller{Operator: true}, mailbackend.InboxSpec{Local: "Alice"}, "key-1")
+	if id != "" || !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "alice already exists") {
+		t.Fatalf("create %q err %v", id, err)
+	}
+	if rows, _, _ := svc.Audit(context.Background(), Caller{Operator: true}, 0, 10); len(rows) != 0 {
+		t.Fatalf("audit %+v for an inbox that was not created", rows)
+	}
+	// The conflict gave the key back, so the same request with the same key runs again
+	// instead of being answered as still in progress.
+	mail.createErr = nil
+	mail.created = "alice-id"
+	if id, err := svc.CreateInbox(context.Background(), Caller{Operator: true}, mailbackend.InboxSpec{Local: "Alice"}, "key-1"); err != nil || id != "alice-id" {
+		t.Fatalf("retry %q err %v", id, err)
+	}
+}
+
+func TestReservedAccountsAreNotInboxes(t *testing.T) {
+	ctx := context.Background()
+	operator := Caller{Operator: true}
+	mail := &fakeMail{created: "new-id", accounts: []mailbackend.Account{
+		{ID: "op-id", Local: "operator"},
+		{ID: "svc-id", Local: "service"},
+		{ID: "alice-id", Local: "alice"},
+		{ID: "svc-other", Local: "Service@example.com"},
+		{ID: "op-elsewhere", Local: "operator@other.example"},
+	}}
+	svc := New(mail)
+	svc.ReserveAccounts([]string{"operator", "service"}, []string{"op-id", "svc-id"})
+
+	got, _, err := svc.ListInboxes(ctx, operator, "example.com", mailbackend.Page{})
+	if err != nil || len(got) != 2 || got[0].ID != "alice-id" || got[1].ID != "op-elsewhere" {
+		t.Fatalf("list %+v err %v", got, err)
+	}
+	for _, local := range []string{"operator", " Service "} {
+		if _, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: local}, ""); !errors.Is(err, ErrConflict) {
+			t.Fatalf("create %q err %v", local, err)
+		}
+	}
+	if mail.creates != 0 {
+		t.Fatalf("backend asked to create a reserved account %d times", mail.creates)
+	}
+	// A refused reserved name holds no key: the same key then creates another address
+	// instead of being refused as reused for a different request.
+	if _, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: "operator"}, "key-r"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("reserved create with key err %v", err)
+	}
+	if id, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: "bob"}, "key-r"); err != nil || id != "new-id" {
+		t.Fatalf("create after refused key %q err %v", id, err)
+	}
+	mail.creates = 0
+	if err := svc.Grant(operator, "ada", "*", PermProvision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateInbox(ctx, Caller{Agent: "ada"}, mailbackend.InboxSpec{Local: "operator"}, ""); !errors.Is(err, ErrConflict) || mail.creates != 0 {
+		t.Fatalf("agent create err %v calls %d", err, mail.creates)
+	}
+	if _, err := svc.CreateInbox(ctx, Caller{Agent: "bob"}, mailbackend.InboxSpec{Local: "operator"}, ""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ungranted agent err %v, want the grant checked first", err)
+	}
+	mail.dir = false
+	for _, id := range []string{"op-id", "svc-id"} {
+		if err := svc.DeleteInbox(ctx, operator, id); !errors.Is(err, ErrConflict) || mail.dir {
+			t.Fatalf("delete %s err %v called %v", id, err, mail.dir)
+		}
+	}
+	if err := svc.DeleteInbox(ctx, operator, "alice-id"); err != nil || !mail.dir {
+		t.Fatalf("delete alice err %v called %v", err, mail.dir)
+	}
+}
+
+func TestGenerateReportsAddressesThatExist(t *testing.T) {
+	mail := &fakeMail{taken: map[string]bool{"u00001": true}}
+	svc := New(mail)
+	req := GenerateRequest{Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 3, Wait: true}
+	got, err := svc.Generate(context.Background(), Caller{Operator: true}, req, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Inboxes) != 2 || got.Inboxes[0].ID != "u00000" || got.Inboxes[1].ID != "u00002" {
+		t.Fatalf("inboxes %+v", got.Inboxes)
+	}
+	if len(got.Existing) != 1 || got.Existing[0] != "u00001@example.com" {
+		t.Fatalf("existing %v", got.Existing)
+	}
+
+	mail.taken = map[string]bool{"u00000": true, "u00001": true, "u00002": true}
+	if got, err := svc.Generate(context.Background(), Caller{Operator: true}, req, ""); !errors.Is(err, ErrConflict) || len(got.Inboxes) != 0 {
+		t.Fatalf("all taken %+v err %v", got, err)
+	}
+
+	mail.taken = map[string]bool{"u00001": true}
+	svc.SetSyncLimit(1)
+	req.Wait = false
+	started, err := svc.Generate(context.Background(), Caller{Operator: true}, req, "")
+	if err != nil || started.JobID == "" {
+		t.Fatalf("job %+v err %v", started, err)
+	}
+	var job Job
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		job, err = svc.Job(context.Background(), Caller{Operator: true}, started.JobID)
+		if err == nil && job.Status != "running" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if job.Status != "done" || job.Created != 2 || len(job.Existing) != 1 || job.Existing[0] != "u00001@example.com" {
+		t.Fatalf("job %+v", job)
+	}
+}
+
+func TestJobInboxesKeepExistingAddresses(t *testing.T) {
+	made := []Inbox{{ID: "a-id", Address: "a@example.com"}}
+	for _, existing := range [][]string{nil, {"b@example.com"}} {
+		raw, err := encodeJobInboxes(made, existing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var job Job
+		if err := decodeJobInboxes(raw, &job); err != nil {
+			t.Fatal(err)
+		}
+		if len(job.Inboxes) != 1 || job.Inboxes[0] != made[0] || len(job.Existing) != len(existing) {
+			t.Fatalf("%s decoded to %+v", raw, job)
+		}
+	}
+	var old Job
+	if err := decodeJobInboxes([]byte(`[{"id":"a-id","address":"a@example.com"}]`), &old); err != nil || len(old.Inboxes) != 1 || old.Existing != nil {
+		t.Fatalf("older row %+v err %v", old, err)
+	}
+}
+
 type fakeIdentities struct {
 	known     map[string]bool
 	err       error
@@ -578,6 +715,11 @@ type fakeMail struct {
 	release  chan struct{}
 	senders  map[string][]string
 	lookErr  error
+	// createErr is what CreateInbox returns. taken holds the local parts
+	// CreateInboxes reports as existing. accounts replaces the ListInboxes answer.
+	createErr error
+	taken     map[string]bool
+	accounts  []mailbackend.Account
 }
 
 // SenderAddresses returns lookErr, senders[account], or <account>@example.com when the test set none.
@@ -593,6 +735,9 @@ func (f *fakeMail) SenderAddresses(_ context.Context, account string) ([]string,
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
 	f.creates++
+	if f.createErr != nil {
+		return "", f.createErr
+	}
 	return f.created, nil
 }
 
@@ -610,7 +755,9 @@ func (f *fakeMail) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpe
 	f.batches = append(f.batches, len(specs))
 	ids := make([]string, len(specs))
 	for i, spec := range specs {
-		ids[i] = spec.Local
+		if !f.taken[spec.Local] {
+			ids[i] = spec.Local
+		}
 	}
 	return ids, nil
 }
@@ -647,6 +794,9 @@ func (f *fakeMail) Delete(_ context.Context, _, id string) error {
 
 func (f *fakeMail) ListInboxes(_ context.Context, page mailbackend.Page) ([]mailbackend.Account, string, error) {
 	f.dir = true
+	if f.accounts != nil {
+		return f.accounts, "", nil
+	}
 	return []mailbackend.Account{{ID: "alice-id", Local: "alice"}}, "", nil
 }
 

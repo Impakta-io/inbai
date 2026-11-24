@@ -41,6 +41,10 @@ var ErrQuota = errors.New("send quota exceeded")
 // ErrSuppressed is returned when the recipient is on the hard-bounce list.
 var ErrSuppressed = errors.New("recipient is suppressed")
 
+// ErrConflict is returned when an address is already taken, or when a delete
+// names an account that is not an inbox.
+var ErrConflict = errors.New("conflict")
+
 const (
 	// DefaultInboxDaily is the default daily send cap per inbox.
 	DefaultInboxDaily = 50
@@ -78,6 +82,8 @@ type Service struct {
 	storageQuota       int64
 	now                func() time.Time
 	syncLimit          int
+	reservedLocals     map[string]bool
+	reservedIDs        map[string]bool
 
 	mu        sync.Mutex
 	sent      map[string]int
@@ -123,6 +129,42 @@ func (s *Service) SetSendLimits(inboxDaily, domainDaily, workspaceDaily, recipie
 	s.domainDaily = domainDaily
 	s.workspaceDaily = workspaceDaily
 	s.recipientPerMinute = recipientPerMinute
+}
+
+// ReserveAccounts names mail accounts that are not inboxes, such as the
+// operator and service accounts inbai init creates. locals are their account
+// names and ids their account ids. ListInboxes leaves them out, CreateInbox
+// refuses a reserved local part, and DeleteInbox refuses a reserved id.
+// Empty values are ignored. Call it before the service handles requests.
+func (s *Service) ReserveAccounts(locals, ids []string) {
+	s.reservedLocals = map[string]bool{}
+	s.reservedIDs = map[string]bool{}
+	for _, local := range locals {
+		if local = strings.ToLower(strings.TrimSpace(local)); local != "" {
+			s.reservedLocals[local] = true
+		}
+	}
+	for _, id := range ids {
+		if id != "" {
+			s.reservedIDs[id] = true
+		}
+	}
+}
+
+// reserved reports whether the account is one ReserveAccounts named.
+// name may be a bare local part or an address in domain.
+func (s *Service) reserved(id, name, domain string) bool {
+	if s.reservedIDs[id] {
+		return true
+	}
+	name = strings.ToLower(name)
+	if local, at, ok := strings.Cut(name, "@"); ok {
+		if !strings.EqualFold(at, domain) {
+			return false
+		}
+		name = local
+	}
+	return s.reservedLocals[name]
 }
 
 // Identities creates and suspends agent credentials. The token still only names the caller.
@@ -336,6 +378,11 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 	if spec.QuotaBytes == 0 && s.storageQuota > 0 {
 		spec.QuotaBytes = s.storageQuota
 	}
+	// A reserved local part is refused before a key is reserved, like any other invalid input.
+	local := strings.ToLower(strings.TrimSpace(spec.Local))
+	if s.reservedLocals[local] {
+		return "", fmt.Errorf("%w: %s is reserved for an inbAI account and is not an inbox", ErrConflict, local)
+	}
 	hold, id, done, err := s.reserve(ctx, kindCreate, idempotencyKey(caller, spec.Local, idemKey), hash)
 	if err != nil {
 		return "", err
@@ -346,6 +393,9 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 	id, err = s.mail.CreateInbox(ctx, spec)
 	if err != nil {
 		s.release(ctx, hold)
+		if errors.Is(err, mailbackend.ErrExists) {
+			return "", fmt.Errorf("%w: an account named %s already exists", ErrConflict, local)
+		}
 		return "", err
 	}
 	if err := s.complete(ctx, hold, id); err != nil {
@@ -463,7 +513,9 @@ func (s *Service) Delete(ctx context.Context, caller Caller, accountID, messageI
 	return s.mail.Delete(ctx, accountID, messageID)
 }
 
-// ListInboxes returns every account. Only an operator may do that.
+// ListInboxes returns every inbox. Only an operator may do that.
+// Accounts named by ReserveAccounts are left out, so a page can hold fewer
+// inboxes than its limit and still have a next cursor.
 func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string, page mailbackend.Page) ([]Inbox, string, error) {
 	if !caller.Operator {
 		return nil, "", ErrForbidden
@@ -480,6 +532,9 @@ func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string,
 	}
 	out := make([]Inbox, 0, len(accounts))
 	for _, account := range accounts {
+		if s.reserved(account.ID, account.Local, domain) {
+			continue
+		}
 		address := account.Local
 		if domain != "" && !strings.Contains(account.Local, "@") {
 			address = account.Local + "@" + domain
@@ -494,12 +549,16 @@ func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string,
 // first would stop events for an inbox that still exists if the account delete failed.
 // A failed cursor delete is not returned: the account is gone, and a leftover cursor
 // only shows up as a cursor.sweep error naming this inbox. Other inboxes still sync.
+// An id that ReserveAccounts named is ErrConflict, and the backend is not called.
 func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) error {
 	if !caller.Operator {
 		return ErrForbidden
 	}
 	if id == "" {
 		return fmt.Errorf("%w: inbox id is required", ErrInvalid)
+	}
+	if s.reservedIDs[id] {
+		return fmt.Errorf("%w: %s is an inbAI account, not an inbox, and cannot be deleted", ErrConflict, id)
 	}
 	if err := s.mail.DeleteInbox(ctx, id); err != nil {
 		return err

@@ -173,6 +173,62 @@ func TestReadyNamesTheDependencyNotTheError(t *testing.T) {
 	assertLogged(t, logFor(t, &logs, "ready-1"))
 }
 
+// takenMail is a mail backend where the address "taken" already has an account.
+type takenMail struct {
+	*fakeMail
+}
+
+func (takenMail) CreateInbox(_ context.Context, spec mailbackend.InboxSpec) (string, error) {
+	if spec.Local == "taken" {
+		return "", fmt.Errorf("stalwart a: %w", mailbackend.ErrExists)
+	}
+	return "new-id", nil
+}
+
+func (takenMail) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	ids := make([]string, len(specs))
+	for i, spec := range specs {
+		if spec.Local != "t00001" {
+			ids[i] = spec.Local + "-id"
+		}
+	}
+	return ids, nil
+}
+
+func TestDuplicateAndReservedInboxesAreConflicts(t *testing.T) {
+	svc := service.New(takenMail{fakeMail: &fakeMail{}})
+	svc.ReserveAccounts([]string{"operator", "service"}, []string{"op-id", "svc-id"})
+	handler := (&Server{Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role"}).Handler()
+	for _, tc := range []struct {
+		method, path, body, detail string
+	}{
+		{http.MethodPost, "/v1/inboxes", `{"localPart":"taken"}`, "conflict: an account named taken already exists"},
+		{http.MethodPost, "/v1/inboxes", `{"localPart":"Operator"}`, "conflict: operator is reserved for an inbAI account and is not an inbox"},
+		{http.MethodDelete, "/v1/inboxes/svc-id", ``, "conflict: svc-id is an inbAI account, not an inbox, and cannot be deleted"},
+	} {
+		rec := serveOnce(t, handler, tc.method, tc.path, tc.body, "conflict")
+		var problem struct {
+			Title  string `json:"title"`
+			Detail string `json:"detail"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil || rec.Code != http.StatusConflict || problem.Title != "Conflict" || problem.Detail != tc.detail {
+			t.Errorf("%s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := serveOnce(t, handler, http.MethodPost, "/v1/inboxes/generate", `{"prefix":"t","count":3}`, "generate")
+	var made struct {
+		Inboxes  []service.Inbox `json:"inboxes"`
+		Existing []string        `json:"existing"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &made); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("generate %d %s", rec.Code, rec.Body.String())
+	}
+	if len(made.Inboxes) != 2 || made.Inboxes[1].Address != "t00002@example.com" || len(made.Existing) != 1 || made.Existing[0] != "t00001@example.com" {
+		t.Fatalf("generate %s", rec.Body.String())
+	}
+}
+
 func TestTokenRejectsAnOversizedBody(t *testing.T) {
 	handler := (&Server{Directory: auth.NewDirectory(bytes.Repeat([]byte("k"), 32), "http://127.0.0.1:8787")}).Handler()
 	post := func(body string) *httptest.ResponseRecorder {

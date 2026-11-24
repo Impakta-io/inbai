@@ -94,6 +94,44 @@ func TestDeliverUploadsAttachments(t *testing.T) {
 	}
 }
 
+func TestCreateInboxesSkipsAddressesThatExist(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeMethods(w, []any{[]any{"x:Account/set", map[string]any{
+			"created": map[string]any{"u0": map[string]any{"id": "new-0"}, "u2": map[string]any{"id": "new-2"}},
+			"notCreated": map[string]any{"u1": map[string]any{
+				"type": "primaryKeyViolation", "properties": []string{"email"}, "objectId": map[string]any{"object": "Account", "id": "old"},
+			}},
+		}, "b"}})
+	}))
+	defer srv.Close()
+	ids, err := CreateInboxes(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, []InboxInput{
+		{DomainID: "dom", RoleID: "role", Local: "u00000"},
+		{DomainID: "dom", RoleID: "role", Local: "u00001"},
+		{DomainID: "dom", RoleID: "role", Local: "u00002"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "new-0,,new-2" {
+		t.Fatalf("ids %q, want the existing account left out", ids)
+	}
+}
+
+func TestCreateInboxesFailsOnAnotherRefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeMethods(w, []any{[]any{"x:Account/set", map[string]any{
+			"notCreated": map[string]any{"u0": map[string]any{"type": "overQuota", "objectId": map[string]any{"id": "x"}}},
+		}, "b"}})
+	}))
+	defer srv.Close()
+	ids, err := CreateInboxes(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, []InboxInput{
+		{DomainID: "dom", RoleID: "role", Local: "u00000"},
+	})
+	if err == nil || ids != nil {
+		t.Fatalf("ids %v err %v", ids, err)
+	}
+}
+
 func ints(values []int) []string {
 	out := make([]string, len(values))
 	for i, value := range values {

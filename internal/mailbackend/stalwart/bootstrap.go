@@ -21,6 +21,11 @@ const (
 	serviceRoleDescription  = "inbAI service"
 	operatorRoleDescription = "inbAI operator"
 	recoveryUser            = "admin"
+
+	// OperatorAccountName and ServiceAccountName are the accounts Bootstrap
+	// creates in the domain. They are not inboxes.
+	OperatorAccountName = "operator"
+	ServiceAccountName  = "service"
 )
 
 // Input is the operator's choice for the first boot.
@@ -63,6 +68,9 @@ var inboxPermissions = []string{
 	"jmapEmailQuery",
 	"jmapEmailQueryChanges",
 	"jmapEmailCreate",
+	// jmapEmailDestroy deletes a message: a delete call, the retention sweep,
+	// and the stored copy of a send that Stalwart refused.
+	"jmapEmailDestroy",
 	"jmapEmailSubmissionGet",
 	"jmapEmailSubmissionChanges",
 	"jmapEmailSubmissionCreate",
@@ -75,6 +83,8 @@ var servicePermissions = append(append([]string{}, inboxPermissions...),
 	"sysAccountGet",
 	"sysAccountCreate",
 	"sysAccountUpdate",
+	// sysAccountDestroy deletes an inbox.
+	"sysAccountDestroy",
 	"sysAccountQuery",
 	"sysApiKeyCreate",
 	"sysDomainGet",
@@ -252,6 +262,10 @@ func ensureDomain(ctx context.Context, client *Client, name string) (string, err
 	return createdID(raw, "d1")
 }
 
+// ensureRole returns the id of the role with this description and creates it
+// when there is none. An existing role gets every permission in perms it lacks,
+// so rerunning init gives an older install the permissions this version needs.
+// Permissions an operator added by hand stay, and disabledPermissions is not changed.
 func ensureRole(ctx context.Context, client *Client, createKey, description string, perms map[string]bool) (string, error) {
 	raw, err := client.invoke(ctx, "q", "x:Role/query", map[string]any{})
 	if err != nil {
@@ -270,8 +284,9 @@ func ensureRole(ctx context.Context, client *Client, createKey, description stri
 		}
 		var list struct {
 			List []struct {
-				ID          string `json:"id"`
-				Description string `json:"description"`
+				ID                 string          `json:"id"`
+				Description        string          `json:"description"`
+				EnabledPermissions map[string]bool `json:"enabledPermissions"`
 			} `json:"list"`
 		}
 		if err := json.Unmarshal(got, &list); err != nil {
@@ -279,6 +294,9 @@ func ensureRole(ctx context.Context, client *Client, createKey, description stri
 		}
 		for _, role := range list.List {
 			if role.Description == description {
+				if err := grantMissing(ctx, client, role.ID, role.EnabledPermissions, perms); err != nil {
+					return "", err
+				}
 				return role.ID, nil
 			}
 		}
@@ -299,11 +317,41 @@ func ensureRole(ctx context.Context, client *Client, createKey, description stri
 	return createdID(raw, createKey)
 }
 
+// grantMissing sets the role's enabledPermissions to have plus each permission
+// in want that have lacks. It sends nothing when none is missing.
+func grantMissing(ctx context.Context, client *Client, roleID string, have, want map[string]bool) error {
+	merged := make(map[string]bool, len(have)+len(want))
+	for name, on := range have {
+		if on {
+			merged[name] = true
+		}
+	}
+	missing := false
+	for name := range want {
+		if !merged[name] {
+			merged[name] = true
+			missing = true
+		}
+	}
+	if !missing {
+		return nil
+	}
+	raw, err := client.invoke(ctx, "p", "x:Role/set", map[string]any{
+		"update": map[string]any{
+			roleID: map[string]any{"enabledPermissions": merged},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return updatedID(raw, roleID)
+}
+
 func ensureAccounts(ctx context.Context, client *Client, domainID, operatorRole, serviceRole, operatorPassword, servicePassword string, resetOperatorPassword bool) (string, string, error) {
 	raw, err := client.invoke(ctx, "a", "x:Account/set", map[string]any{
 		"create": map[string]any{
-			"operator": account("operator", domainID, operatorRole, operatorPassword),
-			"svc":      account("service", domainID, serviceRole, servicePassword),
+			"operator": account(OperatorAccountName, domainID, operatorRole, operatorPassword),
+			"svc":      account(ServiceAccountName, domainID, serviceRole, servicePassword),
 		},
 	})
 	if err != nil {

@@ -554,7 +554,11 @@ func (s *Server) generateInboxes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]string{"jobId": result.JobID, "status": "running"})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"inboxes": result.Inboxes})
+	out := map[string]any{"inboxes": result.Inboxes}
+	if len(result.Existing) > 0 {
+		out["existing"] = result.Existing
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
@@ -836,6 +840,7 @@ var serviceProblems = []struct {
 	{service.ErrNotFound, http.StatusNotFound, "Not found"},
 	{service.ErrUnavailable, http.StatusServiceUnavailable, "Event store unavailable"},
 	{service.ErrSuppressed, http.StatusConflict, "Suppressed"},
+	{service.ErrConflict, http.StatusConflict, "Conflict"},
 	{service.ErrUnsupported, http.StatusNotImplemented, "Not implemented"},
 	{service.ErrInProgress, http.StatusConflict, "Request in progress"},
 	{service.ErrKeyReused, http.StatusUnprocessableEntity, "Idempotency-Key reused"},

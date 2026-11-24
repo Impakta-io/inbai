@@ -4,6 +4,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -41,7 +42,9 @@ type Job struct {
 	Total   int     `json:"total"`
 	Created int     `json:"created"`
 	Inboxes []Inbox `json:"inboxes,omitempty"`
-	Error   string  `json:"error,omitempty"`
+	// Existing lists the addresses that were already taken and not created.
+	Existing []string `json:"existing,omitempty"`
+	Error    string   `json:"error,omitempty"`
 
 	// agent started the job. It is empty when an operator did.
 	agent string
@@ -61,9 +64,11 @@ type GenerateRequest struct {
 }
 
 // GenerateResult is either the finished addresses or a job id.
+// Existing lists the addresses that were already taken and not created.
 type GenerateResult struct {
-	Inboxes []Inbox
-	JobID   string
+	Inboxes  []Inbox
+	Existing []string
+	JobID    string
 }
 
 // BulkPayload is the work stored in job_queue for an asynchronous Generate call.
@@ -133,11 +138,11 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 		}
 	}
 	if req.Wait || req.Count <= s.SyncLimit() {
-		made, err := s.createAll(ctx, specs, req.Domain, req.Progress)
+		made, existing, err := s.createAll(ctx, specs, req.Domain, req.Progress)
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		result := GenerateResult{Inboxes: made}
+		result := GenerateResult{Inboxes: made, Existing: existing}
 		if key != "" {
 			if err := s.rememberGenerate(ctx, key, result); err != nil {
 				return GenerateResult{}, err
@@ -200,7 +205,7 @@ func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
 			QuotaBytes: quotaBytes,
 		}
 	}
-	made, err := s.createAll(ctx, specs, payload.Domain, nil)
+	made, existing, err := s.createAll(ctx, specs, payload.Domain, nil)
 	if s.db == nil {
 		return err
 	}
@@ -211,7 +216,7 @@ func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
 		_ = s.db.UpdateJob(ctx, row)
 		return err
 	}
-	raw, encErr := json.Marshal(made)
+	raw, encErr := encodeJobInboxes(made, existing)
 	if encErr != nil {
 		row.Status = "failed"
 		row.Error = encErr.Error()
@@ -260,7 +265,7 @@ func (s *Service) loadJob(ctx context.Context, id string) (Job, error) {
 		}
 		job := Job{ID: row.ID, Status: row.Status, Total: row.Total, Created: row.Created, Error: row.Error, agent: row.Agent}
 		if len(row.Inboxes) > 0 && string(row.Inboxes) != "[]" {
-			if err := json.Unmarshal(row.Inboxes, &job.Inboxes); err != nil {
+			if err := decodeJobInboxes(row.Inboxes, &job); err != nil {
 				return Job{}, err
 			}
 		}
@@ -289,14 +294,14 @@ func (s *Service) putJob(ctx context.Context, job *Job) error {
 }
 
 func (s *Service) finishJob(job *Job, specs []mailbackend.InboxSpec, domain string) {
-	made, err := s.createAll(context.Background(), specs, domain, nil)
+	made, existing, err := s.createAll(context.Background(), specs, domain, nil)
 	if s.db != nil {
 		row := store.JobRow{ID: job.ID, Total: job.Total, Inboxes: []byte("[]")}
 		if err != nil {
 			row.Status = "failed"
 			row.Error = err.Error()
 		} else {
-			raw, encErr := json.Marshal(made)
+			raw, encErr := encodeJobInboxes(made, existing)
 			if encErr != nil {
 				row.Status = "failed"
 				row.Error = encErr.Error()
@@ -317,15 +322,20 @@ func (s *Service) finishJob(job *Job, specs []mailbackend.InboxSpec, domain stri
 		return
 	}
 	job.Inboxes = made
+	job.Existing = existing
 	job.Created = len(made)
 	job.Status = "done"
 }
 
-func (s *Service) createAll(ctx context.Context, specs []mailbackend.InboxSpec, domain string, progress func(done, total int)) ([]Inbox, error) {
+// createAll creates the addresses and returns the new inboxes and the
+// addresses that were already taken. Those are skipped, not returned as
+// inboxes. When every address was taken, nothing was created and it is ErrConflict.
+func (s *Service) createAll(ctx context.Context, specs []mailbackend.InboxSpec, domain string, progress func(done, total int)) ([]Inbox, []string, error) {
 	made := make([]Inbox, 0, len(specs))
+	var existing []string
 	for start := 0; start < len(specs); start += generateBatch {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		end := start + generateBatch
 		if end > len(specs) {
@@ -333,23 +343,56 @@ func (s *Service) createAll(ctx context.Context, specs []mailbackend.InboxSpec, 
 		}
 		ids, err := s.mail.CreateInboxes(ctx, specs[start:end])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(ids) != end-start {
-			return nil, fmt.Errorf("created %d addresses, want %d", len(ids), end-start)
+			return nil, nil, fmt.Errorf("created %d addresses, want %d", len(ids), end-start)
 		}
 		for i, id := range ids {
 			address := specs[start+i].Local + "@" + domain
+			if id == "" {
+				existing = append(existing, address)
+				continue
+			}
 			made = append(made, Inbox{ID: id, Address: address})
 			if err := s.BindInbox(ctx, id, address); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if progress != nil {
-			progress(len(made), len(specs))
+			progress(len(made)+len(existing), len(specs))
 		}
 	}
-	return made, nil
+	if len(made) == 0 && len(existing) > 0 {
+		return nil, nil, fmt.Errorf("%w: all %d addresses already exist, none was created", ErrConflict, len(existing))
+	}
+	return made, existing, nil
+}
+
+// jobInboxes is a job row's inboxes value when some addresses already
+// existed. Without any, the value is the bare inbox array, as in older rows.
+type jobInboxes struct {
+	Inboxes  []Inbox  `json:"inboxes"`
+	Existing []string `json:"existing"`
+}
+
+func encodeJobInboxes(made []Inbox, existing []string) ([]byte, error) {
+	if len(existing) == 0 {
+		return json.Marshal(made)
+	}
+	return json.Marshal(jobInboxes{Inboxes: made, Existing: existing})
+}
+
+func decodeJobInboxes(raw []byte, job *Job) error {
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '{' {
+		var both jobInboxes
+		if err := json.Unmarshal(trimmed, &both); err != nil {
+			return err
+		}
+		job.Inboxes, job.Existing = both.Inboxes, both.Existing
+		return nil
+	}
+	return json.Unmarshal(raw, &job.Inboxes)
 }
 
 func (s *Service) savedGenerate(ctx context.Context, key string) (GenerateResult, bool, error) {
@@ -391,6 +434,9 @@ func copyJob(job *Job) Job {
 	out := *job
 	if job.Inboxes != nil {
 		out.Inboxes = append([]Inbox(nil), job.Inboxes...)
+	}
+	if job.Existing != nil {
+		out.Existing = append([]string(nil), job.Existing...)
 	}
 	return out
 }
