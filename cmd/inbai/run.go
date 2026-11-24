@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,12 +73,13 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		writef(stderr, "usage: inbai init --domain name [--public] [--no-docker] [--url url] [--hostname name] [--stalwart-url url] [--stack-dir dir] [--config path] [--json]\n")
+		writef(stderr, "usage: inbai init --domain name [--public] [--no-docker] [--url url] [--api-url url] [--hostname name] [--stalwart-url url] [--stack-dir dir] [--config path] [--json]\n")
 		fs.PrintDefaults()
 	}
 	url := fs.String("url", "http://127.0.0.1:8080", "Stalwart recovery API, reachable on the host (skips local Docker setup)")
 	domain := fs.String("domain", "", "DNS domain to create")
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")
+	apiURLFlag := fs.String("api-url", "", "inbaid API URL to store for later commands (default: keep the stored one, else http://127.0.0.1:8787)")
 	stalwartURL := fs.String("stalwart-url", "", "Stalwart URL to store for later commands")
 	configPath := fs.String("config", "", "config file to write (default is the user config directory)")
 	stackDir := fs.String("stack-dir", "", "directory for local Docker Compose files (default <config-dir>/stack)")
@@ -99,6 +101,14 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	if *domain == "" {
 		writef(stderr, "init needs --domain\n")
 		return 2
+	}
+	apiURL := strings.TrimSpace(*apiURLFlag)
+	if apiURL != "" {
+		var ok bool
+		if apiURL, ok = checkAPIURL(apiURL); !ok {
+			writef(stderr, "init: --api-url must be an http or https URL\n")
+			return 2
+		}
 	}
 	visited := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
@@ -274,6 +284,9 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	if existing.APIURL != "" {
 		cfg.APIURL = existing.APIURL
 	}
+	if apiURL != "" {
+		cfg.APIURL = apiURL
+	}
 	if err := writeStoredConfig(path, storedConfig{File: cfg, OperatorPassword: operatorPassword}); err != nil {
 		writef(stderr, "write config: %s\n", err)
 		if result.APIKey != "" {
@@ -288,6 +301,7 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 			"operator":       "operator@" + cfg.Domain,
 			"serviceAccount": "service@" + cfg.Domain,
 			"retentionDays":  cfg.RetentionDays,
+			"apiUrl":         cfg.APIURL,
 			"config":         path,
 		}
 		if usedDockerMode {
@@ -308,6 +322,7 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	} else {
 		writef(stdout, "Message retention is %d days.\n", cfg.RetentionDays)
 	}
+	writef(stdout, "API URL is %s.\n", cfg.APIURL)
 	writef(stdout, "Wrote %s\n", path)
 	if usedDockerMode {
 		writef(stdout, "The operator password is stored in %s.\n", path)
@@ -318,6 +333,16 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	}
 	writef(stdout, "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail.\n")
 	return 0
+}
+
+// checkAPIURL reports whether raw is an http or https URL with a host, and
+// returns it without a trailing slash.
+func checkAPIURL(raw string) (string, bool) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", false
+	}
+	return strings.TrimRight(raw, "/"), true
 }
 
 func configFilePath(explicit string) (string, error) {

@@ -32,6 +32,13 @@ services:
     volumes:
       - ./entrypoint.sh:/entrypoint.sh:ro
       - stalwart:/var/lib/stalwart
+    # The entrypoint writes /etc/stalwart/config.json on every start. The image
+    # declares a volume there, so without this Docker keeps an anonymous volume
+    # per container that "down -v" does not remove after a recreate. The image
+    # runs as the stalwart user (uid and gid 2000), and a tmpfs is owned by root
+    # unless told otherwise, so the mount names that owner.
+    tmpfs:
+      - /etc/stalwart:uid=2000,gid=2000
   inbaid:
     build:
       context: ../..
