@@ -302,10 +302,10 @@ inbai inbox list --limit 50 --cursor <token>
 Delete an inbox.
 
 ```text
-inbai inbox delete <address>
+inbai inbox delete <address|local-part>
 ```
 
-The address must be in the config file. The command deletes that account and removes the address from the config file.
+The address, or a bare local part for the config domain, must be in the config file. The command deletes that account and removes the address from the config file.
 
 Flags:
 
@@ -439,7 +439,7 @@ inbai inbox allowlist clear <inbox-id>
 
 Get or set an inbox's storage quota.
 
-&lt;inbox-id&gt; may also be an address in the config file. New inboxes get the server default, 100 MiB unless inbaid sets INBAI_STORAGE_QUOTA_BYTES.
+&lt;inbox-id&gt; may also be an address in the config file, or a bare local part for the config domain. New inboxes get the server default, 100 MiB unless inbaid sets INBAI_STORAGE_QUOTA_BYTES.
 
 Run `inbai help inbox quota <command>` for one of its subcommands.
 
@@ -497,7 +497,7 @@ inbai inbox quota set alice@example.com 52428800
 
 Send and read mail as an inbox in the config file.
 
-An &lt;address&gt; must be in the inboxes map of the config file, which inbox create and inbox generate fill.
+An &lt;address&gt; must be in the inboxes map of the config file, which inbox create and inbox generate fill. A bare local part such as alice stands for alice@ and the config domain, the way inbox create reads it.
 
 Run `inbai help message <command>` for one of its subcommands.
 
@@ -506,7 +506,7 @@ Run `inbai help message <command>` for one of its subcommands.
 Send a plain-text message.
 
 ```text
-inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]
+inbai message send --from <address|local-part> --to <address> --subject <text> [--body <text>] [--attach <file>]
 ```
 
 Flags:
@@ -539,7 +539,7 @@ inbai message send --from alice@example.com --to bob@example.net --subject hello
 List or search an inbox's messages.
 
 ```text
-inbai message list [--query text] <address>
+inbai message list [--query text] <address|local-part>
 ```
 
 Each line is a subject and a preview. A line that starts with next is the cursor for the next page.
@@ -573,7 +573,7 @@ inbai message list --query invoice --limit 20 alice@example.com
 Print one message and its attachments.
 
 ```text
-inbai message get <address> <message-id>
+inbai message get <address|local-part> <message-id>
 ```
 
 Each attachment line is a blob id and a file name. Pass the blob id to message attachment.
@@ -601,7 +601,7 @@ inbai message get --json alice@example.com <message-id>
 Reply to a message.
 
 ```text
-inbai message reply --to <address> [--body <text>] <address> <message-id>
+inbai message reply --to <address> [--body <text>] <address|local-part> <message-id>
 ```
 
 Flags:
@@ -630,7 +630,7 @@ inbai message reply --to bob@example.net --body 'Thanks' alice@example.com <mess
 Delete a message.
 
 ```text
-inbai message delete <address> <message-id>
+inbai message delete <address|local-part> <message-id>
 ```
 
 Flags:
@@ -655,7 +655,7 @@ inbai message delete alice@example.com <message-id>
 Save an attachment to a file.
 
 ```text
-inbai message attachment --output <file> <address> <message-id> <blob-id>
+inbai message attachment --output <file> <address|local-part> <message-id> <blob-id>
 ```
 
 Flags:

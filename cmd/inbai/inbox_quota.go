@@ -29,7 +29,7 @@ func inboxQuotaGet(args []string, stdout, stderr io.Writer, getenv func(string) 
 		return code
 	}
 	inbox := fs.Arg(0)
-	if id, ok := cfg.Inboxes[inbox]; ok {
+	if _, id, ok := resolveInbox(cfg, inbox); ok {
 		inbox = id
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -65,7 +65,7 @@ func inboxQuotaSet(args []string, stdout, stderr io.Writer, getenv func(string) 
 		return code
 	}
 	inbox := fs.Arg(0)
-	if id, ok := cfg.Inboxes[inbox]; ok {
+	if _, id, ok := resolveInbox(cfg, inbox); ok {
 		inbox = id
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

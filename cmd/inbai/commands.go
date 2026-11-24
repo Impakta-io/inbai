@@ -129,8 +129,8 @@ var commands = []cli.Command{
 	{
 		Name:        "inbox delete",
 		Summary:     "Delete an inbox",
-		Usage:       []string{"inbai inbox delete <address>"},
-		Description: "The address must be in the config file. The command deletes that account and removes the address from the config file.",
+		Usage:       []string{"inbai inbox delete <address|local-part>"},
+		Description: "The address, or a bare local part for the config domain, must be in the config file. The command deletes that account and removes the address from the config file.",
 		Examples:    []string{"inbai inbox delete alice@example.com"},
 		Positional:  true,
 		Run:         inboxDelete,
@@ -175,7 +175,7 @@ var commands = []cli.Command{
 	{
 		Name:        "inbox quota",
 		Summary:     "Get or set an inbox's storage quota",
-		Description: "<inbox-id> may also be an address in the config file. New inboxes get the server default, 100 MiB unless inbaid sets INBAI_STORAGE_QUOTA_BYTES.",
+		Description: "<inbox-id> may also be an address in the config file, or a bare local part for the config domain. New inboxes get the server default, 100 MiB unless inbaid sets INBAI_STORAGE_QUOTA_BYTES.",
 	},
 	{
 		Name:       "inbox quota get",
@@ -196,19 +196,19 @@ var commands = []cli.Command{
 	{
 		Name:        "message",
 		Summary:     "Send and read mail as an inbox in the config file",
-		Description: "An <address> must be in the inboxes map of the config file, which inbox create and inbox generate fill.",
+		Description: "An <address> must be in the inboxes map of the config file, which inbox create and inbox generate fill. A bare local part such as alice stands for alice@ and the config domain, the way inbox create reads it.",
 	},
 	{
 		Name:     "message send",
 		Summary:  "Send a plain-text message",
-		Usage:    []string{"inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]"},
+		Usage:    []string{"inbai message send --from <address|local-part> --to <address> --subject <text> [--body <text>] [--attach <file>]"},
 		Examples: []string{"inbai message send --from alice@example.com --to bob@example.net --subject hello --body 'Hi Bob'"},
 		Run:      messageSend,
 	},
 	{
 		Name:        "message list",
 		Summary:     "List or search an inbox's messages",
-		Usage:       []string{"inbai message list [--query text] <address>"},
+		Usage:       []string{"inbai message list [--query text] <address|local-part>"},
 		Description: "Each line is a subject and a preview. A line that starts with next is the cursor for the next page.",
 		Examples:    []string{"inbai message list alice@example.com", "inbai message list --query invoice --limit 20 alice@example.com"},
 		Positional:  true,
@@ -217,7 +217,7 @@ var commands = []cli.Command{
 	{
 		Name:        "message get",
 		Summary:     "Print one message and its attachments",
-		Usage:       []string{"inbai message get <address> <message-id>"},
+		Usage:       []string{"inbai message get <address|local-part> <message-id>"},
 		Description: "Each attachment line is a blob id and a file name. Pass the blob id to message attachment.",
 		Examples:    []string{"inbai message get alice@example.com <message-id>", "inbai message get --json alice@example.com <message-id>"},
 		Positional:  true,
@@ -226,7 +226,7 @@ var commands = []cli.Command{
 	{
 		Name:       "message reply",
 		Summary:    "Reply to a message",
-		Usage:      []string{"inbai message reply --to <address> [--body <text>] <address> <message-id>"},
+		Usage:      []string{"inbai message reply --to <address> [--body <text>] <address|local-part> <message-id>"},
 		Examples:   []string{"inbai message reply --to bob@example.net --body 'Thanks' alice@example.com <message-id>"},
 		Positional: true,
 		Run:        messageReply,
@@ -234,7 +234,7 @@ var commands = []cli.Command{
 	{
 		Name:       "message delete",
 		Summary:    "Delete a message",
-		Usage:      []string{"inbai message delete <address> <message-id>"},
+		Usage:      []string{"inbai message delete <address|local-part> <message-id>"},
 		Examples:   []string{"inbai message delete alice@example.com <message-id>"},
 		Positional: true,
 		Run:        messageDelete,
@@ -242,7 +242,7 @@ var commands = []cli.Command{
 	{
 		Name:       "message attachment",
 		Summary:    "Save an attachment to a file",
-		Usage:      []string{"inbai message attachment --output <file> <address> <message-id> <blob-id>"},
+		Usage:      []string{"inbai message attachment --output <file> <address|local-part> <message-id> <blob-id>"},
 		Examples:   []string{"inbai message attachment --output note.txt alice@example.com <message-id> <blob-id>"},
 		Positional: true,
 		Run:        messageAttachment,

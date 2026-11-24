@@ -223,7 +223,7 @@ func TestMessageReplyTakesFlagsBeforeArguments(t *testing.T) {
 	if code := run([]string{"message", "reply", "--config", path, "alice@example.com", "m"}, &stdout, &stderr, env); code != 2 {
 		t.Fatalf("reply without --to exit %d, want 2", code)
 	}
-	want := "usage: inbai message reply --to <address> [--body <text>] <address> <message-id>"
+	want := "usage: inbai message reply --to <address> [--body <text>] <address|local-part> <message-id>"
 	if !strings.Contains(stderr.String(), want) {
 		t.Fatalf("usage stderr %q, want %q", stderr.String(), want)
 	}
@@ -241,4 +241,85 @@ func writeOperatorConfig(t *testing.T, apiURL string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func shortNameServer(t *testing.T, paths *[]string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*paths = append(*paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/inboxes/alice-id/messages" {
+			_, _ = w.Write([]byte(`{"messages":[{"id":"m","subject":"hello","preview":"body"}]}`))
+			return
+		}
+		http.Error(w, "unexpected", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func writeShortNameConfig(t *testing.T, apiURL, domain string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw, err := json.Marshal(map[string]any{"apiUrl": apiURL, "domain": domain, "inboxes": map[string]string{"alice@example.com": "alice-id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func shortNameEnv(key string) string {
+	if key == "INBAI_OPERATOR_TOKEN" {
+		return "operator-token"
+	}
+	return ""
+}
+
+func TestMessageListAcceptsShortAndFullAddress(t *testing.T) {
+	for _, arg := range []string{"alice", "Alice", "alice@example.com"} {
+		var paths []string
+		srv := shortNameServer(t, &paths)
+		path := writeShortNameConfig(t, srv.URL, "example.com")
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"message", "list", "--config", path, arg}, &stdout, &stderr, shortNameEnv); code != 0 {
+			t.Fatalf("%s: exit %d stderr %s", arg, code, stderr.String())
+		}
+		if len(paths) != 1 || paths[0] != "GET /v1/inboxes/alice-id/messages" {
+			t.Fatalf("%s: paths %v", arg, paths)
+		}
+	}
+}
+
+func TestMessageListShortNameNotInConfig(t *testing.T) {
+	var paths []string
+	srv := shortNameServer(t, &paths)
+	path := writeShortNameConfig(t, srv.URL, "example.com")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"message", "list", "--config", path, "bob"}, &stdout, &stderr, shortNameEnv); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	want := "message list: bob@example.com is not in the config. Create it with inbai inbox create.\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+}
+
+func TestMessageListShortNameWithoutDomainKeepsError(t *testing.T) {
+	var paths []string
+	srv := shortNameServer(t, &paths)
+	path := writeShortNameConfig(t, srv.URL, "")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"message", "list", "--config", path, "alice"}, &stdout, &stderr, shortNameEnv); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	want := "message list: alice is not in the config. Create it with inbai inbox create.\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+	if len(paths) != 0 {
+		t.Fatalf("paths %v", paths)
+	}
 }

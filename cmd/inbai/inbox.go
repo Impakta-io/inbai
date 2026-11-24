@@ -108,15 +108,14 @@ func inboxDelete(args []string, stdout, stderr io.Writer, getenv func(string) st
 		return 2
 	}
 	if fs.NArg() != 1 {
-		writef(stderr, "usage: inbai inbox delete <address>\n")
+		writef(stderr, "usage: inbai inbox delete <address|local-part>\n")
 		return 2
 	}
-	address := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 	cfg, path, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	id, ok := cfg.Inboxes[address]
+	address, id, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
 		writef(stderr, "inbox delete: %s is not in the config.\n", address)
 		return 1
@@ -148,16 +147,16 @@ func messageList(args []string, stdout, stderr io.Writer, getenv func(string) st
 		return 2
 	}
 	if fs.NArg() != 1 {
-		writef(stderr, "usage: inbai message list [--query text] <address>\n")
+		writef(stderr, "usage: inbai message list [--query text] <address|local-part>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	address, accountID, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
-		writef(stderr, "message list: %s is not in the config. Create it with inbai inbox create.\n", fs.Arg(0))
+		writef(stderr, "message list: %s is not in the config. Create it with inbai inbox create.\n", address)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -202,16 +201,16 @@ func messageSend(args []string, stdout, stderr io.Writer, getenv func(string) st
 		return 2
 	}
 	if *from == "" || *to == "" || *subject == "" {
-		writef(stderr, "usage: inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]\n")
+		writef(stderr, "usage: inbai message send --from <address|local-part> --to <address> --subject <text> [--body <text>] [--attach <file>]\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[*from]
+	fromAddress, accountID, ok := resolveInbox(cfg, *from)
 	if !ok {
-		writef(stderr, "message send: %s is not in the config. Create it with inbai inbox create.\n", *from)
+		writef(stderr, "message send: %s is not in the config. Create it with inbai inbox create.\n", fromAddress)
 		return 1
 	}
 	files, code := readAttach(*attach, stderr)
@@ -220,7 +219,7 @@ func messageSend(args []string, stdout, stderr io.Writer, getenv func(string) st
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	err := client.send(ctx, accountID, apiSend{From: *from, To: *to, Subject: *subject, Text: *body, Attachments: files})
+	err := client.send(ctx, accountID, apiSend{From: fromAddress, To: *to, Subject: *subject, Text: *body, Attachments: files})
 	if err != nil {
 		writef(stderr, "message send: %s\n", err)
 		return 1
@@ -238,16 +237,16 @@ func messageGet(args []string, stdout, stderr io.Writer, getenv func(string) str
 		return 2
 	}
 	if fs.NArg() != 2 {
-		writef(stderr, "usage: inbai message get <address> <message-id>\n")
+		writef(stderr, "usage: inbai message get <address|local-part> <message-id>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	address, accountID, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
-		writef(stderr, "message get: %s is not in the config. Create it with inbai inbox create.\n", fs.Arg(0))
+		writef(stderr, "message get: %s is not in the config. Create it with inbai inbox create.\n", address)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -284,16 +283,16 @@ func messageAttachment(args []string, stdout, stderr io.Writer, getenv func(stri
 		return 2
 	}
 	if fs.NArg() != 3 || *output == "" {
-		writef(stderr, "usage: inbai message attachment --output <file> <address> <message-id> <blob-id>\n")
+		writef(stderr, "usage: inbai message attachment --output <file> <address|local-part> <message-id> <blob-id>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	address, accountID, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
-		writef(stderr, "message attachment: %s is not in the config.\n", fs.Arg(0))
+		writef(stderr, "message attachment: %s is not in the config.\n", address)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -322,21 +321,21 @@ func messageReply(args []string, stdout, stderr io.Writer, getenv func(string) s
 		return 2
 	}
 	if fs.NArg() != 2 || *to == "" {
-		writef(stderr, "usage: inbai message reply --to <address> [--body <text>] <address> <message-id>\n")
+		writef(stderr, "usage: inbai message reply --to <address> [--body <text>] <address|local-part> <message-id>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	address, accountID, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
-		writef(stderr, "message reply: %s is not in the config. Create it with inbai inbox create.\n", fs.Arg(0))
+		writef(stderr, "message reply: %s is not in the config. Create it with inbai inbox create.\n", address)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	err := client.reply(ctx, accountID, fs.Arg(1), apiSend{From: fs.Arg(0), To: *to, Text: *body})
+	err := client.reply(ctx, accountID, fs.Arg(1), apiSend{From: address, To: *to, Text: *body})
 	if err != nil {
 		writef(stderr, "message reply: %s\n", err)
 		return 1
@@ -354,16 +353,16 @@ func messageDelete(args []string, stdout, stderr io.Writer, getenv func(string) 
 		return 2
 	}
 	if fs.NArg() != 2 {
-		writef(stderr, "usage: inbai message delete <address> <message-id>\n")
+		writef(stderr, "usage: inbai message delete <address|local-part> <message-id>\n")
 		return 2
 	}
 	cfg, _, client, code := openAPI(configPath, stderr, getenv)
 	if code != 0 {
 		return code
 	}
-	accountID, ok := cfg.Inboxes[fs.Arg(0)]
+	address, accountID, ok := resolveInbox(cfg, fs.Arg(0))
 	if !ok {
-		writef(stderr, "message delete: %s is not in the config. Create it with inbai inbox create.\n", fs.Arg(0))
+		writef(stderr, "message delete: %s is not in the config. Create it with inbai inbox create.\n", address)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -461,4 +460,18 @@ func emit(stdout io.Writer, asJSON bool, text string, value any) {
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(value)
+}
+
+// resolveInbox turns an inbox argument into the address stored in the config
+// and its account id. A value with an @ is an address. A bare local part gets
+// the config domain, and both are lowercased the way inbox create does. When
+// the config has no domain, a bare name is looked up as given. The returned
+// address is the resolved one even when it is not in the config.
+func resolveInbox(cfg config.File, arg string) (address, id string, ok bool) {
+	address = strings.ToLower(strings.TrimSpace(arg))
+	if !strings.Contains(address, "@") && cfg.Domain != "" {
+		address += "@" + strings.ToLower(cfg.Domain)
+	}
+	id, ok = cfg.Inboxes[address]
+	return address, id, ok
 }
