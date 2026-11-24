@@ -87,12 +87,12 @@ func (c apiClient) grant(ctx context.Context, agent, inbox, permission string) e
 }
 
 func (c apiClient) suspendAgent(ctx context.Context, name string) error {
-	_, err := c.call(ctx, http.MethodPost, "/v1/agents/"+url.PathEscape(name)+"/suspend", map[string]string{}, nil)
+	_, err := c.call(ctx, http.MethodPost, "/v1/agents/"+pathSegment(name)+"/suspend", map[string]string{}, nil)
 	return err
 }
 
 func (c apiClient) revoke(ctx context.Context, agent, inbox, permission string) error {
-	path := "/v1/grants/" + url.PathEscape(agent) + "/" + url.PathEscape(inbox) + "/" + url.PathEscape(permission)
+	path := "/v1/grants/" + pathSegment(agent) + "/" + pathSegment(inbox) + "/" + pathSegment(permission)
 	_, err := c.call(ctx, http.MethodDelete, path, nil, nil)
 	return err
 }
@@ -164,13 +164,13 @@ type apiStorageQuota struct {
 
 func (c apiClient) storageQuota(ctx context.Context, inbox string) (apiStorageQuota, error) {
 	var out apiStorageQuota
-	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", nil, &out)
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+pathSegment(inbox)+"/quota", nil, &out)
 	return out, err
 }
 
 func (c apiClient) setStorageQuota(ctx context.Context, inbox string, limitBytes int64) (apiStorageQuota, error) {
 	var out apiStorageQuota
-	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/quota", map[string]int64{"limitBytes": limitBytes}, &out)
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+pathSegment(inbox)+"/quota", map[string]int64{"limitBytes": limitBytes}, &out)
 	return out, err
 }
 
@@ -208,7 +208,7 @@ func (c apiClient) generate(ctx context.Context, prefix string, count int, progr
 			Inboxes []apiInbox `json:"inboxes"`
 			Error   string     `json:"error"`
 		}
-		if _, err := c.call(ctx, http.MethodGet, "/v1/jobs/"+accepted.JobID, nil, &job); err != nil {
+		if _, err := c.call(ctx, http.MethodGet, "/v1/jobs/"+pathSegment(accepted.JobID), nil, &job); err != nil {
 			return nil, err
 		}
 		if progress != nil {
@@ -232,7 +232,7 @@ func (c apiClient) generate(ctx context.Context, prefix string, count int, progr
 }
 
 func (c apiClient) listMessages(ctx context.Context, accountID, query, cursor string, limit int) ([]apiMessage, string, error) {
-	path := withPage("/v1/inboxes/"+accountID+"/messages", map[string]string{"q": query, "cursor": cursor}, limit)
+	path := withPage("/v1/inboxes/"+pathSegment(accountID)+"/messages", map[string]string{"q": query, "cursor": cursor}, limit)
 	var out struct {
 		Messages []apiMessage `json:"messages"`
 		Next     string       `json:"next"`
@@ -243,17 +243,17 @@ func (c apiClient) listMessages(ctx context.Context, accountID, query, cursor st
 
 func (c apiClient) getMessage(ctx context.Context, accountID, messageID string) (apiMessage, error) {
 	var out apiMessage
-	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+accountID+"/messages/"+messageID, nil, &out)
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+pathSegment(accountID)+"/messages/"+pathSegment(messageID), nil, &out)
 	return out, err
 }
 
 func (c apiClient) send(ctx context.Context, accountID string, msg apiSend) error {
-	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes/"+accountID+"/messages", msg, nil)
+	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes/"+pathSegment(accountID)+"/messages", msg, nil)
 	return err
 }
 
 func (c apiClient) reply(ctx context.Context, accountID, messageID string, msg apiSend) error {
-	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes/"+accountID+"/messages/"+messageID+"/reply", msg, nil)
+	_, err := c.call(ctx, http.MethodPost, "/v1/inboxes/"+pathSegment(accountID)+"/messages/"+pathSegment(messageID)+"/reply", msg, nil)
 	return err
 }
 
@@ -264,6 +264,19 @@ func (c apiClient) listInboxes(ctx context.Context, cursor string, limit int) ([
 	}
 	_, err := c.call(ctx, http.MethodGet, withPage("/v1/inboxes", map[string]string{"cursor": cursor}, limit), nil, &out)
 	return out.Inboxes, out.Next, err
+}
+
+// pathSegment escapes one caller-supplied value for use as a single URL path
+// segment. url.PathEscape leaves "." and ".." alone, which a client or router
+// would collapse, so those two are escaped here.
+func pathSegment(s string) string {
+	switch s {
+	case ".":
+		return "%2E"
+	case "..":
+		return "%2E%2E"
+	}
+	return url.PathEscape(s)
 }
 
 func withPage(path string, extra map[string]string, limit int) string {
@@ -283,17 +296,17 @@ func withPage(path string, extra map[string]string, limit int) string {
 }
 
 func (c apiClient) deleteInbox(ctx context.Context, id string) error {
-	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+id, nil, nil)
+	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+pathSegment(id), nil, nil)
 	return err
 }
 
 func (c apiClient) download(ctx context.Context, accountID, messageID, blobID string) ([]byte, error) {
-	_, raw, err := c.callRaw(ctx, http.MethodGet, "/v1/inboxes/"+accountID+"/messages/"+messageID+"/attachments/"+blobID, nil)
+	_, raw, err := c.callRaw(ctx, http.MethodGet, "/v1/inboxes/"+pathSegment(accountID)+"/messages/"+pathSegment(messageID)+"/attachments/"+pathSegment(blobID), nil)
 	return raw, err
 }
 
 func (c apiClient) deleteMessage(ctx context.Context, accountID, messageID string) error {
-	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+accountID+"/messages/"+messageID, nil, nil)
+	_, err := c.call(ctx, http.MethodDelete, "/v1/inboxes/"+pathSegment(accountID)+"/messages/"+pathSegment(messageID), nil, nil)
 	return err
 }
 
@@ -317,7 +330,7 @@ type apiAllowlist struct {
 
 func (c apiClient) allowlist(ctx context.Context, inbox string) (apiAllowlist, error) {
 	var out apiAllowlist
-	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", nil, &out)
+	_, err := c.call(ctx, http.MethodGet, "/v1/inboxes/"+pathSegment(inbox)+"/allowlist", nil, &out)
 	return out, err
 }
 
@@ -326,7 +339,7 @@ func (c apiClient) setAllowlist(ctx context.Context, inbox string, senders []str
 		senders = []string{}
 	}
 	var out apiAllowlist
-	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+url.PathEscape(inbox)+"/allowlist", map[string]any{"senders": senders}, &out)
+	_, err := c.call(ctx, http.MethodPut, "/v1/inboxes/"+pathSegment(inbox)+"/allowlist", map[string]any{"senders": senders}, &out)
 	return out, err
 }
 
