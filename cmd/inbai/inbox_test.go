@@ -176,6 +176,59 @@ func TestMessageCommandsTalkToTheAPI(t *testing.T) {
 	}
 }
 
+func TestMessageReplyTakesFlagsBeforeArguments(t *testing.T) {
+	var replied bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/reply") {
+			replied = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"submitted"}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		http.Error(w, "no", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	path := writeOperatorConfig(t, srv.URL)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg["inboxes"] = map[string]string{"alice@example.com": "alice-id"}
+	raw, err = json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := func(string) string { return "operator-token" }
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"message", "reply", "--config", path, "--to", "bob@example.com", "--body", "hi", "alice@example.com", "m"}
+	if code := run(args, &stdout, &stderr, env); code != 0 {
+		t.Fatalf("reply exit %d stderr %s", code, stderr.String())
+	}
+	if !replied {
+		t.Fatal("reply was not sent to the API")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"message", "reply", "--config", path, "alice@example.com", "m"}, &stdout, &stderr, env); code != 2 {
+		t.Fatalf("reply without --to exit %d, want 2", code)
+	}
+	want := "usage: inbai message reply --to <address> [--body <text>] <address> <message-id>"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("usage stderr %q, want %q", stderr.String(), want)
+	}
+}
+
 func writeOperatorConfig(t *testing.T, apiURL string) string {
 	t.Helper()
 	dir := t.TempDir()

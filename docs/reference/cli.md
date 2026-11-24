@@ -36,7 +36,7 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai message delete <address> <message-id>`
 - `usage: inbai message get <address> <message-id>`
 - `usage: inbai message list [--query text] <address>`
-- `usage: inbai message reply <address> <message-id> --to <address> [--body <text>]`
+- `usage: inbai message reply --to <address> [--body <text>] <address> <message-id>`
 - `usage: inbai message send --from <address> --to <address> --subject <text> [--body <text>] [--attach <file>]`
 - `usage: inbai restore --file path [--json]`
 - `usage: inbai retention [--days n] [--inbox id] [--config path] [--json]`
