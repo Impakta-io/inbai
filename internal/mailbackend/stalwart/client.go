@@ -66,6 +66,12 @@ func (m *jmapMethodResponse) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(parts[2], &m.ID)
 }
 
+// maxJMAPResponse bounds one JMAP response. A message body is capped at
+// maxBodyValueBytes, which JSON escaping can expand about six-fold, so 16 MiB
+// holds the largest response the code asks for. A bigger one is an error, not
+// a cut-off document.
+const maxJMAPResponse = 16 << 20
+
 func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.RawMessage, error) {
 	found, err := c.invokeMany(ctx, []jmapCall{{Name: name, Args: args, ID: id}})
 	if err != nil {
@@ -106,13 +112,16 @@ func (c *Client) invokeMany(ctx context.Context, calls []jmapCall) (map[string]j
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
 	label := "jmap"
 	if len(calls) > 0 {
 		label = calls[0].Name
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJMAPResponse+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxJMAPResponse {
+		return nil, fmt.Errorf("stalwart %s: response too large (more than %d MiB)", label, maxJMAPResponse>>20)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("stalwart %s returned HTTP %d", label, resp.StatusCode)

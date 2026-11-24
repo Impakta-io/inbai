@@ -19,6 +19,11 @@ func SearchMessages(ctx context.Context, client *Client, accountID, query string
 	return found, err
 }
 
+// maxBodyValueBytes caps the text body Stalwart returns for one message.
+// A longer body arrives cut at this size, with isTruncated set on the part.
+// Only the text part is read; HTML is never used, so it is not fetched.
+const maxBodyValueBytes = 1 << 20
+
 // GetMessage returns one message, including its plain-text body and threading headers.
 func GetMessage(ctx context.Context, client *Client, accountID, messageID string) (Message, error) {
 	if client == nil {
@@ -28,10 +33,11 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 		return Message{}, fmt.Errorf("message needs an account and an id")
 	}
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
-		"accountId":          accountID,
-		"ids":                []string{messageID},
-		"properties":         []string{"subject", "preview", "receivedAt", "from", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
-		"fetchAllBodyValues": true,
+		"accountId":           accountID,
+		"ids":                 []string{messageID},
+		"properties":          []string{"subject", "preview", "receivedAt", "from", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
+		"fetchTextBodyValues": true,
+		"maxBodyValueBytes":   maxBodyValueBytes,
 	})
 	if err != nil {
 		return Message{}, err
