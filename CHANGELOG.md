@@ -4,9 +4,9 @@ Status: current
 
 Versions follow semantic versioning. Pre-alpha releases are marked as such and callers should not depend on API stability yet. The release process is in [releasing.md](docs/contributing/releasing.md).
 
-## Unreleased
+## v0.1.0-alpha.4 (2026-11-24)
 
-Changes merged since `v0.1.0-alpha.3`.
+Pre-alpha release. Changes since `v0.1.0-alpha.3`. Read the **Upgrade** lines under Changed before upgrading.
 
 ### Security
 
@@ -38,11 +38,13 @@ Changes merged since `v0.1.0-alpha.3`.
 - `inbai doctor` only reads. It reports a domain Stalwart does not have instead of creating it, and does not fail on an IPv6 address (#65).
 - `inbai login --client-id` and `inbai login --clear` keep `operatorToken` (#62).
 - `inbai help`, `inbai help <command>` and `--help` on every command print full help; `inbai` and `inbaid` with no arguments print help instead of the version (#97).
-- Commands that take an inbox address, such as `message list`, `message send --from`, and `inbox delete`, also accept a bare local part like `alice` and use the config domain, as `inbox create` does.
+- Commands that take an inbox address, such as `message list`, `message send --from`, and `inbox delete`, also accept a bare local part like `alice` and use the config domain, as `inbox create` does (#99).
+- **Upgrade:** with several `inbaid` replicas, upgrade them together. A bulk job queued by this version and claimed by an older replica fails (#94).
+- When `inbai init` times out, it prints Stalwart's state and log first and a hint that matches the cause (#92).
 
 ### Fixed
 
-- `POST /v1/inboxes/generate` holds its `Idempotency-Key` while it runs and binds it to the prefix and count, like create, send, and reply. A concurrent repeat is `409` instead of a second batch or job, and the same key with another prefix or count is `422` instead of the first result.
+- `POST /v1/inboxes/generate` holds its `Idempotency-Key` while it runs and binds it to the prefix and count, like create, send, and reply. A concurrent repeat is `409` instead of a second batch or job, and the same key with another prefix or count is `422` instead of the first result (#98).
 - Message delete, the retention sweep, and `inbai inbox delete` work on Stalwart after the `inbai init` rerun (#82).
 - Deleting an inbox removes its grants, webhooks, allowlist, retention setting, event cursor, and create `Idempotency-Key` (#84).
 - `docker compose down -v` removes every volume the stacks create. Stalwart's generated configuration lives in a temporary filesystem instead of a new anonymous volume per container (#87).
@@ -54,7 +56,8 @@ Changes merged since `v0.1.0-alpha.3`.
 - `inbai mcp serve` renews its client-credential token (#55).
 - IMAP mode selects the mailbox before searching, parses responses strictly, and names the account and step when a login fails (#63, #80).
 - `inbai message reply` usage shows flags before arguments (#57).
-- With several `inbaid` replicas, a webhook delivery is no longer claimed and posted twice when another replica finished it during the claim, and a late result from a sender whose lease ended no longer marks a delivered webhook as failed.
+- With several `inbaid` replicas, a webhook delivery is no longer claimed and posted twice when another replica finished it during the claim, and a late result from a sender whose lease ended no longer marks a delivered webhook as failed (#100).
+- Without a database, send-quota counters are pruned once their window has passed and idempotency keys after 24 hours, so a long-running `inbaid` no longer grows without bound (#91).
 
 ### Added
 
@@ -66,6 +69,13 @@ Changes merged since `v0.1.0-alpha.3`.
 - `INBAI_AUTHSERV_ID` for IMAP mode (#76).
 - `INBAI_IMAP_SECURITY`, `INBAI_SMTP_SECURITY`, `INBAI_ALLOW_PLAINTEXT_AUTH`, and `INBAI_IMAP_TLS_INSECURE` (#77).
 - `inbai init --api-url` sets the `inbaid` address later commands use. A rerun keeps it (#87).
+- `POST /v1/agents/{name}/resume` and `inbai agent resume <name>` let an operator undo a suspension (#93).
+
+### Project
+
+- CI runs the PostgreSQL-backed tests on every pull request, and `main` merges through a merge queue (#89, #96).
+- ADR 0011 records that operators authenticate with a static token, replacing that part of ADR 0006 (#90).
+- `mailbackend.InboxSpec` no longer carries Stalwart's domain and role ids; the Stalwart backend owns them (#94).
 
 ## v0.1.0-alpha.3 (2026-11-24)
 
