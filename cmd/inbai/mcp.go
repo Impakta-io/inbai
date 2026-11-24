@@ -259,7 +259,7 @@ func (c apiClient) waitEvents(ctx context.Context, inbox string, after *int64, t
 func toMessages(in []apiMessage) []mailbackend.Message {
 	out := make([]mailbackend.Message, len(in))
 	for i, message := range in {
-		out[i] = mailbackend.Message{ID: message.ID, Subject: message.Subject, Preview: message.Preview, Text: message.Text}
+		out[i] = mailbackend.Message{ID: message.ID, Subject: message.Subject, Preview: message.Preview, Text: message.Text, TextTruncated: message.TextTruncated}
 		for _, file := range message.Attachments {
 			out[i].Attachments = append(out[i].Attachments, mailbackend.Attachment{Name: file.Name, Type: file.Type, Size: file.Size})
 		}

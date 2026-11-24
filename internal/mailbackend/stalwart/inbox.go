@@ -39,6 +39,7 @@ type Message struct {
 	Subject        string                     `json:"subject"`
 	Preview        string                     `json:"preview"`
 	Text           string                     `json:"text,omitempty"`
+	TextTruncated  bool                       `json:"textTruncated,omitempty"`
 	MessageID      []string                   `json:"messageId,omitempty"`
 	InReplyTo      []string                   `json:"inReplyTo,omitempty"`
 	References     []string                   `json:"references,omitempty"`

@@ -193,7 +193,8 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				PartID string `json:"partId"`
 			} `json:"textBody"`
 			BodyValues map[string]struct {
-				Value string `json:"value"`
+				Value       string `json:"value"`
+				IsTruncated bool   `json:"isTruncated"`
 			} `json:"bodyValues"`
 			Attachments []struct {
 				Name   string `json:"name"`
@@ -223,6 +224,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 		}
 		if body, ok := item.BodyValues[part]; ok {
 			out[i].Text = body.Value
+			out[i].TextTruncated = body.IsTruncated
 		}
 		for _, file := range item.Attachments {
 			out[i].Attachments = append(out[i].Attachments, Attachment{
