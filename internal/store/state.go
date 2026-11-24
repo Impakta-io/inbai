@@ -6,6 +6,8 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -115,6 +117,69 @@ func (p *Postgres) Idempotency(ctx context.Context, kind, key string) (string, b
 		return "", false, nil
 	}
 	return payload, err == nil, err
+}
+
+const (
+	// IdempotencyInProgress is a key reserved by a request that has not finished.
+	IdempotencyInProgress = "in_progress"
+	// IdempotencyDone is a key whose request finished. A row written by SaveIdempotency is done.
+	IdempotencyDone = "done"
+)
+
+// IdempotencyClaim is the row a ReserveIdempotency call found instead of reserving the key.
+type IdempotencyClaim struct {
+	State       string
+	RequestHash string
+	Payload     string
+}
+
+// ReserveIdempotency inserts the key as in progress, reserved at at, with the request hash.
+// It also takes over an in-progress key with the same hash that was reserved before stale.
+// reserved is true when this call holds the key. Otherwise found is the row already there.
+// The insert is one statement, so two callers cannot both reserve the same key.
+func (p *Postgres) ReserveIdempotency(ctx context.Context, kind, key, hash string, at, stale time.Time) (reserved bool, found IdempotencyClaim, err error) {
+	for range 3 {
+		var one int
+		err = p.pool.QueryRow(ctx, `
+INSERT INTO idempotency AS i (kind, key, payload, state, request_hash, reserved_at)
+VALUES ($1, $2, '', 'in_progress', $3, $4)
+ON CONFLICT (kind, key) DO UPDATE SET reserved_at = EXCLUDED.reserved_at, payload = ''
+WHERE i.state = 'in_progress' AND i.request_hash = EXCLUDED.request_hash AND i.reserved_at < $5
+RETURNING 1`, kind, key, hash, at, stale).Scan(&one)
+		if err == nil {
+			return true, IdempotencyClaim{}, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return false, IdempotencyClaim{}, err
+		}
+		err = p.pool.QueryRow(ctx, `SELECT state, request_hash, payload FROM idempotency WHERE kind = $1 AND key = $2`, kind, key).
+			Scan(&found.State, &found.RequestHash, &found.Payload)
+		if err == nil {
+			return false, found, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return false, IdempotencyClaim{}, err
+		}
+		// The holder released the key between the two statements. Try to reserve it again.
+	}
+	return false, IdempotencyClaim{}, fmt.Errorf("idempotency key %s was reserved and released repeatedly", kind)
+}
+
+// CompleteIdempotency marks a key reserved at at as done with its payload.
+// A key another caller has taken over since is left as it is.
+func (p *Postgres) CompleteIdempotency(ctx context.Context, kind, key string, at time.Time, payload string) error {
+	_, err := p.pool.Exec(ctx, `
+UPDATE idempotency SET state = 'done', payload = $4
+WHERE kind = $1 AND key = $2 AND state = 'in_progress' AND reserved_at = $3`, kind, key, at, payload)
+	return err
+}
+
+// ReleaseIdempotency deletes a key reserved at at that is still in progress, so a retry can run.
+// A key another caller has taken over since is left as it is.
+func (p *Postgres) ReleaseIdempotency(ctx context.Context, kind, key string, at time.Time) error {
+	_, err := p.pool.Exec(ctx, `
+DELETE FROM idempotency WHERE kind = $1 AND key = $2 AND state = 'in_progress' AND reserved_at = $3`, kind, key, at)
+	return err
 }
 
 // JobRow is one bulk-create job stored for another process to read.

@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS idempotency (
     kind text NOT NULL,
     key text NOT NULL,
     payload text NOT NULL DEFAULT '',
+    state text NOT NULL DEFAULT 'done',
+    request_hash text NOT NULL DEFAULT '',
+    reserved_at timestamptz NOT NULL DEFAULT now(),
     workspace_id text NOT NULL DEFAULT 'default',
     PRIMARY KEY (kind, key)
 );
@@ -219,6 +222,9 @@ var addedColumns = []string{
 	`ALTER TABLE webhook_subscription ALTER COLUMN operator SET NOT NULL`,
 	`ALTER TABLE webhook_subscription ADD COLUMN IF NOT EXISTS disabled text NOT NULL DEFAULT ''`,
 	`ALTER TABLE webhook_delivery ADD COLUMN IF NOT EXISTS fail_reason text NOT NULL DEFAULT ''`,
+	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'done'`,
+	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS request_hash text NOT NULL DEFAULT ''`,
+	`ALTER TABLE idempotency ADD COLUMN IF NOT EXISTS reserved_at timestamptz NOT NULL DEFAULT now()`,
 }
 
 func ensureColumns(ctx context.Context, pool *pgxpool.Pool) error {
@@ -806,13 +812,13 @@ func readGrants(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
 		return err
 	}
 	rows.Close()
-	rows, err = tx.Query(ctx, `SELECT kind, key, payload FROM idempotency ORDER BY kind, key`)
+	rows, err = tx.Query(ctx, `SELECT kind, key, payload, state, request_hash, reserved_at FROM idempotency ORDER BY kind, key`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var row IdempotencyRow
-		if err := rows.Scan(&row.Kind, &row.Key, &row.Payload); err != nil {
+		if err := rows.Scan(&row.Kind, &row.Key, &row.Payload, &row.State, &row.RequestHash, &row.ReservedAt); err != nil {
 			rows.Close()
 			return err
 		}
@@ -961,7 +967,16 @@ func writeGrants(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
 		}
 	}
 	for _, row := range snap.Idempotency {
-		if _, err := tx.Exec(ctx, `INSERT INTO idempotency (kind, key, payload) VALUES ($1, $2, $3)`, row.Kind, row.Key, row.Payload); err != nil {
+		state := row.State
+		if state == "" {
+			state = IdempotencyDone
+		}
+		reserved := row.ReservedAt
+		if reserved.IsZero() {
+			reserved = time.Now().UTC()
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO idempotency (kind, key, payload, state, request_hash, reserved_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+			row.Kind, row.Key, row.Payload, state, row.RequestHash, reserved); err != nil {
 			return err
 		}
 	}

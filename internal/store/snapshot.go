@@ -75,11 +75,17 @@ type QuotaRow struct {
 	Used   int    `json:"used"`
 }
 
-// IdempotencyRow is one completed request key.
+// IdempotencyRow is one request key. State is IdempotencyDone or IdempotencyInProgress.
+// RequestHash binds the key to the request that first used it.
+// A file written before keys were reserved omits State, RequestHash, and ReservedAt.
+// Such a row restores as done, with no hash, so a repeat of any request with that key is a success.
 type IdempotencyRow struct {
-	Kind    string `json:"kind"`
-	Key     string `json:"key"`
-	Payload string `json:"payload"`
+	Kind        string    `json:"kind"`
+	Key         string    `json:"key"`
+	Payload     string    `json:"payload"`
+	State       string    `json:"state,omitempty"`
+	RequestHash string    `json:"requestHash,omitempty"`
+	ReservedAt  time.Time `json:"reservedAt,omitzero"`
 }
 
 // JobSnap is one bulk-create job. Inboxes is the JSON array stored with the job.
@@ -309,6 +315,9 @@ func (s Snapshot) check() error {
 	for _, item := range s.Idempotency {
 		if item.Kind == "" || item.Key == "" {
 			return fmt.Errorf("idempotency key is incomplete")
+		}
+		if item.State != "" && item.State != IdempotencyDone && item.State != IdempotencyInProgress {
+			return fmt.Errorf("idempotency key has unknown state %q", item.State)
 		}
 	}
 	for _, job := range s.Jobs {

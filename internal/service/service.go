@@ -81,8 +81,7 @@ type Service struct {
 
 	mu        sync.Mutex
 	sent      map[string]int
-	sentID    map[string]struct{}
-	createdID map[string]string
+	idem      map[string]idemEntry
 	jobs      map[string]*Job
 	generated map[string]GenerateResult
 	keep      map[string]int
@@ -107,8 +106,7 @@ func New(mail mailbackend.Backend) *Service {
 		storageQuota:       DefaultStorageQuotaBytes,
 		now:                time.Now,
 		sent:               map[string]int{},
-		sentID:             map[string]struct{}{},
-		createdID:          map[string]string{},
+		idem:               map[string]idemEntry{},
 	}
 }
 
@@ -326,6 +324,7 @@ func (s *Service) Audit(ctx context.Context, caller Caller, after int64, limit i
 // CreateInbox creates an address. An operator may do that.
 // An agent may do that when it holds inbox:provision on *.
 // idemKey is the Idempotency-Key. A repeat of a completed key returns the same account id.
+// See reserve for a repeat that is still running or names a different request.
 func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbackend.InboxSpec, idemKey string) (string, error) {
 	if err := s.permitProvision(ctx, caller); err != nil {
 		return "", err
@@ -333,27 +332,24 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 	if spec.QuotaBytes < 0 {
 		return "", fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
 	}
+	hash := createHash(spec)
 	if spec.QuotaBytes == 0 && s.storageQuota > 0 {
 		spec.QuotaBytes = s.storageQuota
 	}
-	key := idempotencyKey(caller, spec.Local, idemKey)
-	if key != "" {
-		id, ok, err := s.created(ctx, key)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return id, nil
-		}
-	}
-	id, err := s.mail.CreateInbox(ctx, spec)
+	hold, id, done, err := s.reserve(ctx, kindCreate, idempotencyKey(caller, spec.Local, idemKey), hash)
 	if err != nil {
 		return "", err
 	}
-	if key != "" {
-		if err := s.rememberCreated(ctx, key, id); err != nil {
-			return "", err
-		}
+	if done {
+		return id, nil
+	}
+	id, err = s.mail.CreateInbox(ctx, spec)
+	if err != nil {
+		s.release(ctx, hold)
+		return "", err
+	}
+	if err := s.complete(ctx, hold, id); err != nil {
+		return "", err
 	}
 	if err := s.record(ctx, caller, "inbox.create", id); err != nil {
 		return "", err
@@ -366,6 +362,7 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 // The sender is the account's own address or another address the mail server lets it send as.
 // See sender. That rule applies to an operator too.
 // idemKey is the Idempotency-Key. A repeat of a completed key does not send again and does not consume quota.
+// See reserve for a repeat that is still running or names a different request.
 func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Outbound, idemKey string) error {
 	if err := s.permit(ctx, caller, msg.AccountID, PermSend); err != nil {
 		return err
@@ -375,20 +372,24 @@ func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Ou
 		return err
 	}
 	msg.From = from
-	key := idempotencyKey(caller, msg.AccountID, idemKey)
-	if key != "" {
-		seen, err := s.alreadySent(ctx, key)
-		if err != nil {
-			return err
-		}
-		if seen {
-			return nil
-		}
-	}
-	return s.submit(ctx, key, msg)
+	return s.submitOnce(ctx, kindSend, idempotencyKey(caller, msg.AccountID, idemKey), sendHash("send", "", msg), msg)
 }
 
-func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbound) error {
+// submitOnce submits msg unless the key already finished. The key is held while the message is
+// submitted, released when the submit fails, and marked done when it succeeds.
+func (s *Service) submitOnce(ctx context.Context, kind, key, hash string, msg mailbackend.Outbound) error {
+	hold, _, done, err := s.reserve(ctx, kind, key, hash)
+	if err != nil || done {
+		return err
+	}
+	if err := s.submit(ctx, msg); err != nil {
+		s.release(ctx, hold)
+		return err
+	}
+	return s.complete(ctx, hold, "")
+}
+
+func (s *Service) submit(ctx context.Context, msg mailbackend.Outbound) error {
 	if s.feed != nil {
 		reason, suppressed, err := s.feed.Suppressed(ctx, msg.To)
 		if err != nil {
@@ -404,11 +405,6 @@ func (s *Service) submit(ctx context.Context, key string, msg mailbackend.Outbou
 	if err := s.mail.Deliver(ctx, msg); err != nil {
 		s.refund(ctx, msg)
 		return err
-	}
-	if key != "" {
-		if err := s.remember(ctx, key); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -548,6 +544,7 @@ func (s *Service) Attachment(ctx context.Context, caller Caller, accountID, mess
 // Reply submits a message that references an existing one.
 // An agent needs a reply grant. The send quota still applies.
 // The reply goes to the original sender. See replyRecipient. The sender follows the same rule as Deliver.
+// idemKey is the Idempotency-Key, as for Deliver. Replies have their own keys: a key used for a send does not answer a reply.
 func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID string, msg mailbackend.Outbound, idemKey string) error {
 	if err := s.permit(ctx, caller, accountID, PermReply); err != nil {
 		return err
@@ -572,17 +569,7 @@ func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID
 	}
 	msg.InReplyTo = original.MessageID
 	msg.References = append(append([]string{}, original.References...), original.MessageID...)
-	key := idempotencyKey(caller, accountID, idemKey)
-	if key != "" {
-		seen, err := s.alreadySent(ctx, key)
-		if err != nil {
-			return err
-		}
-		if seen {
-			return nil
-		}
-	}
-	return s.submit(ctx, key, msg)
+	return s.submitOnce(ctx, kindReply, idempotencyKey(caller, accountID, idemKey), sendHash("reply", messageID, msg), msg)
 }
 
 // sender returns the address a message from the account is sent as.
@@ -686,47 +673,6 @@ func idempotencyKey(caller Caller, inbox, key string) string {
 		who = "operator"
 	}
 	return who + "\n" + inbox + "\n" + key
-}
-
-func (s *Service) alreadySent(ctx context.Context, key string) (bool, error) {
-	if s.db != nil {
-		_, ok, err := s.db.Idempotency(ctx, "sent", key)
-		return ok, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.sentID[key]
-	return ok, nil
-}
-
-func (s *Service) remember(ctx context.Context, key string) error {
-	if s.db != nil {
-		return s.db.SaveIdempotency(ctx, "sent", key, "")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sentID[key] = struct{}{}
-	return nil
-}
-
-func (s *Service) created(ctx context.Context, key string) (string, bool, error) {
-	if s.db != nil {
-		return s.db.Idempotency(ctx, "created", key)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id, ok := s.createdID[key]
-	return id, ok, nil
-}
-
-func (s *Service) rememberCreated(ctx context.Context, key, id string) error {
-	if s.db != nil {
-		return s.db.SaveIdempotency(ctx, "created", key, id)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.createdID[key] = id
-	return nil
 }
 
 func (s *Service) sendBuckets(msg mailbackend.Outbound) []store.BucketLimit {

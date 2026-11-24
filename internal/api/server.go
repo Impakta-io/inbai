@@ -837,6 +837,8 @@ var serviceProblems = []struct {
 	{service.ErrUnavailable, http.StatusServiceUnavailable, "Event store unavailable"},
 	{service.ErrSuppressed, http.StatusConflict, "Suppressed"},
 	{service.ErrUnsupported, http.StatusNotImplemented, "Not implemented"},
+	{service.ErrInProgress, http.StatusConflict, "Request in progress"},
+	{service.ErrKeyReused, http.StatusUnprocessableEntity, "Idempotency-Key reused"},
 }
 
 func writeServiceError(w http.ResponseWriter, err error) {
