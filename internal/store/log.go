@@ -41,6 +41,7 @@ type Log interface {
 	State(context.Context, string) (string, bool, error)
 	InboxByAddress(context.Context, string) (string, bool, error)
 	Inboxes(context.Context) ([]string, error)
+	Forget(context.Context, string) error
 	Put(context.Context, string, string, string, []Record) error
 	Since(context.Context, string, int64, int) ([]Record, error)
 	Subscribe(context.Context, Subscription) error

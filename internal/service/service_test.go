@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
+	"github.com/Impakta-io/inbai/internal/store"
 )
 
 func TestAgentCannotGrantItself(t *testing.T) {
@@ -318,6 +320,74 @@ func TestInboxDirectoryIsOperatorOnly(t *testing.T) {
 	}
 }
 
+func TestDeleteInboxRemovesItsCursor(t *testing.T) {
+	ctx := context.Background()
+	log := &store.Memory{}
+	feed := events.New(log)
+	for _, inbox := range []string{"alice-id", "bob-id"} {
+		if err := feed.Remember(ctx, inbox, inbox+"@example.com"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mail := &fakeMail{}
+	svc := New(mail)
+	svc.SetFeed(feed)
+	svc.Allow("ada", "alice-id", PermManage)
+	if err := svc.DeleteInbox(ctx, Caller{Agent: "ada"}, "alice-id"); !errors.Is(err, ErrForbidden) || mail.dir {
+		t.Fatalf("agent delete err %v called %v", err, mail.dir)
+	}
+	if got, err := log.Inboxes(ctx); err != nil || len(got) != 2 {
+		t.Fatalf("forbidden delete dropped a cursor: %v err %v", got, err)
+	}
+	mail.dropErr = errors.New("backend down")
+	if err := svc.DeleteInbox(ctx, Caller{Operator: true}, "alice-id"); !errors.Is(err, mail.dropErr) {
+		t.Fatalf("failed delete err %v", err)
+	}
+	if got, err := log.Inboxes(ctx); err != nil || len(got) != 2 {
+		t.Fatalf("failed account delete dropped a cursor: %v err %v", got, err)
+	}
+	mail.dropErr = nil
+	if err := svc.DeleteInbox(ctx, Caller{Operator: true}, "alice-id"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := log.Inboxes(ctx)
+	if err != nil || len(got) != 1 || got[0] != "bob-id" {
+		t.Fatalf("inboxes %v err %v", got, err)
+	}
+	if _, ok, err := log.InboxByAddress(ctx, "alice-id@example.com"); err != nil || ok {
+		t.Fatalf("address still bound ok %v err %v", ok, err)
+	}
+}
+
+func TestDeleteInboxSucceedsWhenTheCursorDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	log := &forgetFails{Log: &store.Memory{}}
+	feed := events.New(log)
+	if err := feed.Remember(ctx, "alice-id", "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	mail := &fakeMail{}
+	svc := New(mail)
+	svc.SetFeed(feed)
+	if err := svc.DeleteInbox(ctx, Caller{Operator: true}, "alice-id"); err != nil || !mail.dir || !log.asked {
+		t.Fatalf("err %v called %v forget %v", err, mail.dir, log.asked)
+	}
+	rows, _, err := svc.Audit(ctx, Caller{Operator: true}, 0, 0)
+	if err != nil || len(rows) != 1 || rows[0].Action != "inbox.delete" || rows[0].Target != "alice-id" {
+		t.Fatalf("audit %+v err %v", rows, err)
+	}
+}
+
+type forgetFails struct {
+	store.Log
+	asked bool
+}
+
+func (f *forgetFails) Forget(context.Context, string) error {
+	f.asked = true
+	return errors.New("database down")
+}
+
 func TestAttachmentRequiresTheReadGrant(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{
 		ID: "m", Attachments: []mailbackend.Attachment{{Name: "note.txt", Type: "text/plain", BlobID: "blob-1"}},
@@ -343,6 +413,7 @@ type fakeMail struct {
 	listed   bool
 	sent     int
 	sendErr  error
+	dropErr  error
 	got      bool
 	deleted  bool
 	removed  []string
@@ -414,7 +485,7 @@ func (f *fakeMail) ListInboxes(_ context.Context, page mailbackend.Page) ([]mail
 
 func (f *fakeMail) DeleteInbox(context.Context, string) error {
 	f.dir = true
-	return nil
+	return f.dropErr
 }
 
 func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {

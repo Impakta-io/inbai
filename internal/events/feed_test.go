@@ -5,6 +5,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -110,6 +111,86 @@ func TestClaimLeaseStopsASecondWorker(t *testing.T) {
 	if first.Event.MessageID != "m" {
 		t.Fatalf("event %+v", first.Event)
 	}
+}
+
+func TestSweepContinuesPastAFailingInbox(t *testing.T) {
+	ctx := context.Background()
+	log := &store.Memory{}
+	feed := New(log)
+	for _, inbox := range []string{"inbox-a", "inbox-b", "inbox-c"} {
+		if err := feed.Remember(ctx, inbox, inbox+"@example.com"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone := errors.New("account not found")
+	watch := &failingWatch{fail: map[string]error{"inbox-a": gone}}
+	err := feed.Sweep(ctx, watch)
+	if !errors.Is(err, gone) || !strings.Contains(err.Error(), "inbox-a") {
+		t.Fatalf("sweep err %v", err)
+	}
+	for _, inbox := range []string{"inbox-b", "inbox-c"} {
+		state, ok, err := log.State(ctx, inbox)
+		if err != nil || !ok || state != "s0" {
+			t.Fatalf("%s state %q ok %v err %v", inbox, state, ok, err)
+		}
+	}
+	if strings.Contains(err.Error(), "inbox-b") || strings.Contains(err.Error(), "inbox-c") {
+		t.Fatalf("sweep err names a healthy inbox: %v", err)
+	}
+}
+
+func TestSweepStopsWhenTheContextEnds(t *testing.T) {
+	log := &store.Memory{}
+	feed := New(log)
+	if err := feed.Remember(context.Background(), "inbox-a", "a@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	watch := &failingWatch{}
+	if err := feed.Sweep(ctx, watch); !errors.Is(err, context.Canceled) {
+		t.Fatalf("sweep err %v", err)
+	}
+	if len(watch.asked) != 0 {
+		t.Fatalf("asked %v after cancel", watch.asked)
+	}
+}
+
+func TestForgetStopsTheSweep(t *testing.T) {
+	ctx := context.Background()
+	log := &store.Memory{}
+	feed := New(log)
+	if err := feed.Remember(ctx, "inbox-a", "a@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Forget(ctx, "inbox-a"); err != nil {
+		t.Fatal(err)
+	}
+	watch := &failingWatch{}
+	if err := feed.Sweep(ctx, watch); err != nil || len(watch.asked) != 0 {
+		t.Fatalf("sweep err %v asked %v", err, watch.asked)
+	}
+}
+
+// failingWatch returns state s0 for every inbox except those listed in fail.
+type failingWatch struct {
+	mu    sync.Mutex
+	fail  map[string]error
+	asked []string
+}
+
+func (f *failingWatch) MailState(_ context.Context, inbox string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, inbox)
+	if err := f.fail[inbox]; err != nil {
+		return "", err
+	}
+	return "s0", nil
+}
+
+func (f *failingWatch) MailChanges(_ context.Context, _, since string) (mailbackend.Delta, error) {
+	return mailbackend.Delta{State: since}, nil
 }
 
 type fakeWatch struct {
