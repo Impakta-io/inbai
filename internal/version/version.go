@@ -4,8 +4,8 @@
 // Package version reports the build identity shared by the inbai and inbaid binaries.
 package version
 
-// Version is the current project version. Releases replace this value.
-const Version = "0.0.0-dev"
+// Version is the current project version. Release builds set this with -ldflags -X.
+var Version = "0.0.0-dev"
 
 const (
 	// CLI is the operator command name.

@@ -13,3 +13,12 @@ func TestString(t *testing.T) {
 		t.Fatalf("String(Server) = %q", got)
 	}
 }
+
+func TestVersionOverride(t *testing.T) {
+	orig := Version
+	t.Cleanup(func() { Version = orig })
+	Version = "0.1.0"
+	if got := String(CLI); got != "inbai 0.1.0" {
+		t.Fatalf("String(CLI) = %q", got)
+	}
+}
