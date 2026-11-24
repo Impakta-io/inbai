@@ -20,6 +20,8 @@ const (
 	KindCursorSweep = "cursor.sweep"
 	// KindRetentionSweep deletes messages older than the configured retention period.
 	KindRetentionSweep = "retention.sweep"
+	// KindPrune deletes finished jobs, finished webhook deliveries, old events, and spent send counters.
+	KindPrune = "store.prune"
 
 	defaultPoll        = 500 * time.Millisecond
 	defaultLease       = 2 * time.Minute

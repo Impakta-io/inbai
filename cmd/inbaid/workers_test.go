@@ -75,7 +75,7 @@ func TestWorkerRunsBulkCursorAndRetentionJobs(t *testing.T) {
 	feed := events.New(memLog)
 	q := &store.MemoryQueue{}
 	var stderr bytes.Buffer
-	worker := newWorker(q, svc, feed, mail, 30, &stderr)
+	worker := newWorker(q, svc, feed, mail, 30, nil, store.Retention{}, &stderr)
 
 	bulkRaw, err := json.Marshal(service.BulkPayload{
 		JobID: "j1", Prefix: "u", Domain: "example.com", DomainID: "d", RoleID: "r", Count: 2,
@@ -116,5 +116,31 @@ func TestWorkerRunsBulkCursorAndRetentionJobs(t *testing.T) {
 		if !job.Done || job.Failed {
 			t.Fatalf("job not done %+v", job)
 		}
+	}
+}
+
+type recordingPruner struct {
+	calls []store.Retention
+}
+
+func (p *recordingPruner) Prune(_ context.Context, _ time.Time, keep store.Retention) (store.Pruned, error) {
+	p.calls = append(p.calls, keep)
+	return store.Pruned{}, nil
+}
+
+func TestWorkerRunsThePruneJob(t *testing.T) {
+	ctx := context.Background()
+	q := &store.MemoryQueue{}
+	pruner := &recordingPruner{}
+	keep := store.Retention{DoneJobs: time.Hour, Events: 2 * time.Hour}
+	worker := newWorker(q, service.New(&stubWorkerMail{}), nil, nil, 0, pruner, keep, nil)
+	if _, ok, err := q.Enqueue(ctx, jobs.KindPrune, "singleton", nil, time.Now().UTC().Add(-time.Second)); err != nil || !ok {
+		t.Fatalf("enqueue ok %v err %v", ok, err)
+	}
+	if ok, err := worker.RunOnce(ctx); err != nil || !ok {
+		t.Fatalf("run ok %v err %v", ok, err)
+	}
+	if len(pruner.calls) != 1 || pruner.calls[0] != keep {
+		t.Fatalf("prune calls %+v", pruner.calls)
 	}
 }

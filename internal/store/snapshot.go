@@ -35,6 +35,13 @@ type DeliveryRow struct {
 	Reason         string    `json:"reason,omitempty"`
 }
 
+// EventRow is one event and when it was logged. A file written before events had a time
+// has no at, and the event counts from the restore when old events are pruned.
+type EventRow struct {
+	Record
+	At time.Time `json:"at,omitzero"`
+}
+
 // legacyOperatorAgent is the agent name the server stored for an operator's subscription
 // before subscriptions recorded who created them.
 const legacyOperatorAgent = "operator"
@@ -130,7 +137,7 @@ type ClientRow struct {
 type Snapshot struct {
 	Version       int              `json:"version"`
 	Cursors       []CursorRow      `json:"cursors"`
-	Events        []Record         `json:"events"`
+	Events        []EventRow       `json:"events"`
 	Subscriptions []Subscription   `json:"subscriptions"`
 	Deliveries    []DeliveryRow    `json:"deliveries"`
 	Suppressions  []Suppression    `json:"suppressions"`
@@ -145,6 +152,10 @@ type Snapshot struct {
 	Allowlists    []AllowlistRow   `json:"allowlists"`
 	SigningKey    []byte           `json:"signingKey"`
 	Queue         []QueueJob       `json:"queue"`
+	// EventSequence is the last event id handed out. Pruning can remove the newest events of
+	// an idle server, so a restore starts new ids after this, never below a consumer's cursor.
+	// An older file has none and the restore uses the highest event id in the file.
+	EventSequence int64 `json:"eventSequence,omitempty"`
 }
 
 // Export copies the log. Postgres reads it in one transaction.
@@ -157,7 +168,10 @@ func (m *Memory) Export(context.Context) (Snapshot, error) {
 		snap.Cursors = append(snap.Cursors, CursorRow{Inbox: inbox, Address: cur.address, State: cur.state})
 	}
 	sort.Slice(snap.Cursors, func(i, j int) bool { return snap.Cursors[i].Inbox < snap.Cursors[j].Inbox })
-	snap.Events = append(snap.Events, m.events...)
+	for _, event := range m.events {
+		snap.Events = append(snap.Events, EventRow{Record: event.Record, At: event.at})
+	}
+	snap.EventSequence = m.nextEvent
 	for _, sub := range m.subs {
 		snap.Subscriptions = append(snap.Subscriptions, sub)
 	}
@@ -197,8 +211,15 @@ func (m *Memory) Import(_ context.Context, snap Snapshot) error {
 			m.byAddress[address] = cur.Inbox
 		}
 	}
-	m.events = append([]Record(nil), snap.Events...)
-	for _, event := range m.events {
+	m.sending = map[string]memSending{}
+	m.nextEvent = snap.EventSequence
+	restored := time.Now()
+	for _, event := range snap.Events {
+		at := event.At
+		if at.IsZero() {
+			at = restored
+		}
+		m.events = append(m.events, memEvent{Record: event.Record, at: at})
 		if event.ID > m.nextEvent {
 			m.nextEvent = event.ID
 		}
@@ -207,9 +228,14 @@ func (m *Memory) Import(_ context.Context, snap Snapshot) error {
 		m.subs[sub.ID] = sub
 	}
 	for _, item := range snap.Deliveries {
+		var finished time.Time
+		if item.Done || item.Failed {
+			finished = item.Next
+		}
 		m.deliveries = append(m.deliveries, memDelivery{
 			id: item.ID, subID: item.SubscriptionID, eventID: item.EventID,
 			attempt: item.Attempt, next: item.Next, done: item.Done, failed: item.Failed, reason: item.Reason,
+			finished: finished,
 		})
 		if item.ID > m.nextDel {
 			m.nextDel = item.ID
@@ -268,7 +294,7 @@ func (s Snapshot) check() error {
 	}
 	events := map[int64]struct{}{}
 	for _, event := range s.Events {
-		if event.ID <= 0 || event.Inbox == "" || !eventShape(event) {
+		if event.ID <= 0 || event.Inbox == "" || !eventShape(event.Record) {
 			return fmt.Errorf("event %d is incomplete", event.ID)
 		}
 		if _, dup := events[event.ID]; dup {
@@ -372,7 +398,7 @@ func emptySnapshot() Snapshot {
 	return Snapshot{
 		Version:       snapshotVersion,
 		Cursors:       []CursorRow{},
-		Events:        []Record{},
+		Events:        []EventRow{},
 		Subscriptions: []Subscription{},
 		Deliveries:    []DeliveryRow{},
 		Suppressions:  []Suppression{},

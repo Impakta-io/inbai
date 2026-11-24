@@ -14,6 +14,10 @@ Set `INBAI_DATABASE_URL` before `inbaid serve`. The server creates the tables. W
 
 Pass the response's `after` as `after` on the next call. Delivery is at least once and ordered per inbox, so the same `id` can be seen again after a timeout. Handle it once, then move the cursor forward.
 
+### Retention
+
+`inbaid` keeps an event for 30 days after it is logged, then deletes it. `INBAI_EVENT_RETENTION_DAYS` changes that period, and `0` keeps every event. An event a webhook delivery still names stays until that delivery row is deleted. A cursor older than every event still kept is not an error: the call returns the oldest events still kept, so a consumer that was away longer than the period misses the deleted ones without a `resync` event. List the inbox to catch up when the first `id` returned is far past your cursor. Event ids keep counting up after events are deleted, and after `inbai restore`, so an `after` you hold never points past a new event.
+
 A `resync` event has an empty `messageId`. It means the mail server could no longer report changes since the stored cursor, for example because Stalwart expired its change log (JMAP `cannotCalculateChanges`) or an IMAP mailbox's UIDVALIDITY changed. The feed moved to the inbox's current state, so messages that arrived or were removed before the `resync` event may have no `created` or `destroyed` event. List the inbox to catch up, then keep reading the feed after the `resync` event's `id`. `inbaid` also logs a warning naming the inbox.
 
 When Stalwart reports `cannotCalculateChanges` for an account that no longer exists, for example one an administrator deleted in Stalwart, `inbaid` stops sweeping that inbox, drops its cursor and address binding, and logs a warning naming the inbox once. Events already on the feed stay. No `resync` event is recorded.
@@ -31,13 +35,21 @@ curl -s -X POST -H "Authorization: Bearer $ACCESS_TOKEN" \
   http://127.0.0.1:8787/v1/webhooks
 ```
 
-The response includes `secret` once. Each delivery is a POST of one event. The header `X-Inbai-Signature` is `sha256=` plus the hex HMAC-SHA256 of the raw body, using that secret. A non-2xx response is retried with backoff. After five attempts the delivery stops and the event remains on the feed.
+The response includes `secret` once. Each delivery is a POST of one event. The header `X-Inbai-Signature` is `sha256=` plus the hex HMAC-SHA256 of the raw body, using that secret.
+
+### Order and retries
+
+Each webhook gets one POST at a time, across every `inbaid` replica, and new events go out in `id` order. A receiver that is slow or does not answer delays only its own webhook. `inbaid` posts to other webhooks at the same time, up to `INBAI_WEBHOOK_WORKERS` at once per process (default 16, at most 256).
+
+A network error, a timeout, or a non-2xx response is retried 30 seconds, 2 minutes, 10 minutes, 1 hour, 6 hours, and 24 hours after the attempt before, so the last of seven attempts is about 31 hours after the first. The time of the next attempt is stored, so a restart of `inbaid` neither drops nor hurries it. After the seventh attempt the delivery stops and the event remains on the feed. A delivery waiting for a retry does not hold back later events for the same webhook, so after a failure events can arrive out of `id` order. Order them by `id`, or read the feed, which is always in order. A delivery that was being sent when `inbaid` stopped is sent again about 30 seconds later, so the same event can arrive twice.
+
+A delivered or stopped delivery is deleted 7 days later. `INBAI_DELIVERY_RETENTION_DAYS` changes that period, and `0` keeps them.
 
 The `url` must be `https`, must not carry a user name or password, and must resolve only to public addresses. A loopback, link-local (including `169.254.169.254`), private, carrier-grade NAT, multicast or unspecified address is refused with 400. `inbaid` checks the address again when it connects, so a name that later resolves to an internal address is refused too. A redirect is not followed and counts as a failed delivery. Each delivery times out after 10 seconds.
 
 An operator who sends webhooks to a service on their own network sets `INBAI_WEBHOOK_ALLOW_PRIVATE=true` before `inbaid serve`. That allows `http` and private addresses for every webhook on that server. An agent cannot set it.
 
-Creating a webhook needs a `read` grant on the inbox. One agent may hold 10 webhooks on one inbox, disabled ones included. The next create is 429 until the agent deletes one. Each webhook is one POST per event, so the cap limits how many requests one agent adds to the delivery loop for each event. An operator is not capped.
+Creating a webhook needs a `read` grant on the inbox. One agent may hold 10 webhooks on one inbox, disabled ones included. The next create is 429 until the agent deletes one. Each webhook is one POST per event, so the cap limits how many requests one agent adds to webhook delivery for each event. An operator is not capped.
 
 ### Access is checked before each delivery
 

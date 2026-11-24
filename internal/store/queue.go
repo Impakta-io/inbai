@@ -170,6 +170,15 @@ type MemoryQueue struct {
 	mu   sync.Mutex
 	next int64
 	jobs []*QueueJob
+	// finished is when each done or failed job ended, for Prune.
+	finished map[int64]time.Time
+}
+
+func (m *MemoryQueue) end(id int64, now time.Time) {
+	if m.finished == nil {
+		m.finished = map[int64]time.Time{}
+	}
+	m.finished[id] = now
 }
 
 func (m *MemoryQueue) Enqueue(_ context.Context, kind, uniqueKey string, payload []byte, runAt time.Time) (int64, bool, error) {
@@ -225,12 +234,13 @@ func (m *MemoryQueue) ClaimJob(_ context.Context, now time.Time, lease time.Dura
 	return QueueJob{}, false, nil
 }
 
-func (m *MemoryQueue) AckJob(_ context.Context, id int64, _ time.Time) error {
+func (m *MemoryQueue) AckJob(_ context.Context, id int64, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, job := range m.jobs {
 		if job.ID == id {
 			job.Done = true
+			m.end(id, now)
 			job.LastError = ""
 			return nil
 		}
@@ -251,12 +261,13 @@ func (m *MemoryQueue) RetryJob(_ context.Context, id int64, next time.Time, last
 	return nil
 }
 
-func (m *MemoryQueue) FailJob(_ context.Context, id int64, _ time.Time, lastErr string) error {
+func (m *MemoryQueue) FailJob(_ context.Context, id int64, now time.Time, lastErr string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, job := range m.jobs {
 		if job.ID == id {
 			job.Failed = true
+			m.end(id, now)
 			job.LastError = lastErr
 			return nil
 		}
