@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -90,7 +91,22 @@ func (m *Memory) Inboxes(context.Context) ([]string, error) {
 	for inbox := range m.cursors {
 		out = append(out, inbox)
 	}
+	sort.Strings(out)
 	return out, nil
+}
+
+// Forget drops the cursor and address binding for an inbox. Events already logged stay.
+func (m *Memory) Forget(_ context.Context, inbox string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	delete(m.cursors, inbox)
+	for address, owner := range m.byAddress {
+		if owner == inbox {
+			delete(m.byAddress, address)
+		}
+	}
+	return nil
 }
 
 func (m *Memory) Put(_ context.Context, inbox, address, state string, records []Record) error {

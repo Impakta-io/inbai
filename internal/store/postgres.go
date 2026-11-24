@@ -256,6 +256,13 @@ func (p *Postgres) Inboxes(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// Forget drops the cursor row for an inbox, which also removes its address binding.
+// Events already logged stay.
+func (p *Postgres) Forget(ctx context.Context, inbox string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM inbox_cursor WHERE inbox = $1`, inbox)
+	return err
+}
+
 func (p *Postgres) Put(ctx context.Context, inbox, address, state string, records []Record) error {
 	address = strings.ToLower(strings.TrimSpace(address))
 	tx, err := p.pool.Begin(ctx)

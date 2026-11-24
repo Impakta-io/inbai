@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,17 +124,29 @@ func (f *Feed) Sync(ctx context.Context, watch mailbackend.Watcher, inbox string
 }
 
 // Sweep syncs every inbox the log knows about.
+// A failure on one inbox does not stop the others. It returns every failure, each naming its inbox.
+// It stops early only when ctx ends.
 func (f *Feed) Sweep(ctx context.Context, watch mailbackend.Watcher) error {
 	inboxes, err := f.log.Inboxes(ctx)
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, inbox := range inboxes {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
 		if err := f.Sync(ctx, watch, inbox); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("inbox %s: %w", inbox, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// Forget stops sweeping an inbox and drops its address binding. Events already logged stay.
+func (f *Feed) Forget(ctx context.Context, inbox string) error {
+	return f.log.Forget(ctx, inbox)
 }
 
 // Since returns events after a consumer cursor.

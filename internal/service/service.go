@@ -475,7 +475,11 @@ func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string,
 	return out, next, nil
 }
 
-// DeleteInbox removes one account. Only an operator may do that.
+// DeleteInbox removes one account and its event cursor. Only an operator may do that.
+// The account is deleted first because that step cannot be undone. Dropping the cursor
+// first would stop events for an inbox that still exists if the account delete failed.
+// A failed cursor delete is not returned: the account is gone, and a leftover cursor
+// only shows up as a cursor.sweep error naming this inbox. Other inboxes still sync.
 func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) error {
 	if !caller.Operator {
 		return ErrForbidden
@@ -485,6 +489,9 @@ func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) err
 	}
 	if err := s.mail.DeleteInbox(ctx, id); err != nil {
 		return err
+	}
+	if s.feed != nil {
+		_ = s.feed.Forget(ctx, id)
 	}
 	return s.record(ctx, caller, "inbox.delete", id)
 }
