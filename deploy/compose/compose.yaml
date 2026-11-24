@@ -5,7 +5,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: stalwart
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD to a random database password, for example openssl rand -hex 24}
       POSTGRES_DB: stalwart
     volumes:
       - postgres:/var/lib/postgresql/data
@@ -21,9 +21,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD to a random database password, for example openssl rand -hex 24}
       STALWART_RECOVERY_MODE: ${STALWART_RECOVERY_MODE:-0}
-      STALWART_RECOVERY_ADMIN: ${STALWART_RECOVERY_ADMIN:-}
+      STALWART_RECOVERY_ADMIN: "admin:${STALWART_RECOVERY_ADMIN_PASSWORD:?set STALWART_RECOVERY_ADMIN_PASSWORD to a random value that differs from PG_PASSWORD}"
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     ports:
       - "25:25"
@@ -42,7 +42,7 @@ services:
         condition: service_healthy
     environment:
       INBAI_OPERATOR_TOKEN: ${INBAI_OPERATOR_TOKEN:-}
-      INBAI_DATABASE_URL: postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable
+      PG_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD to a random database password, for example openssl rand -hex 24}
       INBAI_STALWART_URL: https://stalwart
       INBAI_TLS_INSECURE: "1"
       INBAI_SIGNING_KEY: ${INBAI_SIGNING_KEY:-}

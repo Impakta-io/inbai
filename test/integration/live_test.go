@@ -39,9 +39,9 @@ func TestOneInboxOnStalwart(t *testing.T) {
 	password := secret()
 	compose := filepath.Join(root, "deploy", "compose")
 	env := []string{
-		"PG_PASSWORD=" + password,
+		"PG_PASSWORD=" + secret(),
 		"STALWART_RECOVERY_MODE=1",
-		"STALWART_RECOVERY_ADMIN=admin:" + password,
+		"STALWART_RECOVERY_ADMIN_PASSWORD=" + password,
 		"INBAI_OPERATOR_TOKEN=integration-token",
 		"INBAI_CONFIG_DIR=" + cfgDir,
 	}
