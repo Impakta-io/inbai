@@ -135,7 +135,7 @@ func idempotencyBackends(t *testing.T, run func(t *testing.T, open func(mailback
 			t.Fatal(err)
 		}
 		defer db.Close()
-		if _, err := pool.Exec(ctx, `TRUNCATE idempotency, quota_counter`); err != nil {
+		if _, err := pool.Exec(ctx, `TRUNCATE idempotency, quota_counter, job_queue, bulk_job`); err != nil {
 			t.Fatal(err)
 		}
 		run(t, func(mail mailbackend.Backend) *Service {
@@ -317,6 +317,244 @@ func TestStaleReservationIsTakenOver(t *testing.T) {
 		svc.release(ctx, claim{kind: kindSend, key: key, at: start})
 		if err := svc.Deliver(ctx, operator, outbound("hi"), "k"); err != nil || mail.count() != 1 {
 			t.Fatalf("after a stale release err = %v deliveries %d", err, mail.count())
+		}
+	})
+}
+
+// CreateInboxes waits on release when gated, fails while failNext is set, and otherwise answers as fakeMail.
+func (g *gateMail) CreateInboxes(ctx context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	g.mu.Lock()
+	gated := g.gated
+	g.mu.Unlock()
+	if gated {
+		g.entered <- struct{}{}
+		<-g.release
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failNext > 0 {
+		g.failNext--
+		return nil, errors.New("backend unavailable")
+	}
+	return g.fakeMail.CreateInboxes(ctx, specs)
+}
+
+func (g *gateMail) batchCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.batches)
+}
+
+func generateRequest(prefix string, count int) GenerateRequest {
+	return GenerateRequest{Prefix: prefix, Domain: "example.com", Count: count}
+}
+
+func TestGenerateHashNamesTheBackendPlacement(t *testing.T) {
+	sum := sha256.Sum256([]byte(`{"op":"generate","domain":"example.com","domainId":"dom","roleId":"inbox-role","prefix":"u","count":2,"quotaBytes":0}`))
+	if got, want := generateHash(placedMail{fakeMail: &fakeMail{}}, "u", generateRequest("u", 2)), hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("generate hash %s, want %s", got, want)
+	}
+	if generateHash(&fakeMail{}, "u", generateRequest("u", 2)) == generateHash(placedMail{fakeMail: &fakeMail{}}, "u", generateRequest("u", 2)) {
+		t.Fatal("unplaced backend matched a placed generate")
+	}
+}
+
+func TestConcurrentGeneratesWithOneKeyRunOnce(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		mail := newGateMail()
+		mail.gated = true
+		svc := open(mail)
+		const n = 5
+		type answer struct {
+			result GenerateResult
+			err    error
+		}
+		results := make(chan answer, n)
+		for range n {
+			go func() {
+				got, err := svc.Generate(context.Background(), operator, generateRequest("u", 2), "gen-1")
+				results <- answer{got, err}
+			}()
+		}
+		released := false
+		defer func() {
+			if !released {
+				close(mail.release)
+			}
+		}()
+		select {
+		case <-mail.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("no generate reached the backend")
+		}
+		// One generate is held in the backend. Every other request must answer without reaching it.
+		for range n - 1 {
+			select {
+			case got := <-results:
+				if !errors.Is(got.err, ErrInProgress) {
+					t.Errorf("concurrent repeat %+v err = %v, want ErrInProgress", got.result, got.err)
+				}
+			case <-mail.entered:
+				t.Fatal("a second generate with the same key reached the backend")
+			case <-time.After(5 * time.Second):
+				t.Fatal("a concurrent repeat did not answer")
+			}
+		}
+		close(mail.release)
+		released = true
+		first := <-results
+		if first.err != nil || len(first.result.Inboxes) != 2 {
+			t.Fatalf("held generate %+v err = %v", first.result, first.err)
+		}
+		mail.mu.Lock()
+		mail.gated = false
+		mail.mu.Unlock()
+		again, err := svc.Generate(context.Background(), operator, generateRequest("u", 2), "gen-1")
+		if err != nil || len(again.Inboxes) != 2 || again.Inboxes[0] != first.result.Inboxes[0] {
+			t.Fatalf("repeat after done %+v err = %v", again, err)
+		}
+		if got := mail.batchCount(); got != 1 {
+			t.Fatalf("backend batches = %d, want 1", got)
+		}
+	})
+}
+
+func TestGenerateKeyReusedForADifferentRequest(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		mail := newGateMail()
+		svc := open(mail)
+		ctx := context.Background()
+		if _, err := svc.Generate(ctx, operator, generateRequest("u", 2), "k"); err != nil {
+			t.Fatal(err)
+		}
+		quota := generateRequest("u", 2)
+		quota.QuotaBytes = 1
+		for name, req := range map[string]GenerateRequest{
+			"prefix": generateRequest("v", 2),
+			"count":  generateRequest("u", 3),
+			"quota":  quota,
+		} {
+			if got, err := svc.Generate(ctx, operator, req, "k"); !errors.Is(err, ErrKeyReused) {
+				t.Fatalf("different %s %+v err = %v, want ErrKeyReused", name, got, err)
+			}
+		}
+		if got := mail.batchCount(); got != 1 {
+			t.Fatalf("backend batches = %d, want 1", got)
+		}
+		// The prefix is compared as it is used, so case and spaces do not make a different request.
+		if got, err := svc.Generate(ctx, operator, generateRequest(" U ", 2), "k"); err != nil || len(got.Inboxes) != 2 {
+			t.Fatalf("same request %+v err = %v", got, err)
+		}
+	})
+}
+
+func TestRepeatedGenerateReturnsTheSameInboxes(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		mail := newGateMail()
+		mail.taken = map[string]bool{"u00001": true}
+		svc := open(mail)
+		ctx := context.Background()
+		first, err := svc.Generate(ctx, operator, generateRequest("u", 3), "k")
+		if err != nil || len(first.Inboxes) != 2 || len(first.Existing) != 1 {
+			t.Fatalf("generate %+v err = %v", first, err)
+		}
+		mail.mu.Lock()
+		mail.failNext = 1 // a repeat that reached the backend would fail
+		mail.mu.Unlock()
+		again, err := svc.Generate(ctx, operator, generateRequest("u", 3), "k")
+		if err != nil || again.JobID != "" || len(again.Inboxes) != 2 || again.Inboxes[1] != first.Inboxes[1] ||
+			len(again.Existing) != 1 || again.Existing[0] != "u00001@example.com" {
+			t.Fatalf("repeat %+v err = %v, want %+v", again, err, first)
+		}
+		if got := mail.batchCount(); got != 1 {
+			t.Fatalf("backend batches = %d, want 1", got)
+		}
+	})
+}
+
+func TestRepeatedQueuedGenerateReturnsTheSameJob(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		svc := open(newGateMail())
+		svc.SetSyncLimit(1)
+		ctx := context.Background()
+		first, err := svc.Generate(ctx, operator, generateRequest("q", 2), "k")
+		if err != nil || first.JobID == "" {
+			t.Fatalf("generate %+v err = %v", first, err)
+		}
+		for range 2 {
+			again, err := svc.Generate(ctx, operator, generateRequest("q", 2), "k")
+			if err != nil || again.JobID != first.JobID || len(again.Inboxes) != 0 {
+				t.Fatalf("repeat %+v err = %v, want job %s", again, err, first.JobID)
+			}
+		}
+		if _, err := svc.Generate(ctx, operator, generateRequest("q", 3), "k"); !errors.Is(err, ErrKeyReused) {
+			t.Fatalf("different count err = %v, want ErrKeyReused", err)
+		}
+		if svc.db != nil {
+			claimed, ok, err := svc.db.ClaimJob(ctx, svc.now().UTC().Add(time.Second), time.Minute)
+			if err != nil || !ok || claimed.UniqueKey != first.JobID {
+				t.Fatalf("claim %+v ok %v err %v", claimed, ok, err)
+			}
+			if extra, ok, err := svc.db.ClaimJob(ctx, svc.now().UTC().Add(time.Second), time.Minute); err != nil || ok {
+				t.Fatalf("a second job was queued: %+v err %v", extra, err)
+			}
+			return
+		}
+		waitForJob(t, svc, first.JobID)
+		svc.mu.Lock()
+		jobs := len(svc.jobs)
+		svc.mu.Unlock()
+		if jobs != 1 {
+			t.Fatalf("jobs = %d, want 1", jobs)
+		}
+	})
+}
+
+func TestFailedGenerateReleasesTheKey(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		mail := newGateMail()
+		mail.failNext = 1
+		svc := open(mail)
+		ctx := context.Background()
+		if _, err := svc.Generate(ctx, operator, generateRequest("u", 2), "k"); err == nil {
+			t.Fatal("the failed generate returned nil")
+		}
+		// The released key is free, so a different request may use it now.
+		if got, err := svc.Generate(ctx, operator, generateRequest("v", 2), "k"); err != nil || len(got.Inboxes) != 2 {
+			t.Fatalf("retry after a failure %+v err = %v", got, err)
+		}
+		if _, err := svc.Generate(ctx, operator, generateRequest("v", 2), "k"); err != nil {
+			t.Fatalf("repeat after the retry err = %v", err)
+		}
+		if got := mail.batchCount(); got != 1 {
+			t.Fatalf("backend batches = %d, want 1", got)
+		}
+	})
+}
+
+func TestGenerateKeyStoredBeforeReservationStillAnswers(t *testing.T) {
+	idempotencyBackends(t, func(t *testing.T, open func(mailbackend.Backend) *Service) {
+		mail := newGateMail()
+		svc := open(mail)
+		if svc.db == nil {
+			t.Skip("keys held in memory do not outlive the process")
+		}
+		ctx := context.Background()
+		// An older server keyed a generate by caller, prefix, and count, with no request hash.
+		stored := `{"Inboxes":[{"id":"old-0","address":"u00000@example.com"}],"Existing":["u00001@example.com"],"JobID":""}`
+		if err := svc.db.SaveIdempotency(ctx, "generate", "operator\nu\n2\nold", stored); err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.Generate(ctx, operator, generateRequest("u", 2), "old")
+		if err != nil || len(got.Inboxes) != 1 || got.Inboxes[0].ID != "old-0" || len(got.Existing) != 1 {
+			t.Fatalf("old key %+v err = %v", got, err)
+		}
+		if got := mail.batchCount(); got != 0 {
+			t.Fatalf("backend batches = %d, want 0", got)
+		}
+		// The answer is now bound to that request.
+		if _, err := svc.Generate(ctx, operator, generateRequest("w", 2), "old"); !errors.Is(err, ErrKeyReused) {
+			t.Fatalf("different prefix err = %v, want ErrKeyReused", err)
 		}
 	})
 }

@@ -40,6 +40,7 @@ Changes merged since `v0.1.0-alpha.3`.
 
 ### Fixed
 
+- `POST /v1/inboxes/generate` holds its `Idempotency-Key` while it runs and binds it to the prefix and count, like create, send, and reply. A concurrent repeat is `409` instead of a second batch or job, and the same key with another prefix or count is `422` instead of the first result.
 - Message delete, the retention sweep, and `inbai inbox delete` work on Stalwart after the `inbai init` rerun (#82).
 - Deleting an inbox removes its grants, webhooks, allowlist, retention setting, event cursor, and create `Idempotency-Key` (#84).
 - `docker compose down -v` removes every volume the stacks create. Stalwart's generated configuration lives in a temporary filesystem instead of a new anonymous volume per container (#87).

@@ -80,3 +80,36 @@ func TestIdempotencyKeyInProgressAndReused(t *testing.T) {
 		t.Fatalf("sends = %d, want 1", got)
 	}
 }
+
+func TestGenerateIdempotencyKeyIsBoundToTheRequest(t *testing.T) {
+	svc := service.New(&fakeMail{})
+	svc.SetSyncLimit(1)
+	srv := httptest.NewServer((&Server{
+		Service: svc, Token: "operator-token", Domain: "example.com",
+	}).Handler())
+	defer srv.Close()
+	generate := func(body, key string) (int, string) {
+		res := call(t, srv.URL, http.MethodPost, "/v1/inboxes/generate", "operator-token", body, key)
+		return res.StatusCode, readBody(t, res)
+	}
+	code, first := generate(`{"prefix":"u","count":1}`, "sync")
+	if code != http.StatusCreated {
+		t.Fatalf("generate %d %s", code, first)
+	}
+	if code, again := generate(`{"prefix":"u","count":1}`, "sync"); code != http.StatusCreated || again != first {
+		t.Fatalf("repeat %d %s, want %s", code, again, first)
+	}
+	if code, body := generate(`{"prefix":"v","count":1}`, "sync"); code != http.StatusUnprocessableEntity || !strings.Contains(body, "used for a different request") {
+		t.Fatalf("other prefix %d %s", code, body)
+	}
+	code, queued := generate(`{"prefix":"q","count":2}`, "async")
+	if code != http.StatusAccepted || !strings.Contains(queued, `"jobId"`) {
+		t.Fatalf("queued %d %s", code, queued)
+	}
+	if code, again := generate(`{"prefix":"q","count":2}`, "async"); code != http.StatusAccepted || again != queued {
+		t.Fatalf("queued repeat %d %s, want %s", code, again, queued)
+	}
+	if code, body := generate(`{"prefix":"q","count":3}`, "async"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("other count %d %s", code, body)
+	}
+}
