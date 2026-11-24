@@ -302,19 +302,35 @@ func (m *Memory) Claim(_ context.Context, now time.Time) (Delivery, bool, error)
 	return Delivery{}, false, nil
 }
 
+// Ack records that the receiver took the delivery, even when it had failed meanwhile.
 func (m *Memory) Ack(_ context.Context, id int64, now time.Time) error {
-	return m.finish(id, func(item *memDelivery) { item.done, item.finished = true, now })
+	return m.finish(id, func(item *memDelivery) {
+		if !item.done {
+			item.done, item.failed, item.reason, item.finished = true, false, "", now
+		}
+	})
 }
 
+// Retry schedules a delivery that has not finished.
 func (m *Memory) Retry(_ context.Context, id int64, next time.Time) error {
-	return m.finish(id, func(item *memDelivery) { item.next = next })
+	return m.finish(id, func(item *memDelivery) {
+		if !item.done && !item.failed {
+			item.next = next
+		}
+	})
 }
 
+// Fail drops a delivery that has not finished.
 func (m *Memory) Fail(_ context.Context, id int64, now time.Time) error {
-	return m.finish(id, func(item *memDelivery) { item.failed, item.finished = true, now })
+	return m.finish(id, func(item *memDelivery) {
+		if !item.done && !item.failed {
+			item.failed, item.finished = true, now
+		}
+	})
 }
 
-// finish changes one delivery and clears its subscription's in-flight mark when it names that delivery.
+// finish changes one delivery and clears its subscription's in-flight mark when it names
+// that delivery, as Postgres does. The change applies whether or not the mark names it.
 func (m *Memory) finish(id int64, change func(*memDelivery)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -535,6 +535,17 @@ WHERE subscription_id = $1 AND done_at IS NULL AND failed_at IS NULL`, id, reaso
 // When another process marked the subscription first, the lock sees the new row and its
 // sending_until fails the condition, so two processes never send for one subscription at
 // the same time.
+//
+// The lock rechecks only the subscription row. Under READ COMMITTED the delivery columns
+// in claimed still come from the statement's snapshot, so a delivery another process
+// claimed and finished after that snapshot can look pending although its subscription
+// is free again. updated therefore repeats the delivery conditions. An UPDATE evaluates
+// its WHERE on the newest committed version of the row, waiting for a writer still in
+// progress, so a delivery that was finished or rescheduled meanwhile matches nothing.
+// busy marks the subscription only for a row updated returned, so a stale candidate
+// claims nothing and leaves the subscription as it was; the next claim reads afresh.
+// No earlier delivery can have become due in between: a finished one stays finished, and
+// one waiting for a retry keeps a later next_at.
 func (p *Postgres) Claim(ctx context.Context, now time.Time) (Delivery, bool, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -555,17 +566,18 @@ WITH claimed AS (
     ORDER BY delivery.id
     FOR UPDATE OF subscription SKIP LOCKED
     LIMIT 1
-), busy AS (
-    UPDATE webhook_subscription AS subscription
-    SET sending_delivery = claimed.id, sending_until = $2
-    FROM claimed
-    WHERE subscription.id = claimed.subscription_id
 ), updated AS (
     UPDATE webhook_delivery AS delivery
     SET attempt = delivery.attempt + 1, next_at = $2
     FROM claimed
     WHERE delivery.id = claimed.id
+      AND delivery.done_at IS NULL AND delivery.failed_at IS NULL AND delivery.next_at <= $1
     RETURNING delivery.id, delivery.attempt, delivery.subscription_id, delivery.event_id
+), busy AS (
+    UPDATE webhook_subscription AS subscription
+    SET sending_delivery = updated.id, sending_until = $2
+    FROM updated
+    WHERE subscription.id = updated.subscription_id
 )
 SELECT updated.id, updated.attempt, subscription.id, subscription.agent, subscription.operator,
        subscription.url, subscription.secret,
@@ -589,28 +601,59 @@ JOIN mail_event AS event ON event.id = updated.event_id`, now, now.Add(claimLeas
 	return delivery, true, nil
 }
 
-// releaseSending clears the subscription's in-flight mark when it still names this delivery.
-// It runs in the same statement as the change to the delivery.
-const releaseSending = `
-UPDATE webhook_subscription SET sending_delivery = NULL, sending_until = NULL
-WHERE id IN (SELECT subscription_id FROM changed) AND sending_delivery = $1`
-
+// Ack records that the receiver took the delivery. That stands even when the delivery had
+// failed meanwhile, for example because its subscription was disabled during the post.
 func (p *Postgres) Ack(ctx context.Context, id int64, now time.Time) error {
-	_, err := p.pool.Exec(ctx, `
-WITH changed AS (UPDATE webhook_delivery SET done_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, now)
-	return err
+	return p.finish(ctx, id, now, `
+UPDATE webhook_delivery SET done_at = $2, failed_at = NULL, fail_reason = '' WHERE id = $1 AND done_at IS NULL`)
 }
 
+// Retry schedules a delivery that has not finished.
 func (p *Postgres) Retry(ctx context.Context, id int64, next time.Time) error {
-	_, err := p.pool.Exec(ctx, `
-WITH changed AS (UPDATE webhook_delivery SET next_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, next)
-	return err
+	return p.finish(ctx, id, next, `
+UPDATE webhook_delivery SET next_at = $2 WHERE id = $1 AND done_at IS NULL AND failed_at IS NULL`)
 }
 
+// Fail drops a delivery that has not finished.
 func (p *Postgres) Fail(ctx context.Context, id int64, now time.Time) error {
-	_, err := p.pool.Exec(ctx, `
-WITH changed AS (UPDATE webhook_delivery SET failed_at = $2 WHERE id = $1 RETURNING subscription_id)`+releaseSending, id, now)
-	return err
+	return p.finish(ctx, id, now, `
+UPDATE webhook_delivery SET failed_at = $2 WHERE id = $1 AND done_at IS NULL AND failed_at IS NULL`)
+}
+
+// finish records a claimed delivery's outcome with change, whose parameters are the
+// delivery id and a time, and clears the subscription's in-flight mark when it names this
+// delivery. The outcome is recorded whether or not the mark still names it: after a lease
+// ended, another claim may have taken the subscription, and its mark is left alone.
+//
+// The subscription row is locked first, as Claim, Disable and Unsubscribe lock it before
+// delivery rows, so finishing a delivery whose lease ended never deadlocks with a claim
+// of it. The statement after the lock reads every change committed before it.
+func (p *Postgres) finish(ctx context.Context, id int64, at time.Time, change string) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var sub string
+	err = tx.QueryRow(ctx, `
+SELECT subscription.id FROM webhook_subscription AS subscription
+JOIN webhook_delivery AS delivery ON delivery.subscription_id = subscription.id
+WHERE delivery.id = $1
+FOR UPDATE OF subscription`, id).Scan(&sub)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The delivery or its subscription was removed.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+WITH changed AS (`+change+`)
+UPDATE webhook_subscription SET sending_delivery = NULL, sending_until = NULL
+WHERE id = $3 AND sending_delivery = $1`, id, at, sub); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) Suppress(ctx context.Context, address, reason string) error {
