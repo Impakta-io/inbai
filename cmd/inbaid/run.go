@@ -216,6 +216,7 @@ func retainLoop(svc *service.Service, days int, stderr io.Writer) {
 		if _, err := svc.Sweep(ctx, service.Caller{Operator: true}, days); err != nil {
 			writef(stderr, "retention: %s\n", err)
 		}
+		svc.PruneMemory(time.Now())
 	}
 	sweep()
 	ticker := time.NewTicker(time.Hour)
