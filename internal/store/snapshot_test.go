@@ -73,6 +73,22 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSnapshotChecksEventShape(t *testing.T) {
+	for event, ok := range map[string]bool{
+		`{"id":1,"inbox":"a","messageId":"m","kind":"created"}`:   true,
+		`{"id":1,"inbox":"a","messageId":"m","kind":"destroyed"}`: true,
+		`{"id":1,"inbox":"a","messageId":"","kind":"resync"}`:     true,
+		`{"id":1,"inbox":"a","messageId":"","kind":"created"}`:    false,
+		`{"id":1,"inbox":"a","messageId":"m","kind":"resync"}`:    false,
+		`{"id":1,"inbox":"a","messageId":"m","kind":"moved"}`:     false,
+	} {
+		_, err := Decode([]byte(`{"version":1,"events":[` + event + `]}`))
+		if (err == nil) != ok {
+			t.Errorf("%s: err %v, want ok %v", event, err, ok)
+		}
+	}
+}
+
 func TestPostgresBackupRoundTrip(t *testing.T) {
 	dsn := os.Getenv("INBAI_TEST_DATABASE")
 	if dsn == "" {

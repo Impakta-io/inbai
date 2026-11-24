@@ -8,11 +8,15 @@ Set `INBAI_DATABASE_URL` before `inbaid serve`. The server creates the tables. W
 
 ## Feed
 
-`GET /v1/events?inbox=ACCOUNT_ID&after=0&timeout=25` returns up to 50 events with `id` greater than `after`, oldest first. It answers as soon as there is one, or when `timeout` elapses. `timeout` is seconds and is capped at 25. The response is `{"events":[{"id":1,"inbox":"ACCOUNT_ID","messageId":"...","kind":"created"}],"after":1}`. `kind` is `created` or `destroyed`. `after` in the response is the id of the last event returned, or the cursor the call waited from when it returned none.
+`GET /v1/events?inbox=ACCOUNT_ID&after=0&timeout=25` returns up to 50 events with `id` greater than `after`, oldest first. It answers as soon as there is one, or when `timeout` elapses. `timeout` is seconds and is capped at 25. The response is `{"events":[{"id":1,"inbox":"ACCOUNT_ID","messageId":"...","kind":"created"}],"after":1}`. `kind` is `created`, `destroyed`, or `resync`. `after` in the response is the id of the last event returned, or the cursor the call waited from when it returned none.
 
 `latest=true` in place of `after` waits only for events recorded after the request starts. A new consumer that does not want the history starts this way. `latest=true` with `after` is a 400.
 
 Pass the response's `after` as `after` on the next call. Delivery is at least once and ordered per inbox, so the same `id` can be seen again after a timeout. Handle it once, then move the cursor forward.
+
+A `resync` event has an empty `messageId`. It means the mail server could no longer report changes since the stored cursor, for example because Stalwart expired its change log (JMAP `cannotCalculateChanges`) or an IMAP mailbox's UIDVALIDITY changed. The feed moved to the inbox's current state, so messages that arrived or were removed before the `resync` event may have no `created` or `destroyed` event. List the inbox to catch up, then keep reading the feed after the `resync` event's `id`. `inbaid` also logs a warning naming the inbox.
+
+When Stalwart reports `cannotCalculateChanges` for an account that no longer exists, for example one an administrator deleted in Stalwart, `inbaid` stops sweeping that inbox, drops its cursor and address binding, and logs a warning naming the inbox once. Events already on the feed stay. No `resync` event is recorded.
 
 A caller needs a `read` grant on that inbox. Another inbox is forbidden and the log is not read.
 

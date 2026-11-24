@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,9 @@ type Feed struct {
 	allowPrivate bool
 	client       *http.Client
 	gate         Gate
+
+	// logger receives cursor recovery notices. Nil means slog.Default().
+	logger *slog.Logger
 }
 
 // Gate decides, before each webhook is sent, whether the subscription's creator may still
@@ -102,6 +106,8 @@ func (f *Feed) Ping(ctx context.Context) error {
 
 // Sync asks the mail backend for changes since the stored cursor and appends them.
 // The first call for an inbox stores the current state and does not invent history.
+// When the backend can no longer report changes since the cursor, Sync recovers:
+// see recoverCursor.
 func (f *Feed) Sync(ctx context.Context, watch mailbackend.Watcher, inbox string) error {
 	state, ok, err := f.log.State(ctx, inbox)
 	if err != nil {
@@ -116,6 +122,9 @@ func (f *Feed) Sync(ctx context.Context, watch mailbackend.Watcher, inbox string
 	}
 	for {
 		delta, err := watch.MailChanges(ctx, inbox, state)
+		if errors.Is(err, mailbackend.ErrChangesLost) {
+			return f.recoverCursor(ctx, watch, inbox, state, err)
+		}
 		if err != nil {
 			return err
 		}
@@ -135,6 +144,47 @@ func (f *Feed) Sync(ctx context.Context, watch mailbackend.Watcher, inbox string
 			return nil
 		}
 	}
+}
+
+// recoverCursor handles a cursor the backend can no longer report changes from.
+// An inbox the backend says is gone is forgotten. Otherwise the cursor moves to
+// the current state and one resync event, with no message id, tells consumers
+// that changes in between may be missing and the inbox should be listed again.
+func (f *Feed) recoverCursor(ctx context.Context, watch mailbackend.Watcher, inbox, state string, cause error) error {
+	if check, ok := watch.(mailbackend.InboxChecker); ok {
+		exists, err := check.InboxExists(ctx, inbox)
+		if err != nil {
+			return fmt.Errorf("%w; checking whether the inbox exists: %w", cause, err)
+		}
+		if !exists {
+			if err := f.log.Forget(ctx, inbox); err != nil {
+				return err
+			}
+			f.notices().Warn("event cursor dropped: the inbox no longer exists on the mail server", "inbox", inbox)
+			return nil
+		}
+	}
+	current, err := watch.MailState(ctx, inbox)
+	if err != nil {
+		return fmt.Errorf("%w; reading the current state: %w", cause, err)
+	}
+	if current == state {
+		return cause
+	}
+	if err := f.log.Put(ctx, inbox, "", current, []store.Record{{Kind: "resync"}}); err != nil {
+		return err
+	}
+	f.appended.Add(1)
+	f.notices().Warn("event cursor moved to the current state: the mail server cannot report changes since the stored one, so events in between may be missing",
+		"inbox", inbox, "from", state, "to", current, "cause", cause.Error())
+	return nil
+}
+
+func (f *Feed) notices() *slog.Logger {
+	if f.logger != nil {
+		return f.logger
+	}
+	return slog.Default()
 }
 
 // Sweep syncs every inbox the log knows about.

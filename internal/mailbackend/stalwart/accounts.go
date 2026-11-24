@@ -74,6 +74,45 @@ func ListInboxes(ctx context.Context, client *Client, page mailbackend.Page) ([]
 	return out, next, nil
 }
 
+// InboxExists reports whether an account is still on the server. It asks
+// x:Account/get for that one id. A listed id exists and a notFound id does not.
+// A response that names the id in neither is an error, not an answer.
+func InboxExists(ctx context.Context, client *Client, id string) (bool, error) {
+	if client == nil {
+		return false, fmt.Errorf("missing stalwart client")
+	}
+	if id == "" {
+		return false, fmt.Errorf("inbox id is required")
+	}
+	raw, err := client.invoke(ctx, "a", "x:Account/get", map[string]any{
+		"ids":        []string{id},
+		"properties": []string{"name"},
+	})
+	if err != nil {
+		return false, err
+	}
+	var got struct {
+		List []struct {
+			ID string `json:"id"`
+		} `json:"list"`
+		NotFound []string `json:"notFound"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return false, err
+	}
+	for _, item := range got.List {
+		if item.ID == id {
+			return true, nil
+		}
+	}
+	for _, missing := range got.NotFound {
+		if missing == id {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("stalwart x:Account/get did not report account %s", id)
+}
+
 type mailAccount struct {
 	ID    string
 	Local string

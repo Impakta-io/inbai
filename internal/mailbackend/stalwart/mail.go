@@ -103,6 +103,11 @@ func (m Mail) MailState(ctx context.Context, accountID string) (string, error) {
 	return MailState(ctx, m.Client, accountID)
 }
 
+// InboxExists reports whether the account is still on the server.
+func (m Mail) InboxExists(ctx context.Context, accountID string) (bool, error) {
+	return InboxExists(ctx, m.Client, accountID)
+}
+
 func (m Mail) MailChanges(ctx context.Context, accountID, since string) (mailbackend.Delta, error) {
 	delta, err := MailChanges(ctx, m.Client, accountID, since)
 	if err != nil {

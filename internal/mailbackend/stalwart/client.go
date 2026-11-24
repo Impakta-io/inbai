@@ -72,6 +72,20 @@ func (m *jmapMethodResponse) UnmarshalJSON(data []byte) error {
 // a cut-off document.
 const maxJMAPResponse = 16 << 20
 
+// methodError is a JMAP method-level error, such as cannotCalculateChanges.
+type methodError struct {
+	CallID      string `json:"-"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+func (e *methodError) Error() string {
+	if e.Description != "" {
+		return fmt.Sprintf("stalwart %s: %s: %s", e.CallID, e.Type, e.Description)
+	}
+	return fmt.Sprintf("stalwart %s: %s", e.CallID, e.Type)
+}
+
 func (c *Client) invoke(ctx context.Context, id, name string, args any) (json.RawMessage, error) {
 	found, err := c.invokeMany(ctx, []jmapCall{{Name: name, Args: args, ID: id}})
 	if err != nil {
@@ -133,15 +147,9 @@ func (c *Client) invokeMany(ctx context.Context, calls []jmapCall) (map[string]j
 	out := make(map[string]json.RawMessage, len(parsed.MethodResponses))
 	for _, method := range parsed.MethodResponses {
 		if method.Name == "error" {
-			var problem struct {
-				Type        string `json:"type"`
-				Description string `json:"description"`
-			}
-			_ = json.Unmarshal(method.Raw, &problem)
-			if problem.Description != "" {
-				return nil, fmt.Errorf("stalwart %s: %s: %s", method.ID, problem.Type, problem.Description)
-			}
-			return nil, fmt.Errorf("stalwart %s: %s", method.ID, problem.Type)
+			problem := &methodError{CallID: method.ID}
+			_ = json.Unmarshal(method.Raw, problem)
+			return nil, problem
 		}
 		out[method.ID] = method.Raw
 	}

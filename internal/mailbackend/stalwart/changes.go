@@ -6,7 +6,10 @@ package stalwart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 // MailState returns the account's current Email state without listing messages.
@@ -45,6 +48,9 @@ func MailState(ctx context.Context, client *Client, accountID string) (string, e
 }
 
 // MailChanges returns messages created or destroyed since a JMAP state.
+// A cannotCalculateChanges method error is mailbackend.ErrChangesLost. Stalwart
+// returns it when the change log since that state is gone, and also for an
+// account that no longer exists.
 func MailChanges(ctx context.Context, client *Client, accountID, since string) (mailDelta, error) {
 	if client == nil {
 		return mailDelta{}, fmt.Errorf("missing stalwart client")
@@ -58,6 +64,10 @@ func MailChanges(ctx context.Context, client *Client, accountID, since string) (
 		"maxChanges": 128,
 	})
 	if err != nil {
+		var problem *methodError
+		if errors.As(err, &problem) && problem.Type == "cannotCalculateChanges" {
+			return mailDelta{}, fmt.Errorf("%w: %w", mailbackend.ErrChangesLost, err)
+		}
 		return mailDelta{}, err
 	}
 	var parsed struct {

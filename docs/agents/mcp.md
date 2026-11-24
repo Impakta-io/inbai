@@ -57,7 +57,7 @@ Every tool takes `inbox`, the Stalwart account id. A missing grant returns a too
 
 `timeoutSeconds` is optional. The default is 5 and the maximum is 25. A call returns up to 50 changes, oldest first.
 
-The result JSON has `messages` and `after`. Each entry's `id` is the message id to pass to `get_message`, and its `subject` is `created` or `destroyed`. `after` is the id of the last change returned. When the call times out, `messages` is empty and `after` is the cursor the call waited from. Pass `after` on the next call, so a loop neither misses a change nor reads one twice.
+The result JSON has `messages` and `after`. Each entry's `id` is the message id to pass to `get_message`, and its `subject` is `created`, `destroyed`, or `resync`. A `resync` entry has an empty `id`. It means the mail server could no longer report changes, so changes before it may be missing. Call `list_messages` to catch up. See [Events](events.md#feed). `after` is the id of the last change returned. When the call times out, `messages` is empty and `after` is the cursor the call waited from. Pass `after` on the next call, so a loop neither misses a change nor reads one twice.
 
 The tool needs the event feed, so `inbaid` must run with `INBAI_DATABASE_URL`. This applies to `/mcp` and to `inbai mcp serve`, which calls `GET /v1/events`. Without the database the tool returns an error. It needs a `read` grant on the inbox.
 

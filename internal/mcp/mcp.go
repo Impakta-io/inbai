@@ -331,7 +331,7 @@ func toolDefs() []map[string]any {
 			"text": map[string]any{"type": "string"},
 		}),
 		tool("delete_message", "Delete one message.", []string{"inbox", "messageId"}, map[string]any{"inbox": inbox, "messageId": map[string]any{"type": "string"}}),
-		tool("wait_for_message", "Return message changes recorded on the event feed after the cursor, waiting up to timeoutSeconds for one. Without after it waits for changes from now on. Pass the result's after on the next call. The id is the message id and the subject field is the change kind. Needs the event database.", []string{"inbox"}, map[string]any{
+		tool("wait_for_message", "Return message changes recorded on the event feed after the cursor, waiting up to timeoutSeconds for one. Without after it waits for changes from now on. Pass the result's after on the next call. The id is the message id and the subject field is the change kind: created, destroyed, or resync. A resync has no id and means changes before it may be missing, so call list_messages to catch up. Needs the event database.", []string{"inbox"}, map[string]any{
 			"inbox":          inbox,
 			"after":          map[string]any{"type": "integer", "minimum": 0, "description": "Event id from the previous result's after. Omit it to wait for changes from now on."},
 			"timeoutSeconds": map[string]any{"type": "number", "description": "Seconds to wait. The default is 5 and the maximum is 25."},
