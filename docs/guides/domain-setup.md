@@ -12,6 +12,10 @@ inbai domain add
 
 The zone file includes MX, SPF, DKIM, and DMARC, plus the client and certificate records Stalwart adds. The check covers MX and TXT records, which is where SPF, DKIM, and DMARC are published. Reverse DNS, port 25, TLS, and blocklists are checked by [`inbai doctor`](troubleshooting.md). `inbai doctor` only reads. For a domain Stalwart does not have, it reports `domain is not configured in Stalwart` with the fix `inbai domain add --domain <name>` and exits 1. Blocklists are queried for IPv4 addresses. An IPv6 address is listed as `not checked` and does not fail the run.
 
+## Ports
+
+inbAI publishes SMTP on port 25 for inbound mail and HTTPS on port 443. Agents send mail through the inbAI API, not SMTP submission, so no submission port is published. Stalwart also listens on port 465 (submission with implicit TLS) inside its container, but the stack does not publish it.
+
 ## Outbound mail
 
 With no relay, Stalwart delivers mail for other domains to their MX hosts. `inbai domain relay` replaces that path with one authenticated SMTP server. Mail for a domain this server hosts still stays local.

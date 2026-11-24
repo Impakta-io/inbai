@@ -277,9 +277,7 @@ func TestInitDockerPublicBindsStandardPorts(t *testing.T) {
 	if got := readEnvValue(envPath, "SMTP_BIND"); got != "25" {
 		t.Fatalf("SMTP_BIND=%q", got)
 	}
-	if got := readEnvValue(envPath, "SUBMISSION_BIND"); got != "587" {
-		t.Fatalf("SUBMISSION_BIND=%q", got)
-	}
+	assertNoSubmissionPort(t, filepath.Join(dir, "stack"))
 	if got := readEnvValue(envPath, "HTTPS_BIND"); got != "443" {
 		t.Fatalf("HTTPS_BIND=%q", got)
 	}
@@ -289,6 +287,95 @@ func TestInitDockerPublicBindsStandardPorts(t *testing.T) {
 	}
 	if cfg.StalwartURL != "https://127.0.0.1" {
 		t.Fatalf("StalwartURL=%q", cfg.StalwartURL)
+	}
+}
+
+// assertNoSubmissionPort fails when the stack in dir publishes SMTP submission.
+// inbAI agents send through the API, so only 25 and 443 face the network.
+func assertNoSubmissionPort(t *testing.T, dir string) {
+	t.Helper()
+	compose, err := os.ReadFile(filepath.Join(dir, "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(compose), "\n") {
+		if strings.Contains(line, ":587") || strings.Contains(line, "SUBMISSION") {
+			t.Errorf("compose.yaml publishes submission: %s", strings.TrimSpace(line))
+		}
+	}
+	for _, line := range envLines(t, dir) {
+		if strings.Contains(line, "SUBMISSION") || publishesPort(line, "587") {
+			t.Errorf(".env has a submission port: %s", line)
+		}
+	}
+}
+
+// envLines returns the lines of the stack's .env file.
+func envLines(t *testing.T, dir string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(raw)), "\n")
+}
+
+// publishesPort reports whether an .env line's value is port, alone or after
+// an address. A random password that contains the digits does not count.
+func publishesPort(line, port string) bool {
+	_, value, _ := strings.Cut(line, "=")
+	return value == port || strings.HasSuffix(value, ":"+port)
+}
+
+func TestInitDockerStackPublishesNoSubmissionPort(t *testing.T) {
+	for name, extra := range map[string][]string{"local": nil, "public": {"--public"}} {
+		t.Run(name, func(t *testing.T) {
+			recovery := fakeRecovery(t, &recoveryState{keySecret: "shown-once"})
+			https := fakeHTTPS(t, func(string) int { return http.StatusOK }, nil)
+			fakeCompose(t, "")
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "config.json")
+			var stdout, stderr bytes.Buffer
+			if code := run(dockerInitArgs(cfgPath, recovery, https, extra...), &stdout, &stderr, noEnv); code != 0 {
+				t.Fatalf("exit %d stderr %s", code, stderr.String())
+			}
+			stack := filepath.Join(dir, "stack")
+			assertNoSubmissionPort(t, stack)
+			compose, err := os.ReadFile(filepath.Join(stack, "compose.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"${SMTP_BIND:-127.0.0.1:2525}:25", "${HTTPS_BIND:-127.0.0.1:8443}:443"} {
+				if !strings.Contains(string(compose), want) {
+					t.Errorf("compose.yaml lacks %s", want)
+				}
+			}
+			if strings.Contains(stderr.String(), "submission") {
+				t.Errorf("init mentioned submission without the flag: %s", stderr.String())
+			}
+		})
+	}
+}
+
+func TestInitDockerIgnoresSubmissionPort(t *testing.T) {
+	recovery := fakeRecovery(t, &recoveryState{keySecret: "shown-once"})
+	https := fakeHTTPS(t, func(string) int { return http.StatusOK }, nil)
+	fakeCompose(t, "")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+	var stdout, stderr bytes.Buffer
+	if code := run(dockerInitArgs(cfgPath, recovery, https, "--submission-port", "15870"), &stdout, &stderr, noEnv); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+	if got := strings.Count(stderr.String(), submissionPortNotice); got != 1 {
+		t.Fatalf("notice printed %d times: %s", got, stderr.String())
+	}
+	stack := filepath.Join(dir, "stack")
+	assertNoSubmissionPort(t, stack)
+	for _, line := range envLines(t, stack) {
+		if publishesPort(line, "15870") {
+			t.Fatalf("the ignored port reached .env: %s", line)
+		}
 	}
 }
 

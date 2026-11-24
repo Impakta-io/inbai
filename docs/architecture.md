@@ -85,7 +85,7 @@ MCP tools are defined once and served two ways: Streamable HTTP at `/mcp` on `in
 
 The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Stalwart. The Compose file starts all three. More `inbaid` replicas can sit behind a load balancer without a code change. Several Stalwart nodes can share PostgreSQL and object storage later. That clustered layout is not part of the first release.
 
-Only port 25 and port 443 are public. Stalwart's own client and admin listeners stay on the internal network.
+Only port 25 and port 443 are public. Port 25 receives inbound mail. Agents send through the REST and MCP API, so no SMTP submission port is published. Stalwart's own client and admin listeners, including submission with implicit TLS on port 465, stay inside the container or on the internal network.
 
 ## Validated with Stalwart
 

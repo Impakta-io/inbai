@@ -25,7 +25,7 @@ inbai init --domain example.com
 inbaid serve
 ```
 
-`inbai init` writes the PostgreSQL and Stalwart Compose files into `<config-dir>/stack`, starts Stalwart in recovery mode, bootstraps the domain and service account, generates an operator token, writes `config.json`, and switches Stalwart out of recovery mode. Pass `--public` on a public mail host to bind ports `25`, `587`, and `443` on all interfaces instead of loopback-only local ports.
+`inbai init` writes the PostgreSQL and Stalwart Compose files into `<config-dir>/stack`, starts Stalwart in recovery mode, bootstraps the domain and service account, generates an operator token, writes `config.json`, and switches Stalwart out of recovery mode. Pass `--public` on a public mail host to bind ports `25` and `443` on all interfaces instead of loopback-only local ports. Port 25 receives inbound mail, and agents send through the inbAI API, so the stack publishes no SMTP submission port. Stalwart also listens on port 465 inside its container, but that port is not published.
 
 If you prefer to manage Stalwart yourself or run `inbaid` inside Docker Compose as well, follow [deploy/compose](../../deploy/compose/README.md) and pass `--url` with `INBAI_RECOVERY_PASSWORD`.
 

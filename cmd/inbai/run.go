@@ -65,6 +65,9 @@ func writef(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
 }
 
+// submissionPortNotice is what init prints when --submission-port is given.
+const submissionPortNotice = "--submission-port is ignored: inbAI does not publish SMTP submission; agents send through the API"
+
 func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -78,11 +81,12 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	stalwartURL := fs.String("stalwart-url", "", "Stalwart URL to store for later commands")
 	configPath := fs.String("config", "", "config file to write (default is the user config directory)")
 	stackDir := fs.String("stack-dir", "", "directory for local Docker Compose files (default <config-dir>/stack)")
-	public := fs.Bool("public", false, "bind SMTP (25), submission (587), and HTTPS (443) on all interfaces in Docker mode")
+	public := fs.Bool("public", false, "bind SMTP (25) and HTTPS (443) on all interfaces in Docker mode")
 	pgPort := fs.Int("pg-port", 5433, "local PostgreSQL port in Docker mode")
 	httpsPort := fs.Int("https-port", 0, "Stalwart HTTPS port in Docker mode (default 8443, or 443 with --public)")
 	smtpPort := fs.Int("smtp-port", 0, "Stalwart SMTP port in Docker mode (default 2525, or 25 with --public)")
-	submissionPort := fs.Int("submission-port", 0, "Stalwart submission port in Docker mode (default 5870, or 587 with --public)")
+	// --submission-port is kept so existing scripts still parse. It does nothing.
+	fs.Int("submission-port", 0, "deprecated and ignored: inbAI does not publish SMTP submission")
 	recoveryPort := fs.Int("recovery-port", 8080, "Stalwart recovery port in Docker mode")
 	noDocker := fs.Bool("no-docker", false, "connect to an already-running Stalwart instead of starting Docker Compose")
 	asJSON := fs.Bool("json", false, "print JSON")
@@ -98,6 +102,9 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	}
 	visited := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+	if visited["submission-port"] {
+		writef(stderr, "%s\n", submissionPortNotice)
+	}
 
 	password := ""
 	if getenv != nil {
@@ -199,19 +206,18 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 			}
 		}
 		dockerRes, err := initDockerStack(context.Background(), dockerInitOptions{
-			Domain:         *domain,
-			Hostname:       *hostname,
-			StackDir:       dir,
-			Project:        project,
-			Public:         *public,
-			PGPort:         *pgPort,
-			HTTPSPort:      *httpsPort,
-			SMTPPort:       *smtpPort,
-			SubmissionPort: *submissionPort,
-			RecoveryPort:   *recoveryPort,
-			StalwartURL:    *stalwartURL,
-			Existing:       existing.File,
-			Progress:       progressOut,
+			Domain:       *domain,
+			Hostname:     *hostname,
+			StackDir:     dir,
+			Project:      project,
+			Public:       *public,
+			PGPort:       *pgPort,
+			HTTPSPort:    *httpsPort,
+			SMTPPort:     *smtpPort,
+			RecoveryPort: *recoveryPort,
+			StalwartURL:  *stalwartURL,
+			Existing:     existing.File,
+			Progress:     progressOut,
 
 			OperatorPassword:      operatorPassword,
 			ResetOperatorPassword: resetOperator,

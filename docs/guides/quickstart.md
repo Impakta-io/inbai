@@ -24,7 +24,7 @@ inbai init --domain inbai.test
 
 This writes a local Compose stack for PostgreSQL and Stalwart, starts Stalwart in recovery mode, creates the domain, roles, accounts, service API key, operator password, and operator token in `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. No environment variables are required. The first run pulls the PostgreSQL and Stalwart images and prints Docker's progress.
 
-By default, local Docker mode binds loopback-only ports (`8443` for HTTPS, `2525` for SMTP, `5870` for submission, `5433` for PostgreSQL) so it will not clash with local services. Pass `--public` on a Linux server to bind ports `25`, `587`, and `443` on all interfaces, or use [deploy/compose](../../deploy/compose/README.md) to run `inbaid` inside Compose as well.
+By default, local Docker mode binds loopback-only ports (`8443` for HTTPS, `2525` for SMTP, `5433` for PostgreSQL) so it will not clash with local services. Pass `--public` on a Linux server to bind ports `25` and `443` on all interfaces, or use [deploy/compose](../../deploy/compose/README.md) to run `inbaid` inside Compose as well. Port 25 receives inbound mail. Agents send through the inbAI API, so the stack publishes no SMTP submission port. Stalwart also listens on port 465 inside its container, but that port is not published.
 
 `inbai.test` is a reserved name that never resolves, so it suits a local trial. `init` refuses to change the domain recorded in `config.json`. For a real domain, run `inbai init` with that domain on a fresh config instead. To print its DNS zone:
 
