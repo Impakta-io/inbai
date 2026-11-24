@@ -1,8 +1,8 @@
-Status: partial — `TestOneInboxOnStalwart` exercises inbox creation, mail delivery, bulk generation of 10 addresses, OAuth isolation, MCP reply, and event recovery across an `inbaid` stop/start when `INBAI_INTEGRATION=1`. `TestTwoReplicasShareStateAndJobs` exercises two `inbaid` replicas sharing PostgreSQL when `INBAI_TEST_DATABASE` is set. CI does not set either variable.
+Status: partial — `TestOneInboxOnStalwart` exercises inbox creation, mail delivery, bulk generation of 10 addresses, OAuth isolation, MCP reply, event recovery across an `inbaid` stop/start, storage quotas, and `inbai login` when `INBAI_INTEGRATION=1`. `TestTwoReplicasShareStateAndJobs` exercises two `inbaid` replicas sharing PostgreSQL when `INBAI_TEST_DATABASE` is set. CI does not set either variable.
 
 # Integration tests
 
-`TestOneInboxOnStalwart` starts the Compose stack, including `inbaid`, runs `inbai init`, leaves recovery mode, creates `alice@inbai.test`, sends and reads mail, bulk-generates 10 addresses, verifies agent isolation and MCP reply with OAuth credentials, and confirms that a message delivered while `inbaid` is stopped still appears on `GET /v1/events` after `inbaid` restarts.
+`TestOneInboxOnStalwart` starts the Compose stack, including `inbaid`, runs `inbai init`, leaves recovery mode, creates `alice@inbai.test`, sends and reads mail, bulk-generates 10 addresses, verifies agent isolation and MCP reply with OAuth credentials, confirms that a message delivered while `inbaid` is stopped still appears on `GET /v1/events` after `inbaid` restarts, reads and updates disk storage quotas (`inbai inbox quota`), and verifies `inbai login`.
 
 ```sh
 INBAI_INTEGRATION=1 go test ./test/integration -count=1 -timeout 10m

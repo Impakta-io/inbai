@@ -8,11 +8,13 @@ The stack file is [deploy/compose](../../deploy/compose/README.md). It starts Po
 
 ## CLI binary
 
-Build from source with Go 1.27.4 or newer (`make build` writes `bin/inbai` and `bin/inbaid`). Once a release tag is published to `Impakta-io/homebrew-tap` (see [releasing](../contributing/releasing.md)), macOS and Linux users can install both binaries with Homebrew:
+Install `inbai` and `inbaid` with Homebrew on macOS or Linux:
 
 ```sh
 brew install impakta-io/tap/inbai
 ```
+
+Prebuilt archives for macOS, Linux, and Windows are also published on [GitHub Releases](https://github.com/Impakta-io/inbai/releases). To build from source with Go 1.27.4 or newer, run `make build` (`bin/inbai` and `bin/inbaid`). See [releasing](../contributing/releasing.md) for release packaging details.
 
 ## First boot
 

@@ -2,7 +2,7 @@ Status: current
 
 # Releases
 
-No release has been published. `internal/version` reports `0.0.0-dev`.
+Development builds report `0.0.0-dev`. Published pre-alpha releases are listed in [CHANGELOG.md](../../CHANGELOG.md).
 
 When releases start, they follow semantic versioning:
 
