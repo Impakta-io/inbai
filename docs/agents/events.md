@@ -33,6 +33,18 @@ The `url` must be `https`, must not carry a user name or password, and must reso
 
 An operator who sends webhooks to a service on their own network sets `INBAI_WEBHOOK_ALLOW_PRIVATE=true` before `inbaid serve`. That allows `http` and private addresses for every webhook on that server. An agent cannot set it.
 
+Creating a webhook needs a `read` grant on the inbox. One agent may hold 10 webhooks on one inbox, disabled ones included. The next create is 429 until the agent deletes one. Each webhook is one POST per event, so the cap limits how many requests one agent adds to the delivery loop for each event. An operator is not capped.
+
+### Access is checked before each delivery
+
+Before each POST, `inbaid` checks that the agent that created the webhook still holds `read` on the inbox and is not suspended. This includes deliveries queued before the change. If the check fails, the delivery is not sent. It is marked failed with the reason, and the webhook is disabled: its other queued deliveries fail too, and it gets no new ones. A disabled webhook stays disabled when access comes back. The agent deletes it and creates a new one. A webhook an operator created is not checked this way.
+
+### List and delete
+
+`GET /v1/webhooks?inbox=ACCOUNT_ID` returns `{"webhooks":[{"id":"...","inbox":"ACCOUNT_ID","url":"https://agent.example/hook","agent":"ada","active":true}]}`. A disabled webhook has `"active":false` and a `disabledReason` of `read grant revoked` or `agent suspended`. The secret is never returned. An agent sees only the webhooks it created, and needs no grant to list them, so it can still find and delete them after losing access. An operator sees every webhook on the inbox.
+
+`DELETE /v1/webhooks/{id}` removes a webhook and the deliveries still queued for it. A delivery already being sent when the delete arrives can still finish. The agent that created the webhook or an operator may delete it. Any other caller gets 404, the same answer as for an id that does not exist.
+
 ## Ingest hint
 
 Stalwart posts to `POST /v1/hooks/ingest` with `X-Inbai-Ingest` set to `INBAI_INGEST_SECRET`. The body is Stalwart's event list. `message-ingest` events are matched on `data.to`. The numeric `accountId` is not the JMAP account id. A slow sweep also asks for changes when no hint arrives.

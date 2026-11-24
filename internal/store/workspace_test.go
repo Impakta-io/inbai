@@ -107,7 +107,7 @@ func TestExistingRowsGainTheWorkspace(t *testing.T) {
 	if err := db.Suppress(ctx, "bad@example.com", "bounce"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Subscribe(ctx, Subscription{ID: "sub-1", Agent: "ada", Inbox: "inbox-a", URL: "https://example.com/hook", Secret: "secret"}); err != nil {
+	if err := db.Subscribe(ctx, Subscription{ID: "sub-1", Agent: "ada", Inbox: "inbox-a", URL: "https://example.com/hook", Secret: "secret"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Put(ctx, "inbox-a", "ada@example.com", "state-1", []Record{{MessageID: "m", Kind: "created"}}); err != nil {

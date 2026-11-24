@@ -23,6 +23,7 @@ type CursorRow struct {
 }
 
 // DeliveryRow is one webhook delivery, including whether it finished.
+// Reason is why a failed delivery was dropped without being sent. An older file has none.
 type DeliveryRow struct {
 	ID             int64     `json:"id"`
 	SubscriptionID string    `json:"subscriptionId"`
@@ -31,6 +32,34 @@ type DeliveryRow struct {
 	Next           time.Time `json:"next"`
 	Done           bool      `json:"done"`
 	Failed         bool      `json:"failed"`
+	Reason         string    `json:"reason,omitempty"`
+}
+
+// legacyOperatorAgent is the agent name the server stored for an operator's subscription
+// before subscriptions recorded who created them.
+const legacyOperatorAgent = "operator"
+
+// UnmarshalJSON reads a subscription from a backup. A file written before subscriptions
+// recorded who created them has no operator field. Such a row counts as an operator's
+// when its agent is legacyOperatorAgent, the same rule the database migration applies.
+func (s *Subscription) UnmarshalJSON(raw []byte) error {
+	type plain Subscription
+	var row struct {
+		plain
+		Operator *bool `json:"operator"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&row); err != nil {
+		return err
+	}
+	*s = Subscription(row.plain)
+	if row.Operator != nil {
+		s.Operator = *row.Operator
+	} else {
+		s.Operator = s.Agent == legacyOperatorAgent
+	}
+	return nil
 }
 
 // GrantRow is one inbox permission.
@@ -130,7 +159,7 @@ func (m *Memory) Export(context.Context) (Snapshot, error) {
 	for _, item := range m.deliveries {
 		snap.Deliveries = append(snap.Deliveries, DeliveryRow{
 			ID: item.id, SubscriptionID: item.subID, EventID: item.eventID,
-			Attempt: item.attempt, Next: item.next, Done: item.done, Failed: item.failed,
+			Attempt: item.attempt, Next: item.next, Done: item.done, Failed: item.failed, Reason: item.reason,
 		})
 	}
 	for address, reason := range m.blocked {
@@ -174,7 +203,7 @@ func (m *Memory) Import(_ context.Context, snap Snapshot) error {
 	for _, item := range snap.Deliveries {
 		m.deliveries = append(m.deliveries, memDelivery{
 			id: item.ID, subID: item.SubscriptionID, eventID: item.EventID,
-			attempt: item.Attempt, next: item.Next, done: item.Done, failed: item.Failed,
+			attempt: item.Attempt, next: item.Next, done: item.Done, failed: item.Failed, reason: item.Reason,
 		})
 		if item.ID > m.nextDel {
 			m.nextDel = item.ID

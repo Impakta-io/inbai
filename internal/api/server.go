@@ -54,7 +54,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /mcp", s.mcp)
 	mux.HandleFunc("GET /v1/events", s.events)
 	mux.HandleFunc("GET /v1/suppressions", s.suppressions)
+	mux.HandleFunc("GET /v1/webhooks", s.listWebhooks)
 	mux.HandleFunc("POST /v1/webhooks", s.createWebhook)
+	mux.HandleFunc("DELETE /v1/webhooks/{id}", s.deleteWebhook)
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
@@ -707,6 +709,23 @@ func (s *Server) createWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "secret": secret})
+}
+
+func (s *Server) listWebhooks(w http.ResponseWriter, r *http.Request) {
+	hooks, err := s.Service.ListWebhooks(r.Context(), s.requestCaller(r), r.URL.Query().Get("inbox"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"webhooks": hooks})
+}
+
+func (s *Server) deleteWebhook(w http.ResponseWriter, r *http.Request) {
+	if err := s.Service.DeleteWebhook(r.Context(), s.requestCaller(r), r.PathValue("id")); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {

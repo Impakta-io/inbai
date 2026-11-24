@@ -21,7 +21,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if err := original.Put(ctx, "inbox-a", "", "s1", []Record{{MessageID: "m", Kind: "created"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := original.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "https://agent.example/hook", Secret: "sekret"}); err != nil {
+	if err := original.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "https://agent.example/hook", Secret: "sekret"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := original.Put(ctx, "inbox-a", "", "s2", []Record{{MessageID: "m2", Kind: "created"}}); err != nil {
@@ -94,7 +94,7 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.Put(ctx, "inbox-a", "", "s1", []Record{{MessageID: "m", Kind: "created"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "https://agent.example/hook", Secret: "sekret"}); err != nil {
+	if err := db.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "https://agent.example/hook", Secret: "sekret"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Suppress(ctx, "bad@example.com", "delivery.dsn-perm-fail: 550"); err != nil {

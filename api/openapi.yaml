@@ -725,10 +725,37 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
   /v1/webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List webhooks on one inbox. The secret is not returned.
+      description: An agent sees only the webhooks it created, including disabled ones, and needs no grant to list them. An operator sees every webhook on the inbox.
+      parameters:
+        - name: inbox
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [webhooks]
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Webhook"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
     post:
       operationId: createWebhook
       summary: Register a signed webhook. The secret is shown once.
-      description: The url must be https and resolve only to public addresses. A loopback, link-local, private or other internal address answers 400. Redirects are not followed. An operator can allow http and private addresses with INBAI_WEBHOOK_ALLOW_PRIVATE.
+      description: The caller needs read on the inbox. The url must be https and resolve only to public addresses. A loopback, link-local, private or other internal address answers 400. Redirects are not followed. An operator can allow http and private addresses with INBAI_WEBHOOK_ALLOW_PRIVATE. An agent may hold 10 webhooks on one inbox, disabled ones included; the next answers 429 until one is deleted.
       requestBody:
         required: true
         content:
@@ -757,6 +784,28 @@ paths:
         "400":
           $ref: "#/components/responses/Problem"
         "403":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/webhooks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteWebhook
+      summary: Delete one webhook. Deliveries still queued for it are not sent.
+      description: The agent that created it or an operator may delete it. Any other caller gets 404, as for an id that does not exist.
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
@@ -1010,3 +1059,22 @@ components:
         after:
           type: integer
           description: The cursor to pass as after on the next call. It is the id of the last event returned, or the cursor the call waited from when none were returned.
+    Webhook:
+      type: object
+      required: [id, inbox, url, agent, active]
+      properties:
+        id:
+          type: string
+        inbox:
+          type: string
+        url:
+          type: string
+        agent:
+          type: string
+          description: The agent that created the webhook, or operator.
+        active:
+          type: boolean
+          description: False once a delivery was refused because the creating agent lost read on the inbox or was suspended. A disabled webhook stays disabled after access returns.
+        disabledReason:
+          type: string
+          description: Why the webhook was disabled. Absent while it is active.

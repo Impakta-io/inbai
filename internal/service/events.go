@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,9 +22,81 @@ type errorsUnavailable struct{}
 
 func (errorsUnavailable) Error() string { return "event store is not configured" }
 
-// SetFeed attaches the durable event log.
+// MaxWebhooksPerInbox is how many webhooks one agent may hold on one inbox, disabled ones
+// included. Each webhook is one POST per event, so the cap bounds what one agent adds to the
+// single delivery loop for one inbox. Ten leaves room for a primary, a fallback, and test
+// targets. An operator is not capped.
+const MaxWebhooksPerInbox = 10
+
+// errWebhookLimit maps to ErrQuota, which transports answer with 429.
+type errWebhookLimit struct{}
+
+func (errWebhookLimit) Error() string {
+	return fmt.Sprintf("webhook limit reached: an agent may hold %d webhooks on one inbox; delete one first", MaxWebhooksPerInbox)
+}
+
+func (errWebhookLimit) Is(target error) bool { return target == ErrQuota }
+
+// Suspensions reports whether an agent has been suspended. auth.Directory implements it.
+// An error means the state could not be read; the caller must not treat it as not suspended.
+type Suspensions interface {
+	Suspended(agent string) (bool, error)
+}
+
+// SetSuspensions gives the service the same suspension source that verifies tokens, so a
+// webhook stops for exactly the agents whose tokens stop. cmd/inbaid passes auth.Directory.
+func (s *Service) SetSuspensions(stopped Suspensions) {
+	s.stopped = stopped
+}
+
+// SetFeed attaches the durable event log. The service becomes the feed's delivery gate,
+// so every webhook is checked against the creator's current access before it is sent.
 func (s *Service) SetFeed(feed *events.Feed) {
 	s.feed = feed
+	if feed != nil {
+		feed.SetGate(s)
+	}
+}
+
+// MayDeliver is the check the feed runs before each webhook. A subscription an operator
+// created is always delivered. One an agent created is delivered only while that agent is
+// not suspended and still holds read on the inbox. A refusal disables the subscription for
+// good: a later grant does not turn it back on, and the agent creates a new one.
+func (s *Service) MayDeliver(ctx context.Context, agent string, operator bool, inbox string) (bool, string, error) {
+	if operator {
+		return true, "", nil
+	}
+	if agent == "" {
+		return false, "webhook has no owner", nil
+	}
+	suspended, err := s.suspended(ctx, agent)
+	if err != nil {
+		return false, "", err
+	}
+	if suspended {
+		return false, "agent suspended", nil
+	}
+	ok, err := s.allowed(ctx, Caller{Agent: agent}, inbox, PermRead)
+	if err != nil {
+		return false, "", err
+	}
+	if !ok {
+		return false, "read grant revoked", nil
+	}
+	return true, "", nil
+}
+
+// suspended reads the source set by SetSuspensions. Without one it reads the database's
+// suspension rows, which is what auth.Directory reads when it has a database. With neither
+// there is no suspension state, which happens only without a database, and so without a feed.
+func (s *Service) suspended(ctx context.Context, agent string) (bool, error) {
+	if s.stopped != nil {
+		return s.stopped.Suspended(agent)
+	}
+	if s.db != nil {
+		return s.db.AgentSuspended(ctx, agent)
+	}
+	return false, nil
 }
 
 // BindInbox records the address and stores the mailbox's current JMAP state.
@@ -180,7 +253,8 @@ func (s *Service) EventHead(ctx context.Context, caller Caller, inbox string) (i
 	return s.feed.Head(ctx, inbox)
 }
 
-// SubscribeWebhook registers a signed webhook for one inbox.
+// SubscribeWebhook registers a signed webhook for one inbox. The subscription records who
+// created it. An agent may hold MaxWebhooksPerInbox on one inbox; the next is ErrQuota.
 func (s *Service) SubscribeWebhook(ctx context.Context, caller Caller, inbox, rawURL string) (string, string, error) {
 	if err := s.permit(ctx, caller, inbox, PermRead); err != nil {
 		return "", "", err
@@ -191,11 +265,85 @@ func (s *Service) SubscribeWebhook(ctx context.Context, caller Caller, inbox, ra
 	if err := events.CheckWebhookURL(ctx, rawURL, s.feed.AllowPrivate(), nil); err != nil {
 		return "", "", fmt.Errorf("%w: %s", ErrInvalid, err)
 	}
-	agent := caller.Agent
+	sub := store.Subscription{Agent: caller.Agent, Inbox: inbox, URL: rawURL}
+	limit := MaxWebhooksPerInbox
 	if caller.Operator {
-		agent = "operator"
+		sub.Agent, sub.Operator, limit = "operator", true, 0
 	}
-	return s.feed.Subscribe(ctx, agent, inbox, rawURL)
+	id, secret, err := s.feed.Subscribe(ctx, sub, limit)
+	if errors.Is(err, store.ErrSubscriptionLimit) {
+		return "", "", errWebhookLimit{}
+	}
+	return id, secret, err
+}
+
+// Webhook is a subscription as its creator or an operator sees it. The secret is not included.
+// Agent is the agent that created it, or "operator". Active is false once a delivery was
+// refused because that agent lost read or was suspended; DisabledReason says which.
+type Webhook struct {
+	ID             string `json:"id"`
+	Inbox          string `json:"inbox"`
+	URL            string `json:"url"`
+	Agent          string `json:"agent"`
+	Active         bool   `json:"active"`
+	DisabledReason string `json:"disabledReason,omitempty"`
+}
+
+// ListWebhooks returns the caller's webhooks on one inbox. An operator sees every webhook.
+// An agent sees only those it created, and still sees them after losing read on the inbox,
+// so it can delete them. It needs no grant because the list holds nothing from the inbox.
+func (s *Service) ListWebhooks(ctx context.Context, caller Caller, inbox string) ([]Webhook, error) {
+	if !caller.Operator && caller.Agent == "" {
+		return nil, ErrForbidden
+	}
+	if inbox == "" {
+		return nil, fmt.Errorf("%w: inbox is required", ErrInvalid)
+	}
+	if s.feed == nil {
+		return nil, fmt.Errorf("%w", ErrUnavailable)
+	}
+	subs, err := s.feed.Subscriptions(ctx, inbox)
+	if err != nil {
+		return nil, err
+	}
+	out := []Webhook{}
+	for _, sub := range subs {
+		if !ownsWebhook(caller, sub) {
+			continue
+		}
+		out = append(out, Webhook{
+			ID: sub.ID, Inbox: sub.Inbox, URL: sub.URL, Agent: sub.Agent,
+			Active: sub.Disabled == "", DisabledReason: sub.Disabled,
+		})
+	}
+	return out, nil
+}
+
+// DeleteWebhook removes one webhook and the deliveries still queued for it.
+// The agent that created it or an operator may do that. Anyone else gets ErrNotFound,
+// so an id does not reveal that another agent's webhook exists.
+func (s *Service) DeleteWebhook(ctx context.Context, caller Caller, id string) error {
+	if !caller.Operator && caller.Agent == "" {
+		return ErrForbidden
+	}
+	if s.feed == nil {
+		return fmt.Errorf("%w", ErrUnavailable)
+	}
+	sub, ok, err := s.feed.Subscription(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok || !ownsWebhook(caller, sub) {
+		return ErrNotFound
+	}
+	return s.feed.Unsubscribe(ctx, id)
+}
+
+func ownsWebhook(caller Caller, sub store.Subscription) bool {
+	if caller.Operator {
+		return true
+	}
+	return !sub.Operator && caller.Agent != "" && sub.Agent == caller.Agent
 }
 
 // HasFeed reports whether a durable event log is attached.

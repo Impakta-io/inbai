@@ -34,6 +34,20 @@ type Feed struct {
 
 	allowPrivate bool
 	client       *http.Client
+	gate         Gate
+}
+
+// Gate decides, before each webhook is sent, whether the subscription's creator may still
+// see the inbox. The feed does not read grants itself. internal/service implements it.
+type Gate interface {
+	// MayDeliver reports whether a delivery for inbox may go to a subscription created by
+	// agent, or by an operator when operator is true. reason says why not.
+	MayDeliver(ctx context.Context, agent string, operator bool, inbox string) (ok bool, reason string, err error)
+}
+
+// SetGate installs the access check run on every claimed delivery. Call it before delivery starts.
+func (f *Feed) SetGate(gate Gate) {
+	f.gate = gate
 }
 
 // New returns a feed over a durable log.
@@ -164,8 +178,10 @@ func (f *Feed) InboxByAddress(ctx context.Context, address string) (string, bool
 	return f.log.InboxByAddress(ctx, address)
 }
 
-// Subscribe registers a webhook. The returned secret is shown once.
-func (f *Feed) Subscribe(ctx context.Context, agent, inbox, url string) (string, string, error) {
+// Subscribe registers a webhook. sub names the creator, the inbox, and the url; the id and
+// secret are generated. limit caps one agent's subscriptions on the inbox; zero is no cap.
+// The returned secret is shown once.
+func (f *Feed) Subscribe(ctx context.Context, sub store.Subscription, limit int) (string, string, error) {
 	id, err := randomID()
 	if err != nil {
 		return "", "", err
@@ -174,17 +190,44 @@ func (f *Feed) Subscribe(ctx context.Context, agent, inbox, url string) (string,
 	if err != nil {
 		return "", "", err
 	}
-	if err := f.log.Subscribe(ctx, store.Subscription{ID: id, Agent: agent, Inbox: inbox, URL: url, Secret: secret}); err != nil {
+	sub.ID, sub.Secret, sub.Disabled = id, secret, ""
+	if err := f.log.Subscribe(ctx, sub, limit); err != nil {
 		return "", "", err
 	}
 	return id, secret, nil
 }
 
+// Subscription returns one webhook by id.
+func (f *Feed) Subscription(ctx context.Context, id string) (store.Subscription, bool, error) {
+	return f.log.Subscription(ctx, id)
+}
+
+// Subscriptions returns every webhook on an inbox.
+func (f *Feed) Subscriptions(ctx context.Context, inbox string) ([]store.Subscription, error) {
+	return f.log.Subscriptions(ctx, inbox)
+}
+
+// Unsubscribe removes a webhook and the deliveries still queued for it.
+func (f *Feed) Unsubscribe(ctx context.Context, id string) error {
+	return f.log.Unsubscribe(ctx, id)
+}
+
 // DeliverOnce posts one due webhook. The boolean is false when nothing is due.
+// When a gate is set, it is asked first. A refused delivery is not sent: it fails with
+// the gate's reason and its subscription is disabled, so it gets no further deliveries.
 func (f *Feed) DeliverOnce(ctx context.Context, client *http.Client) (bool, error) {
 	delivery, ok, err := f.log.Claim(ctx, f.now())
 	if err != nil || !ok {
 		return false, err
+	}
+	if f.gate != nil {
+		allowed, reason, err := f.gate.MayDeliver(ctx, delivery.Agent, delivery.Operator, delivery.Event.Inbox)
+		if err != nil {
+			return true, errors.Join(err, f.failOrRetry(ctx, delivery))
+		}
+		if !allowed {
+			return true, f.log.Disable(ctx, delivery.SubscriptionID, reason, f.now())
+		}
 	}
 	if client == nil {
 		client = f.client

@@ -65,7 +65,7 @@ func TestWebhookRetriesThenSignsTheBody(t *testing.T) {
 	log := &store.Memory{}
 	feed := New(log)
 	feed.backoff = func(int) time.Duration { return 0 }
-	_, secret, err := feed.Subscribe(context.Background(), "ada", "inbox-a", srv.URL)
+	_, secret, err := feed.Subscribe(context.Background(), store.Subscription{Agent: "ada", Inbox: "inbox-a", URL: srv.URL}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestWebhookRetriesThenSignsTheBody(t *testing.T) {
 
 func TestClaimLeaseStopsASecondWorker(t *testing.T) {
 	log := &store.Memory{}
-	if err := log.Subscribe(context.Background(), store.Subscription{ID: "sub", Inbox: "inbox-a", URL: "http://example", Secret: "s"}); err != nil {
+	if err := log.Subscribe(context.Background(), store.Subscription{ID: "sub", Inbox: "inbox-a", URL: "http://example", Secret: "s"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := log.Put(context.Background(), "inbox-a", "", "s1", []store.Record{{MessageID: "m", Kind: "created"}}); err != nil {

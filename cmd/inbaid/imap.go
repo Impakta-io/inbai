@@ -68,6 +68,7 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		return 2
 	}
 	directory := auth.NewDirectory(signingKey, "http://"+addr)
+	svc.SetSuspensions(directory)
 	if log != nil {
 		svc.SetDB(log)
 		directory.SetDB(log)

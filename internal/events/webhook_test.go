@@ -166,7 +166,7 @@ func TestDeliverOnceDefaultClientRefusesAStoredInternalURL(t *testing.T) {
 	log := &store.Memory{}
 	feed := New(log)
 	feed.backoff = func(int) time.Duration { return time.Hour }
-	if _, _, err := feed.Subscribe(context.Background(), "ada", "inbox-a", srv.URL); err != nil {
+	if _, _, err := feed.Subscribe(context.Background(), store.Subscription{Agent: "ada", Inbox: "inbox-a", URL: srv.URL}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := log.Put(context.Background(), "inbox-a", "", "s1", []store.Record{{MessageID: "m1", Kind: "created"}}); err != nil {
