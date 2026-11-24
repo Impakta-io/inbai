@@ -139,6 +139,9 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 	}); err != nil {
 		return Result{}, err
 	}
+	if err := addAuthResultsToAllMail(ctx, client); err != nil {
+		return Result{}, err
+	}
 	inboxRole, err := ensureRole(ctx, client, "inbox", inboxRoleDescription, permSet(inboxPermissions))
 	if err != nil {
 		return Result{}, err
@@ -176,6 +179,26 @@ func Bootstrap(ctx context.Context, client *Client, in Input) (Result, error) {
 	}
 	result.APIKey = secret
 	return result, nil
+}
+
+// addAuthResultsToAllMail makes Stalwart add its Authentication-Results field
+// to every message it accepts over SMTP. By default it adds one only on port
+// 25, so an authenticated submission and a JMAP send carry none, and a field
+// the sender wrote with our host name would be the top-most one. Stalwart
+// records "none" for those, or uses "localhost" as the authserv-id for a JMAP
+// send, so they report no results. See mailbackend.AuthenticationOf.
+func addAuthResultsToAllMail(ctx context.Context, client *Client) error {
+	raw, err := client.invoke(ctx, "m", "x:MtaStageData/set", map[string]any{
+		"update": map[string]any{
+			"singleton": map[string]any{
+				"addAuthResultsHeader": map[string]any{"match": map[string]any{}, "else": "true"},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return updatedID(raw, "singleton")
 }
 
 // CreateAPIKey issues a new API key for the service account and returns its secret.

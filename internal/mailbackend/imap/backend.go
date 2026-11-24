@@ -224,7 +224,9 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			return fmt.Errorf("imap: message %s was not found", messageID)
 		}
 		text := string(got.literals[0])
-		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM REPLY-TO)])")
+		// The whole header, not only the fields read here: AuthenticationOf
+		// needs where Authentication-Results sits among the other fields.
+		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER])")
 		if err != nil {
 			return err
 		}
@@ -238,7 +240,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			Text:           text,
 			From:           headerField(header, "From"),
 			ReplyTo:        headerField(header, "Reply-To"),
-			Authentication: mailbackend.AuthenticationOf(headerFields(header, "Authentication-Results"), b.authservID, isJunk(flagsOf(auth.text))),
+			Authentication: mailbackend.AuthenticationOf(headerFields(header), b.authservID, isJunk(flagsOf(auth.text))),
 		}
 		return nil
 	})
@@ -447,25 +449,27 @@ func headerField(header, name string) string {
 	return ""
 }
 
-// headerFields returns the value of every name field in header, in header
-// order, with folded lines joined.
-func headerFields(header, name string) []string {
-	prefix := strings.ToLower(name) + ":"
-	var out []string
-	current := -1
+// headerFields returns every field in header, in header order, with folded
+// lines joined. Reading stops at the blank line that ends the header, and at
+// a line that is neither a field nor a continuation.
+func headerFields(header string) []mailbackend.HeaderField {
+	var out []mailbackend.HeaderField
 	for _, line := range strings.Split(header, "\n") {
 		line = strings.TrimRight(line, "\r")
-		if line != "" && (line[0] == ' ' || line[0] == '\t') {
-			if current >= 0 {
-				out[current] += " " + strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		if line[0] == ' ' || line[0] == '\t' {
+			if len(out) > 0 {
+				out[len(out)-1].Value += " " + strings.TrimSpace(line)
 			}
 			continue
 		}
-		current = -1
-		if strings.HasPrefix(strings.ToLower(line), prefix) {
-			out = append(out, strings.TrimSpace(line[len(prefix):]))
-			current = len(out) - 1
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			break
 		}
+		out = append(out, mailbackend.HeaderField{Name: strings.TrimSpace(name), Value: strings.TrimSpace(value)})
 	}
 	return out
 }

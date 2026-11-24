@@ -50,6 +50,8 @@ func TestInitDockerModeFullFlowAndIdempotency(t *testing.T) {
 			writeInit(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
 		case "x:SystemSettings/set":
 			writeInit(w, name, "s", map[string]any{"updated": map[string]any{}})
+		case "x:MtaStageData/set":
+			writeInit(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeInit(w, name, "q", map[string]any{"ids": []string{}})
 		case "x:Role/set":
@@ -230,6 +232,8 @@ func TestInitDockerPublicBindsStandardPorts(t *testing.T) {
 			writeInit(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
 		case "x:SystemSettings/set":
 			writeInit(w, name, "s", map[string]any{"updated": map[string]any{}})
+		case "x:MtaStageData/set":
+			writeInit(w, name, "m", map[string]any{"updated": map[string]any{"singleton": nil}})
 		case "x:Role/query":
 			writeInit(w, name, "q", map[string]any{"ids": []string{}})
 		case "x:Role/set":

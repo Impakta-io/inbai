@@ -34,13 +34,13 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID, auths
 	if accountID == "" || messageID == "" {
 		return Message{}, fmt.Errorf("message needs an account and an id")
 	}
-	// :all returns every Authentication-Results field in header order, top
-	// first (RFC 8621 section 4.1.3). Without it, JMAP returns only the last
-	// one, the one nearest the body, which the sender can write.
+	// headers is every header field in message order, top first (RFC 8621
+	// section 4.1.3). AuthenticationOf needs where Authentication-Results sits
+	// among the other fields, not only its values.
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":           accountID,
 		"ids":                 []string{messageID},
-		"properties":          []string{"subject", "preview", "receivedAt", "from", "replyTo", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText:all"},
+		"properties":          []string{"subject", "preview", "receivedAt", "from", "replyTo", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "headers"},
 		"fetchTextBodyValues": true,
 		"maxBodyValueBytes":   maxBodyValueBytes,
 	})
@@ -58,20 +58,20 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID, auths
 	return list[0], nil
 }
 
-// authenticationOf reads the Authentication-Results fields and the junk
-// keyword of the one message in an Email/get response.
+// authenticationOf reads the header fields and the junk keyword of the one
+// message in an Email/get response.
 func authenticationOf(raw json.RawMessage, authservID string) mailbackend.Authentication {
 	var got struct {
 		List []struct {
 			Keywords json.RawMessage `json:"keywords"`
-			Auth     json.RawMessage `json:"header:Authentication-Results:asText:all"`
+			Headers  json.RawMessage `json:"headers"`
 		} `json:"list"`
 	}
 	if json.Unmarshal(raw, &got) != nil || len(got.List) == 0 {
 		return mailbackend.Authentication{}
 	}
 	item := got.List[0]
-	return mailbackend.AuthenticationOf(headerTexts(item.Auth), authservID, junkKeyword(item.Keywords))
+	return mailbackend.AuthenticationOf(headerFields(item.Headers), authservID, junkKeyword(item.Keywords))
 }
 
 // DeleteMessage removes one message from the account.
@@ -237,14 +237,21 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 	return out, nil
 }
 
-// headerTexts reads a header:...:asText:all value, an array of strings.
-// Anything else reads as no headers.
-func headerTexts(raw json.RawMessage) []string {
-	var many []string
+// headerFields reads the headers property, an array of EmailHeader objects
+// in message order. Anything else reads as no headers.
+func headerFields(raw json.RawMessage) []mailbackend.HeaderField {
+	var many []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
 	if json.Unmarshal(raw, &many) != nil {
 		return nil
 	}
-	return many
+	out := make([]mailbackend.HeaderField, len(many))
+	for i, field := range many {
+		out[i] = mailbackend.HeaderField{Name: field.Name, Value: field.Value}
+	}
+	return out
 }
 
 func fromEmail(raw json.RawMessage) string {
