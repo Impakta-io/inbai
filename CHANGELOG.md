@@ -38,6 +38,7 @@ Changes merged since `v0.1.0-alpha.3`.
 - `inbai doctor` only reads. It reports a domain Stalwart does not have instead of creating it, and does not fail on an IPv6 address (#65).
 - `inbai login --client-id` and `inbai login --clear` keep `operatorToken` (#62).
 - `inbai help`, `inbai help <command>` and `--help` on every command print full help; `inbai` and `inbaid` with no arguments print help instead of the version (#97).
+- Commands that take an inbox address, such as `message list`, `message send --from`, and `inbox delete`, also accept a bare local part like `alice` and use the config domain, as `inbox create` does.
 
 ### Fixed
 
