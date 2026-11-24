@@ -118,6 +118,8 @@ func (p *Postgres) Idempotency(ctx context.Context, kind, key string) (string, b
 }
 
 // JobRow is one bulk-create job stored for another process to read.
+// Agent is the agent that started the job. It is empty when an operator started it
+// and on a row written before the column existed.
 type JobRow struct {
 	ID      string
 	Status  string
@@ -125,16 +127,17 @@ type JobRow struct {
 	Created int
 	Error   string
 	Inboxes []byte
+	Agent   string
 }
 
-// SaveJob inserts a job. The inboxes value is JSON.
+// SaveJob inserts a job. The inboxes value is JSON. Agent is stored once and UpdateJob does not change it.
 func (p *Postgres) SaveJob(ctx context.Context, row JobRow) error {
 	if row.Inboxes == nil {
 		row.Inboxes = []byte("[]")
 	}
 	_, err := p.pool.Exec(ctx, `
-INSERT INTO bulk_job (id, status, total, created, error, inboxes)
-VALUES ($1, $2, $3, $4, $5, $6)`, row.ID, row.Status, row.Total, row.Created, row.Error, row.Inboxes)
+INSERT INTO bulk_job (id, status, total, created, error, inboxes, agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`, row.ID, row.Status, row.Total, row.Created, row.Error, row.Inboxes, row.Agent)
 	return err
 }
 
@@ -153,8 +156,8 @@ UPDATE bulk_job SET status = $2, created = $3, error = $4, inboxes = $5 WHERE id
 func (p *Postgres) Job(ctx context.Context, id string) (JobRow, bool, error) {
 	var row JobRow
 	err := p.pool.QueryRow(ctx, `
-SELECT id, status, total, created, error, inboxes FROM bulk_job WHERE id = $1`, id).
-		Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes)
+SELECT id, status, total, created, error, inboxes, agent FROM bulk_job WHERE id = $1`, id).
+		Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes, &row.Agent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return JobRow{}, false, nil
 	}

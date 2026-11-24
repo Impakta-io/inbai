@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS bulk_job (
     created int NOT NULL DEFAULT 0,
     error text NOT NULL DEFAULT '',
     inboxes jsonb NOT NULL DEFAULT '[]',
+    agent text NOT NULL DEFAULT '',
     workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS agent_credential (
@@ -162,6 +163,10 @@ func Open(ctx context.Context, dsn string) (*Postgres, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := ensureColumns(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &Postgres{pool: pool}, nil
 }
 
@@ -190,6 +195,21 @@ func ensureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
 			`ALTER TABLE %s ADD COLUMN IF NOT EXISTS workspace_id text NOT NULL DEFAULT '%s'`,
 			table, WorkspaceID,
 		)
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addedColumns are columns added to a table after it was first created.
+// CREATE TABLE IF NOT EXISTS skips a table that exists, so Open adds them to an older database.
+var addedColumns = []string{
+	`ALTER TABLE bulk_job ADD COLUMN IF NOT EXISTS agent text NOT NULL DEFAULT ''`,
+}
+
+func ensureColumns(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, stmt := range addedColumns {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			return err
 		}
@@ -692,13 +712,13 @@ func readGrants(ctx context.Context, tx pgx.Tx, snap *Snapshot) error {
 		return err
 	}
 	rows.Close()
-	rows, err = tx.Query(ctx, `SELECT id, status, total, created, error, inboxes FROM bulk_job ORDER BY id`)
+	rows, err = tx.Query(ctx, `SELECT id, status, total, created, error, inboxes, agent FROM bulk_job ORDER BY id`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var row JobSnap
-		if err := rows.Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes); err != nil {
+		if err := rows.Scan(&row.ID, &row.Status, &row.Total, &row.Created, &row.Error, &row.Inboxes, &row.Agent); err != nil {
 			rows.Close()
 			return err
 		}
@@ -839,7 +859,7 @@ func writeGrants(ctx context.Context, tx pgx.Tx, snap Snapshot) error {
 		if len(inboxes) == 0 {
 			inboxes = []byte("[]")
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO bulk_job (id, status, total, created, error, inboxes) VALUES ($1, $2, $3, $4, $5, $6)`, row.ID, row.Status, row.Total, row.Created, row.Error, inboxes); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO bulk_job (id, status, total, created, error, inboxes, agent) VALUES ($1, $2, $3, $4, $5, $6, $7)`, row.ID, row.Status, row.Total, row.Created, row.Error, inboxes, row.Agent); err != nil {
 			return err
 		}
 	}

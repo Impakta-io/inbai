@@ -255,14 +255,14 @@ func TestGenerateAboveTheLimitReturnsAJob(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("job did not start")
 	}
-	job, err := svc.Job(got.JobID)
+	job, err := svc.Job(context.Background(), Caller{Operator: true}, got.JobID)
 	if err != nil || job.Status != "running" {
 		t.Fatalf("running %+v %v", job, err)
 	}
 	close(release)
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		job, err = svc.Job(got.JobID)
+		job, err = svc.Job(context.Background(), Caller{Operator: true}, got.JobID)
 		if err == nil && job.Status == "done" {
 			break
 		}
@@ -271,6 +271,92 @@ func TestGenerateAboveTheLimitReturnsAJob(t *testing.T) {
 	if job.Status != "done" || job.Created != 2 {
 		t.Fatalf("finished %+v", job)
 	}
+}
+
+func TestOnlyTheStartingAgentOrAnOperatorReadsAJob(t *testing.T) {
+	ctx := context.Background()
+	operator := Caller{Operator: true}
+	svc := New(&fakeMail{})
+	svc.SetSyncLimit(1)
+	svc.Allow("ada", "*", PermProvision)
+	svc.Allow("bob", "*", PermProvision)
+	svc.Allow("eve", "inbox-a", PermRead)
+
+	started, err := svc.Generate(ctx, Caller{Agent: "ada"}, GenerateRequest{
+		Prefix: "a", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, "")
+	if err != nil || started.JobID == "" {
+		t.Fatalf("agent job %+v %v", started, err)
+	}
+	waitForJob(t, svc, started.JobID)
+	adaJob := started.JobID
+	started, err = svc.Generate(ctx, operator, GenerateRequest{
+		Prefix: "o", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, "")
+	if err != nil || started.JobID == "" {
+		t.Fatalf("operator job %+v %v", started, err)
+	}
+	waitForJob(t, svc, started.JobID)
+	operatorJob := started.JobID
+
+	for _, id := range []string{adaJob, operatorJob} {
+		if job, err := svc.Job(ctx, operator, id); err != nil || job.ID != id || len(job.Inboxes) != 2 {
+			t.Fatalf("operator read %s: %+v %v", id, job, err)
+		}
+	}
+	job, err := svc.Job(ctx, Caller{Agent: "ada"}, adaJob)
+	if err != nil || job.ID != adaJob || len(job.Inboxes) != 2 || job.Inboxes[0].Address != "a00000@example.com" {
+		t.Fatalf("starting agent read %+v %v", job, err)
+	}
+	denied := []struct {
+		name   string
+		caller Caller
+		id     string
+	}{
+		{"other provisioning agent", Caller{Agent: "bob"}, adaJob},
+		{"agent with a read grant only", Caller{Agent: "eve"}, adaJob},
+		{"agent with no grants", Caller{Agent: "mallory"}, adaJob},
+		{"caller with no name", Caller{}, adaJob},
+		{"agent reading an operator job", Caller{Agent: "ada"}, operatorJob},
+	}
+	for _, tc := range denied {
+		job, err := svc.Job(ctx, tc.caller, tc.id)
+		if !errors.Is(err, ErrNotFound) || errors.Is(err, ErrForbidden) || job.ID != "" || job.Inboxes != nil {
+			t.Fatalf("%s: job %+v err %v, want not found", tc.name, job, err)
+		}
+	}
+	if _, err := svc.Job(ctx, Caller{Agent: "ada"}, "no-such-job"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown id err %v", err)
+	}
+
+	if err := svc.Revoke(operator, "ada", "*", PermProvision); err != nil {
+		t.Fatal(err)
+	}
+	if job, err := svc.Job(ctx, Caller{Agent: "ada"}, adaJob); !errors.Is(err, ErrNotFound) || job.ID != "" {
+		t.Fatalf("revoked agent read %+v %v, want not found", job, err)
+	}
+	if _, err := svc.Job(ctx, operator, adaJob); err != nil {
+		t.Fatalf("operator read after revoke %v", err)
+	}
+}
+
+func waitForJob(t *testing.T, svc *Service, id string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		job, err := svc.Job(context.Background(), Caller{Operator: true}, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Status != "running" {
+			if job.Status != "done" {
+				t.Fatalf("job %+v", job)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not finish", id)
 }
 
 func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Impakta-io/inbai/internal/auth"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
@@ -100,6 +101,104 @@ func TestAgentTokenCannotReadAnotherInbox(t *testing.T) {
 	if deniedMCP.StatusCode != http.StatusOK || !strings.Contains(deniedBody, `"isError":true`) || mail.listed {
 		t.Fatalf("mcp denied %d listed %v body %s", deniedMCP.StatusCode, mail.listed, deniedBody)
 	}
+}
+
+func TestAgentTokenCannotReadAnotherCallersJob(t *testing.T) {
+	svc := service.New(&fakeMail{})
+	svc.SetSyncLimit(1)
+	dir := auth.NewDirectory([]byte("signing-key"), "http://127.0.0.1:8787")
+	srv := httptest.NewServer((&Server{
+		Service:   svc,
+		Directory: dir,
+		Token:     "operator-token",
+		Issuer:    "http://127.0.0.1:8787",
+		Domain:    "example.com",
+		DomainID:  "dom",
+		RoleID:    "role",
+	}).Handler())
+	defer srv.Close()
+
+	ada := agentToken(t, srv.URL, "ada")
+	bob := agentToken(t, srv.URL, "bob")
+	for _, agent := range []string{"ada", "bob"} {
+		grant := operatorJSON(t, srv.URL, http.MethodPost, "/v1/grants", `{"agent":"`+agent+`","inbox":"*","permission":"inbox:provision"}`)
+		if grant.StatusCode != http.StatusCreated {
+			t.Fatalf("grant %s %d %s", agent, grant.StatusCode, readBody(t, grant))
+		}
+	}
+	eve := agentToken(t, srv.URL, "eve")
+
+	started := agentJSON(t, srv.URL, ada, http.MethodPost, "/v1/inboxes/generate", `{"prefix":"u","count":2}`)
+	if started.StatusCode != http.StatusAccepted {
+		t.Fatalf("generate %d %s", started.StatusCode, readBody(t, started))
+	}
+	var accepted struct {
+		JobID string `json:"jobId"`
+	}
+	mustJSON(t, started, &accepted)
+	path := "/v1/jobs/" + accepted.JobID
+	deadline := time.Now().Add(time.Second)
+	for {
+		res := agentGet(t, srv.URL, "operator-token", path)
+		body := readBody(t, res)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("operator read %d %s", res.StatusCode, body)
+		}
+		if strings.Contains(body, `"done"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job did not finish: %s", body)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	own := agentGet(t, srv.URL, ada, path)
+	if body := readBody(t, own); own.StatusCode != http.StatusOK || !strings.Contains(body, "u00001@example.com") {
+		t.Fatalf("starting agent %d %s", own.StatusCode, body)
+	}
+	unknown := agentGet(t, srv.URL, bob, "/v1/jobs/0000000000000000")
+	unknownBody := readBody(t, unknown)
+	if unknown.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown id %d %s", unknown.StatusCode, unknownBody)
+	}
+	for name, token := range map[string]string{"provisioning agent": bob, "agent with no grants": eve} {
+		res := agentGet(t, srv.URL, token, path)
+		body := readBody(t, res)
+		if res.StatusCode != http.StatusNotFound || strings.Contains(body, "example.com") || body != unknownBody {
+			t.Fatalf("%s read another agent's job: %d %s", name, res.StatusCode, body)
+		}
+	}
+}
+
+// agentToken creates an agent credential and exchanges it for an access token.
+func agentToken(t *testing.T, base, name string) string {
+	t.Helper()
+	create := operatorJSON(t, base, http.MethodPost, "/v1/agents", `{"name":"`+name+`"}`)
+	if create.StatusCode != http.StatusCreated {
+		t.Fatalf("agent %s %d %s", name, create.StatusCode, readBody(t, create))
+	}
+	var cred struct {
+		ID     string `json:"id"`
+		Secret string `json:"secret"`
+	}
+	mustJSON(t, create, &cred)
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", cred.ID)
+	form.Set("client_secret", cred.Secret)
+	res, err := http.Post(base+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
+	mustJSON(t, res, &tok)
+	if tok.AccessToken == "" {
+		t.Fatalf("no token for %s", name)
+	}
+	return tok.AccessToken
 }
 
 func operatorJSON(t *testing.T, base, method, path, body string) *http.Response {

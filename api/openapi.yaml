@@ -420,7 +420,11 @@ paths:
   /v1/jobs/{id}:
     get:
       operationId: getJob
-      summary: Read a bulk-create job.
+      summary: Read a bulk-create job. Only an operator or the agent that started it can read it.
+      description: |
+        An operator reads any job.
+        An agent reads a job it started while it holds inbox:provision on *.
+        Any other caller gets 404, the same as for an id that does not exist.
       parameters:
         - name: id
           in: path
@@ -434,8 +438,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+          description: The job does not exist, or the caller may not read it.
   /v1/inboxes/{id}/messages:
     parameters:
       - name: id
