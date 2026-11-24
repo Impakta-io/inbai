@@ -5,10 +5,13 @@ package imap
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
@@ -30,6 +33,38 @@ type session struct {
 	w      io.Writer
 	seq    int
 	broken error
+}
+
+// closedError is a connection the server ended while the client waited for the
+// reply to step.
+type closedError struct {
+	step  string
+	cause error
+}
+
+func (e *closedError) Error() string {
+	return "imap: server closed the connection during " + e.step
+}
+
+func (e *closedError) Unwrap() error { return e.cause }
+
+// statusError is a tagged NO or BAD reply. text is the server's own line.
+type statusError struct{ text string }
+
+func (e *statusError) Error() string { return "imap: " + e.text }
+
+// stepName names a command for an error message, for example "SELECT" or
+// "UID FETCH".
+func stepName(parts []string) string {
+	if len(parts) > 1 && strings.EqualFold(parts[0], "UID") {
+		return "UID " + parts[1]
+	}
+	return parts[0]
+}
+
+func connectionEnded(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed)
 }
 
 func (s *session) greet() error {
@@ -56,13 +91,16 @@ func (s *session) command(parts ...string) ([]item, error) {
 	for {
 		got, err := s.readItem()
 		if err != nil {
+			if connectionEnded(err) {
+				err = &closedError{step: stepName(parts), cause: err}
+			}
 			s.broken = err
 			return nil, err
 		}
 		if strings.HasPrefix(got.text, tag+" ") {
 			status, _, _ := strings.Cut(strings.TrimPrefix(got.text, tag+" "), " ")
 			if !strings.EqualFold(status, "OK") {
-				return nil, fmt.Errorf("imap: %s", got.text)
+				return nil, &statusError{text: got.text}
 			}
 			return untagged, nil
 		}
