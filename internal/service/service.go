@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"strings"
 	"sync"
@@ -97,6 +98,8 @@ type Service struct {
 	db        *store.Postgres
 	audit     []store.AuditRow
 	nextAudit int64
+	// notices receives warnings that do not fail a request. Nil means slog.Default().
+	notices *slog.Logger
 }
 
 // New returns a service over a mail backend.
@@ -544,11 +547,13 @@ func (s *Service) ListInboxes(ctx context.Context, caller Caller, domain string,
 	return out, next, nil
 }
 
-// DeleteInbox removes one account and its event cursor. Only an operator may do that.
-// The account is deleted first because that step cannot be undone. Dropping the cursor
-// first would stop events for an inbox that still exists if the account delete failed.
-// A failed cursor delete is not returned: the account is gone, and a leftover cursor
-// only shows up as a cursor.sweep error naming this inbox. Other inboxes still sync.
+// DeleteInbox removes one account and what inbAI keeps for it. Only an operator may do that.
+// The account is deleted first because that step cannot be undone. Removing the rest first
+// would drop grants and webhooks for an inbox that still exists if the account delete failed.
+// See forgetInbox for what is removed. A failure there is logged, not returned: the account is gone.
+// When the account delete fails and the mail server reports that the account does not exist,
+// the rest is removed too and the mail server's error is still returned, so a repeat delete
+// finishes a cleanup that failed. * names no inbox: it is the scope of inbox:provision grants.
 // An id that ReserveAccounts named is ErrConflict, and the backend is not called.
 func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) error {
 	if !caller.Operator {
@@ -557,16 +562,83 @@ func (s *Service) DeleteInbox(ctx context.Context, caller Caller, id string) err
 	if id == "" {
 		return fmt.Errorf("%w: inbox id is required", ErrInvalid)
 	}
+	if id == provisionScope {
+		return fmt.Errorf("%w: * is not an inbox id", ErrInvalid)
+	}
 	if s.reservedIDs[id] {
 		return fmt.Errorf("%w: %s is an inbAI account, not an inbox, and cannot be deleted", ErrConflict, id)
 	}
 	if err := s.mail.DeleteInbox(ctx, id); err != nil {
+		if check, ok := s.mail.(mailbackend.InboxChecker); ok {
+			if exists, checkErr := check.InboxExists(ctx, id); checkErr == nil && !exists {
+				s.forgetInbox(ctx, id)
+			}
+		}
 		return err
 	}
-	if s.feed != nil {
-		_ = s.feed.Forget(ctx, id)
-	}
+	s.forgetInbox(ctx, id)
 	return s.record(ctx, caller, "inbox.delete", id)
+}
+
+// forgetInbox removes what inbAI keeps for a deleted inbox: every agent's grants on it, its
+// webhooks and their queued deliveries, its sender allowlist and retention policy, the
+// idempotency keys of creates that returned its id, and its event cursor. Events and audit
+// rows stay. With a database that is one transaction, store.ForgetInbox, which also covers
+// the feed's rows because inbaid opens the feed on the same database.
+// Each step deletes only what is there, so a repeat is safe. It runs even when the caller
+// has gone away, because the account is already deleted. A failure is logged as a warning.
+func (s *Service) forgetInbox(ctx context.Context, id string) {
+	ctx = context.WithoutCancel(ctx)
+	var err error
+	if s.db != nil {
+		err = s.db.ForgetInbox(ctx, store.InboxKeys{Inbox: id, RetentionScope: retentionScope(id), CreateKind: kindCreate})
+	} else {
+		s.mu.Lock()
+		kept := s.grants[:0]
+		for _, item := range s.grants {
+			if item.inbox != id {
+				kept = append(kept, item)
+			}
+		}
+		s.grants = kept
+		delete(s.allow, id)
+		delete(s.keep, retentionScope(id))
+		for key, entry := range s.idem {
+			if strings.HasPrefix(key, kindCreate+"\n") && entry.done && entry.payload == id {
+				delete(s.idem, key)
+			}
+		}
+		s.mu.Unlock()
+		if s.feed != nil {
+			err = s.forgetFeed(ctx, id)
+		}
+	}
+	if err != nil {
+		s.logger().Warn("inbox deleted, but removing its grants, webhooks, or settings failed; delete the inbox again to finish",
+			"inbox", id, "error", err.Error())
+	}
+}
+
+// forgetFeed removes the inbox's webhooks, their deliveries, and its cursor from a feed
+// that has no database behind the service.
+func (s *Service) forgetFeed(ctx context.Context, id string) error {
+	subs, err := s.feed.Subscriptions(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		if err := s.feed.Unsubscribe(ctx, sub.ID); err != nil {
+			return err
+		}
+	}
+	return s.feed.Forget(ctx, id)
+}
+
+func (s *Service) logger() *slog.Logger {
+	if s.notices != nil {
+		return s.notices
+	}
+	return slog.Default()
 }
 
 // Attachment returns the bytes of one file on a message. It uses the same read grant as Get.
