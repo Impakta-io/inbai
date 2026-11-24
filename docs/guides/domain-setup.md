@@ -12,6 +12,34 @@ inbai domain add
 
 The zone file includes MX, SPF, DKIM, and DMARC, plus the client and certificate records Stalwart adds. The check covers MX and TXT records, which is where SPF, DKIM, and DMARC are published. Reverse DNS, port 25, TLS, and blocklists are checked by [`inbai doctor`](troubleshooting.md). `inbai doctor` only reads. For a domain Stalwart does not have, it reports `domain is not configured in Stalwart` with the fix `inbai domain add --domain <name>` and exits 1. Blocklists are queried for IPv4 addresses. An IPv6 address is listed as `not checked` and does not fail the run.
 
+## A domain that already has mail
+
+A domain has one set of MX records. If `example.com` already receives mail through a provider such as Google Workspace or Microsoft 365, its MX records point to that provider. Pointing them at inbAI moves all of the domain's mail to inbAI, and the provider stops receiving it.
+
+Give inbAI a subdomain instead, such as `agents.example.com`:
+
+```sh
+inbai init --public --domain agents.example.com
+inbai domain add
+```
+
+On a server that is already set up, run `inbai domain add --domain agents.example.com`.
+
+Every record in the printed zone file sits at or under the subdomain. None of them clash with the provider's records:
+
+| Record | Name | Provider record it leaves alone |
+| --- | --- | --- |
+| MX | `agents.example.com` | MX on `example.com` |
+| SPF | TXT on `agents.example.com` | SPF on `example.com` |
+| DKIM | TXT on `<selector>._domainkey.agents.example.com` | DKIM keys under `_domainkey.example.com` |
+| DMARC | TXT on `_dmarc.agents.example.com` | DMARC on `example.com`; the subdomain's own record takes precedence for subdomain mail |
+
+Many DNS providers add the zone name to each record name for you. In the `example.com` zone, enter `agents`, not `agents.example.com`. Before you save, check that no new record and no changed record is at `example.com` itself.
+
+Agent addresses then look like `support@agents.example.com`. The subdomain also keeps agent sending reputation apart from the domain people use.
+
+inbAI does not set up addresses on `example.com` itself while another provider receives that domain's mail. That would need routing rules at the provider, the inbAI host in the domain's SPF record, and a separate DKIM selector, and a mistake in any of them affects delivery of the domain's other mail.
+
 ## Ports
 
 inbAI publishes SMTP on port 25 for inbound mail and HTTPS on port 443. Agents send mail through the inbAI API, not SMTP submission, so no submission port is published. Stalwart also listens on port 465 (submission with implicit TLS) inside its container, but the stack does not publish it.
