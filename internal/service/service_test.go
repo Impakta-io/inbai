@@ -492,6 +492,73 @@ func TestAttachmentRequiresTheReadGrant(t *testing.T) {
 	}
 }
 
+func TestSuspendAgentReportsTheStoreErrorAndWritesNoAudit(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}, err: errors.New("connection refused")}
+	if err := svc.SuspendAgent(Caller{Operator: true}, ids, "ada"); !errors.Is(err, ids.err) {
+		t.Fatalf("err = %v", err)
+	}
+	if rows := auditRows(t, svc); len(rows) != 0 {
+		t.Fatalf("audit %+v", rows)
+	}
+}
+
+func TestSuspendUnknownAgentIsNotFound(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}}
+	if err := svc.SuspendAgent(Caller{Operator: true}, ids, "bob"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	if rows := auditRows(t, svc); len(rows) != 0 {
+		t.Fatalf("audit %+v", rows)
+	}
+}
+
+func TestSuspendAgentRecordsAfterTheSuspensionIsStored(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}}
+	if err := svc.SuspendAgent(Caller{Agent: "ada"}, ids, "ada"); !errors.Is(err, ErrForbidden) || ids.suspended != "" {
+		t.Fatalf("agent err %v suspended %q", err, ids.suspended)
+	}
+	if err := svc.SuspendAgent(Caller{Operator: true}, ids, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	rows := auditRows(t, svc)
+	if ids.suspended != "ada" || len(rows) != 1 || rows[0].Action != "agent.suspend" || rows[0].Target != "ada" {
+		t.Fatalf("suspended %q audit %+v", ids.suspended, rows)
+	}
+}
+
+func auditRows(t *testing.T, svc *Service) []store.AuditRow {
+	t.Helper()
+	rows, _, err := svc.Audit(context.Background(), Caller{Operator: true}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+type fakeIdentities struct {
+	known     map[string]bool
+	err       error
+	suspended string
+}
+
+func (f *fakeIdentities) Create(agent string, operator bool) (string, string, error) {
+	return "id", "secret", nil
+}
+
+func (f *fakeIdentities) Suspend(agent string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	if !f.known[agent] {
+		return false, nil
+	}
+	f.suspended = agent
+	return true, nil
+}
+
 type fakeMail struct {
 	created  string
 	creates  int
