@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Impakta-io/inbai/internal/mailbackend"
@@ -93,6 +94,9 @@ func (s *Service) SetSyncLimit(n int) {
 // Generate creates count addresses. An operator may do that.
 // An agent may do that when it holds inbox:provision on *.
 // Local parts are prefix plus a zero-padded index, starting at 00000.
+// idemKey is the Idempotency-Key. A repeat of a completed key returns the same inboxes,
+// or the same job id when the first request was queued. See reserve for a repeat that is
+// still running or names a different request.
 func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateRequest, idemKey string) (GenerateResult, error) {
 	if err := s.permitProvision(ctx, caller); err != nil {
 		return GenerateResult{}, err
@@ -110,19 +114,54 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 	if req.QuotaBytes < 0 {
 		return GenerateResult{}, fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
 	}
+	// The key is bound to the caller only. Prefix and count are in the hash, so the same
+	// key with another prefix or count is ErrKeyReused instead of a separate request.
+	hold, saved, done, err := s.reserve(ctx, kindGenerate, idempotencyKey(caller, "", idemKey), generateHash(s.mail, prefix, req))
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	if !done {
+		saved, done, err = s.legacyGenerate(ctx, caller, prefix, req.Count, idemKey)
+		if err != nil {
+			s.release(ctx, hold)
+			return GenerateResult{}, err
+		}
+		if done {
+			// Bind the older answer to this request, so a different one is ErrKeyReused from now on.
+			if err := s.complete(ctx, hold, saved); err != nil {
+				return GenerateResult{}, err
+			}
+		}
+	}
+	if done {
+		var result GenerateResult
+		if err := json.Unmarshal([]byte(saved), &result); err != nil {
+			return GenerateResult{}, err
+		}
+		return result, nil
+	}
+	result, err := s.generate(ctx, caller, req, prefix)
+	if err != nil {
+		s.release(ctx, hold)
+		return GenerateResult{}, err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	if err := s.complete(ctx, hold, string(raw)); err != nil {
+		return GenerateResult{}, err
+	}
+	return result, nil
+}
+
+// generate does the work of a Generate call that holds its key. Inside the sync limit or
+// with Wait it creates the addresses. Otherwise it queues a job and returns its id, and the
+// job is then the durable record of the request.
+func (s *Service) generate(ctx context.Context, caller Caller, req GenerateRequest, prefix string) (GenerateResult, error) {
 	quotaBytes := req.QuotaBytes
 	if quotaBytes == 0 {
 		quotaBytes = s.storageQuota
-	}
-	key := idempotencyKey(caller, prefix+"\n"+fmt.Sprint(req.Count), idemKey)
-	if key != "" {
-		saved, ok, err := s.savedGenerate(ctx, key)
-		if err != nil {
-			return GenerateResult{}, err
-		}
-		if ok {
-			return saved, nil
-		}
 	}
 	specs := make([]mailbackend.InboxSpec, req.Count)
 	for i := range specs {
@@ -136,13 +175,7 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		result := GenerateResult{Inboxes: made, Existing: existing}
-		if key != "" {
-			if err := s.rememberGenerate(ctx, key, result); err != nil {
-				return GenerateResult{}, err
-			}
-		}
-		return result, nil
+		return GenerateResult{Inboxes: made, Existing: existing}, nil
 	}
 	id, err := newID()
 	if err != nil {
@@ -170,16 +203,10 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 			return GenerateResult{}, err
 		}
 	}
-	result := GenerateResult{JobID: id}
-	if key != "" {
-		if err := s.rememberGenerate(ctx, key, result); err != nil {
-			return GenerateResult{}, err
-		}
-	}
 	if s.db == nil {
 		go s.finishJob(job, specs, req.Domain)
 	}
-	return result, nil
+	return GenerateResult{JobID: id}, nil
 }
 
 // RunBulkJob executes one queued bulk-create job and updates its status row.
@@ -385,39 +412,16 @@ func decodeJobInboxes(raw []byte, job *Job) error {
 	return json.Unmarshal(raw, &job.Inboxes)
 }
 
-func (s *Service) savedGenerate(ctx context.Context, key string) (GenerateResult, bool, error) {
-	if s.db != nil {
-		raw, ok, err := s.db.Idempotency(ctx, "generate", key)
-		if err != nil || !ok {
-			return GenerateResult{}, ok, err
-		}
-		var result GenerateResult
-		if err := json.Unmarshal([]byte(raw), &result); err != nil {
-			return GenerateResult{}, false, err
-		}
-		return result, true, nil
+// legacyGenerate is the payload an older server stored for a completed generate. Those rows
+// are keyed by caller, prefix, and count, and have no request hash. Keys held in memory do
+// not outlive the process, so only the database has them. The payload is a GenerateResult
+// in JSON, the same as the payload complete stores now.
+func (s *Service) legacyGenerate(ctx context.Context, caller Caller, prefix string, count int, idemKey string) (string, bool, error) {
+	key := idempotencyKey(caller, prefix+"\n"+strconv.Itoa(count), idemKey)
+	if s.db == nil || key == "" {
+		return "", false, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result, ok := s.generated[key]
-	return result, ok, nil
-}
-
-func (s *Service) rememberGenerate(ctx context.Context, key string, result GenerateResult) error {
-	if s.db != nil {
-		raw, err := json.Marshal(result)
-		if err != nil {
-			return err
-		}
-		return s.db.SaveIdempotency(ctx, "generate", key, string(raw))
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.generated == nil {
-		s.generated = map[string]GenerateResult{}
-	}
-	s.generated[key] = result
-	return nil
+	return s.db.Idempotency(ctx, kindGenerate, key)
 }
 
 func copyJob(job *Job) Job {

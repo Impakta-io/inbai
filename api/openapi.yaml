@@ -465,7 +465,12 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
-          description: Every address already had an account. Nothing was created.
+          description: >-
+            Either a request with the same Idempotency-Key is still running, or every address already
+            had an account. Nothing was created, and the Idempotency-Key is given back.
+        "422":
+          $ref: "#/components/responses/Problem"
+          description: The Idempotency-Key was used for a generate with a different prefix or count. Nothing was created.
   /v1/jobs/{id}:
     get:
       operationId: getJob
@@ -874,8 +879,8 @@ components:
       required: false
       description: >-
         Makes a retry safe. A repeat of a completed key returns the first result without creating or
-        sending again. On createInbox, sendMessage, and replyMessage the key is held while the request
-        runs and bound to its body. There a repeat while the first request runs is 409, the same key with
+        sending again. On createInbox, generateInboxes, sendMessage, and replyMessage the key is held
+        while the request runs and bound to its body. There a repeat while the first request runs is 409, the same key with
         a different body is 422, a failed request gives the key back, and a key held by a server that
         stopped is taken over after 10 minutes.
       schema:

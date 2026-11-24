@@ -22,12 +22,13 @@ var ErrInProgress = errors.New("a request with this Idempotency-Key is still in 
 var ErrKeyReused = errors.New("this Idempotency-Key was used for a different request")
 
 // Idempotency namespaces. Each operation has its own, so a key used for a send does not
-// answer a reply. "sent" and "created" are the names rows were stored under before replies
-// had their own namespace, so keys completed before an upgrade still match.
+// answer a reply. "sent", "created", and "generate" are the names rows were stored under
+// before keys were reserved, so keys completed before an upgrade still match.
 const (
-	kindSend   = "sent"
-	kindReply  = "reply"
-	kindCreate = "created"
+	kindSend     = "sent"
+	kindReply    = "reply"
+	kindCreate   = "created"
+	kindGenerate = "generate"
 )
 
 // idempotencyTakeover is how old an in-progress key must be before another request may take it over.
@@ -188,6 +189,26 @@ func createHash(backend mailbackend.Backend, spec mailbackend.InboxSpec) string 
 		Local      string `json:"local"`
 		QuotaBytes int64  `json:"quotaBytes"`
 	}{"create", first, second, spec.Local, spec.QuotaBytes})
+}
+
+// generateHash is the request hash for a bulk generate. prefix is the normalized prefix.
+// It is taken before the default quota is applied. Wait and Progress only change how the
+// work runs, so they are not part of it. The domain and role ids come from the backend
+// through inboxPlacer, as in createHash, under the same JSON names.
+func generateHash(backend mailbackend.Backend, prefix string, req GenerateRequest) string {
+	var first, second string
+	if placer, ok := backend.(inboxPlacer); ok {
+		first, second = placer.InboxPlacement()
+	}
+	return hashJSON(struct {
+		Op         string `json:"op"`
+		Domain     string `json:"domain"`
+		First      string `json:"domainId"`
+		Second     string `json:"roleId"`
+		Prefix     string `json:"prefix"`
+		Count      int    `json:"count"`
+		QuotaBytes int64  `json:"quotaBytes"`
+	}{"generate", req.Domain, first, second, prefix, req.Count, req.QuotaBytes})
 }
 
 func hashJSON(v any) string {

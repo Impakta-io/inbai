@@ -90,7 +90,6 @@ type Service struct {
 	sent      map[string]int
 	idem      map[string]idemEntry
 	jobs      map[string]*Job
-	generated map[string]GenerateResult
 	keep      map[string]int
 	allow     map[string][]string
 	feed      *events.Feed
