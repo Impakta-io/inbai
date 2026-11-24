@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"net/url"
 	"strings"
 	"time"
 
@@ -64,12 +63,11 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	if base == "" {
 		base = config.DefaultAPIURL
 	}
-	parsed, err := url.Parse(base)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+	base, ok := checkAPIURL(base)
+	if !ok {
 		writef(stderr, "login: --url must be an http or https URL\n")
 		return 2
 	}
-	base = strings.TrimRight(base, "/")
 
 	clientID := strings.TrimSpace(*clientIDFlag)
 	clientSecret := ""
