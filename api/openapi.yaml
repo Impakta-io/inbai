@@ -7,7 +7,9 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0
   description: |
     Operator HTTP API served by inbaid. Routes live under /v1.
-    Create and send accept an Idempotency-Key header.
+    Create, send, and reply accept an Idempotency-Key header. A repeat of a completed key with the
+    same request returns the first result. A repeat while the first request runs is 409. The same key
+    with a different request is 422. Send, reply, and create keep separate keys.
     Errors use RFC 9457 problem details.
     A 502 detail is the mail server's reason when it refused the request.
     Otherwise it names the X-Request-Id to find in the server log, not the error.
@@ -224,6 +226,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Inbox"
         "401":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
         "429":
           $ref: "#/components/responses/Problem"
@@ -503,6 +509,10 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
         "429":
           $ref: "#/components/responses/Problem"
         "502":
@@ -609,6 +619,10 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
           $ref: "#/components/responses/Problem"
         "429":
           $ref: "#/components/responses/Problem"
@@ -818,6 +832,12 @@ components:
       name: Idempotency-Key
       in: header
       required: false
+      description: >-
+        Makes a retry safe. A repeat of a completed key returns the first result without creating or
+        sending again. On createInbox, sendMessage, and replyMessage the key is held while the request
+        runs and bound to its body. There a repeat while the first request runs is 409, the same key with
+        a different body is 422, a failed request gives the key back, and a key held by a server that
+        stopped is taken over after 10 minutes.
       schema:
         type: string
     PageLimit:
