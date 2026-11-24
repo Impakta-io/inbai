@@ -474,8 +474,27 @@ func TestInitLeavesAnExistingConfigDirMode(t *testing.T) {
 	}
 }
 
-func TestInitDockerTimeoutShowsLogsAndVolumeHint(t *testing.T) {
-	calls := fakeCompose(t, "postgres-1  | FATAL:  password authentication failed for user \"stalwart\"\n")
+// timeoutRun runs init against a Stalwart that never answers. Compose answers
+// each service's logs and the stalwart ps call with the text given.
+func timeoutRun(t *testing.T, stalwartLog, postgresLog, psJSON string) (stderr string, calls *[]composeCall, composePath string) {
+	t.Helper()
+	calls = fakeCompose(t, "")
+	base := runCompose
+	runCompose = func(ctx context.Context, dir string, env []string, out io.Writer, args ...string) ([]byte, error) {
+		got, err := base(ctx, dir, env, out, args...)
+		if len(args) > 2 && args[2] == "logs" {
+			switch args[len(args)-1] {
+			case "stalwart":
+				return []byte(stalwartLog), err
+			case "postgres":
+				return []byte(postgresLog), err
+			}
+		}
+		if len(args) > 2 && args[2] == "ps" {
+			return []byte(psJSON), err
+		}
+		return got, err
+	}
 	origTimeout := readyTimeout
 	t.Cleanup(func() { readyTimeout = origTimeout })
 	readyTimeout = 50 * time.Millisecond
@@ -484,28 +503,40 @@ func TestInitDockerTimeoutShowsLogsAndVolumeHint(t *testing.T) {
 		return fmt.Errorf("%w (last error: connection refused)", ctx.Err())
 	}
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.json")
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--domain", "example.com", "--config", cfgPath}, &stdout, &stderr, noEnv)
+	var stdout, errBuf bytes.Buffer
+	code := run([]string{"init", "--domain", "example.com", "--config", filepath.Join(dir, "config.json")}, &stdout, &errBuf, noEnv)
 	if code != 1 {
-		t.Fatalf("exit %d stderr %s", code, stderr.String())
+		t.Fatalf("exit %d stderr %s", code, errBuf.String())
 	}
-	composePath := filepath.Join(dir, "stack", "compose.yaml")
+	return errBuf.String(), calls, filepath.Join(dir, "stack", "compose.yaml")
+}
+
+func TestInitDockerTimeoutPermissionDenied(t *testing.T) {
+	stderr, calls, _ := timeoutRun(t,
+		"stalwart-1  | /entrypoint.sh: 4: cannot create /etc/stalwart/config.json: Permission denied\n",
+		"postgres-1  | database system is ready to accept connections\n",
+		`{"Service":"stalwart","State":"exited","ExitCode":2}`+"\n")
 	for _, want := range []string{
 		"Stalwart recovery API did not answer",
-		"password authentication failed",
-		"Compose project inbai",
-		"different PostgreSQL password",
-		fmt.Sprintf("docker compose -p inbai -f %q down -v", composePath),
+		"stalwart exited with code 2",
+		"Permission denied",
+		"not writable by the container user",
 	} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
 		}
+	}
+	for _, bad := range []string{"down -v", "different PostgreSQL password"} {
+		if strings.Contains(stderr, bad) {
+			t.Fatalf("stderr has %q:\n%s", bad, stderr)
+		}
+	}
+	if strings.Index(stderr, "Permission denied") > strings.Index(stderr, "database system is ready") {
+		t.Fatalf("the Stalwart log must come first:\n%s", stderr)
 	}
 	logsAt, leaveAt := -1, -1
 	for i, call := range *calls {
-		if len(call.args) > 2 && call.args[2] == "logs" {
+		if len(call.args) > 2 && call.args[2] == "logs" && logsAt < 0 {
 			logsAt = i
 		}
 		if containsEnv(call.env, "STALWART_RECOVERY_MODE=0") {
@@ -514,6 +545,44 @@ func TestInitDockerTimeoutShowsLogsAndVolumeHint(t *testing.T) {
 	}
 	if logsAt < 0 || leaveAt < logsAt {
 		t.Fatalf("logs must be read before Stalwart is restarted: %+v", *calls)
+	}
+}
+
+func TestInitDockerTimeoutPasswordHint(t *testing.T) {
+	stderr, _, composePath := timeoutRun(t,
+		"stalwart-1  | waiting for database\n",
+		"postgres-1  | FATAL:  password authentication failed for user \"stalwart\"\n",
+		`[{"Service":"stalwart","State":"restarting","ExitCode":1}]`)
+	for _, want := range []string{
+		"stalwart is restarting",
+		"password authentication failed",
+		"Compose project inbai",
+		"different PostgreSQL password",
+		"deletes that install's mail and accounts",
+		fmt.Sprintf("docker compose -p inbai -f %q down -v", composePath),
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "not writable") {
+		t.Fatalf("wrong hint:\n%s", stderr)
+	}
+}
+
+func TestInitDockerTimeoutGenericHint(t *testing.T) {
+	stderr, _, _ := timeoutRun(t, "stalwart-1  | starting\n", "postgres-1  | ready\n", "")
+	if !strings.Contains(stderr, "Stalwart did not answer in time; see the logs above.") {
+		t.Fatalf("stderr:\n%s", stderr)
+	}
+	for _, bad := range []string{"down -v", "not writable", "exited"} {
+		if strings.Contains(stderr, bad) {
+			t.Fatalf("stderr has %q:\n%s", bad, stderr)
+		}
+	}
+	stderr, _, _ = timeoutRun(t, "stalwart-1  | bye\n", "postgres-1  | ready\n", `{"State":"exited","ExitCode":1}`)
+	if !strings.Contains(stderr, "Stalwart exited; see its log above.") || strings.Contains(stderr, "down -v") {
+		t.Fatalf("stderr:\n%s", stderr)
 	}
 }
 
