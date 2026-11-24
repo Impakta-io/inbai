@@ -71,6 +71,9 @@ func TestTwoReplicasShareStateAndJobs(t *testing.T) {
 		svc.SetDB(db)
 		svc.SetSyncLimit(2)
 		feed := events.New(db)
+		// The receiver listens on loopback, so the operator policy must allow it,
+		// as INBAI_WEBHOOK_ALLOW_PRIVATE=true does in cmd/inbaid.
+		feed.SetAllowPrivate(true)
 		svc.SetFeed(feed)
 		dir := auth.NewDirectory(keyA, issuer)
 		dir.SetDB(db)
@@ -148,7 +151,7 @@ func TestTwoReplicasShareStateAndJobs(t *testing.T) {
 	var hookMu sync.Mutex
 	var gotSig string
 	var gotBody []byte
-	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hook := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		hookMu.Lock()
 		gotSig = r.Header.Get("X-Inbai-Signature")
@@ -193,7 +196,7 @@ func TestTwoReplicasShareStateAndJobs(t *testing.T) {
 		}
 	}
 	for range 4 {
-		ok, err := feedB.DeliverOnce(ctx, hook.Client())
+		ok, err := feedB.DeliverOnce(ctx, hook.Client()) // hook.Client trusts the test certificate
 		if err != nil {
 			t.Fatal(err)
 		}
