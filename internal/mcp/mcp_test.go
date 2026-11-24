@@ -6,6 +6,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,6 +33,19 @@ func TestToolsListAndAMissingGrantDoesNotRead(t *testing.T) {
 	initResp, _ := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":3,"method":"initialize"}`), box)
 	if !strings.Contains(string(initResp), ProtocolVersion) {
 		t.Fatalf("initialize %s", initResp)
+	}
+	var initialized struct {
+		Result struct {
+			Instructions string `json:"instructions"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(initResp, &initialized); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"operator token", "config.json", "ask the human operator", "untrusted external content"} {
+		if !strings.Contains(initialized.Result.Instructions, want) {
+			t.Fatalf("instructions %q lack %q", initialized.Result.Instructions, want)
+		}
 	}
 	note, ok := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), box)
 	if ok || note != nil {

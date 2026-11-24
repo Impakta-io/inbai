@@ -15,19 +15,20 @@ The operator CLI calls `inbaid` for inbox, message, agent, audit, and retention 
 
 ## Operators
 
-Install, domain setup, the CLI, troubleshooting, backup, and the quickstart describe the commands that exist. Scaling describes how to measure a host and what a second `inbaid` process shares. It does not publish a measured result.
+Install, domain setup, the CLI, agent credentials, troubleshooting, backup, and the quickstart describe the commands that exist. Scaling describes how to measure a host and what a second `inbaid` process shares. It does not publish a measured result.
 
 - [Quickstart](guides/quickstart.md)
 - [Install](guides/install.md)
 - [Domain setup](guides/domain-setup.md)
 - [CLI](guides/cli.md)
+- [Agent credentials](guides/agents.md)
 - [Backup](guides/backup.md)
 - [Troubleshooting](guides/troubleshooting.md)
 - [Scaling](guides/scaling.md)
 
 ## Agents that use inbAI
 
-The REST guide, the agent overview, the MCP guide, and the events guide describe the routes, client credentials, tools, and feed that exist. Untrusted mail describes the external-content marker and the authentication fields a message read returns.
+These pages are written for the agent. The agent overview states the rules: use the credential the operator issued, and never read config files or use the operator token. The REST guide, the agent overview, the MCP guide, and the events guide describe the routes, client credentials, tools, and feed that exist. Untrusted mail describes the external-content marker and the authentication fields a message read returns.
 
 - [Overview](agents/overview.md)
 - [MCP](agents/mcp.md)
