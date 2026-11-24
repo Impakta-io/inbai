@@ -311,6 +311,61 @@ func (p *Postgres) Forget(ctx context.Context, inbox string) error {
 	return err
 }
 
+// InboxKeys names the rows ForgetInbox removes for one inbox. Inbox is the account id.
+// RetentionScope is that inbox's retention_policy scope. CreateKind is the idempotency
+// kind whose payload is the id of the inbox a create made. internal/service chooses both.
+type InboxKeys struct {
+	Inbox          string
+	RetentionScope string
+	CreateKind     string
+}
+
+// ForgetInbox removes, in one transaction, what is stored for an inbox that was deleted:
+// its cursor and address binding, its webhook subscriptions and every delivery queued for
+// them, every agent's grants on it, its sender allowlist, its retention policy, and the
+// idempotency keys of creates that returned its id. Events and audit rows stay.
+// Rows already gone are not an error, so a failed call can be repeated.
+//
+// The subscriptions are deleted before their deliveries for the reason Unsubscribe gives.
+func (p *Postgres) ForgetInbox(ctx context.Context, keys InboxKeys) error {
+	if keys.Inbox == "" {
+		return errors.New("forget inbox: inbox id is required")
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `DELETE FROM webhook_subscription WHERE inbox = $1 RETURNING id`, keys.Inbox)
+	if err != nil {
+		return err
+	}
+	subs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	if len(subs) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM webhook_delivery WHERE subscription_id = ANY($1)`, subs); err != nil {
+			return err
+		}
+	}
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM inbox_cursor WHERE inbox = $1`, []any{keys.Inbox}},
+		{`DELETE FROM access_grant WHERE inbox = $1`, []any{keys.Inbox}},
+		{`DELETE FROM sender_allowlist WHERE inbox = $1`, []any{keys.Inbox}},
+		{`DELETE FROM retention_policy WHERE scope = $1`, []any{keys.RetentionScope}},
+		{`DELETE FROM idempotency WHERE kind = $1 AND payload = $2`, []any{keys.CreateKind, keys.Inbox}},
+	} {
+		if _, err := tx.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (p *Postgres) Put(ctx context.Context, inbox, address, state string, records []Record) error {
 	address = strings.ToLower(strings.TrimSpace(address))
 	tx, err := p.pool.Begin(ctx)
