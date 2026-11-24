@@ -43,7 +43,7 @@ export INBAI_CLIENT_SECRET='the-client-secret'
 inbai login --url http://127.0.0.1:8787 --client-id <client-id>
 ```
 
-`--url` updates `apiUrl` in the config file (defaulting to the saved `apiUrl` or `http://127.0.0.1:8787`). `INBAI_CLIENT_ID` may be used instead of `--client-id`. `--json` prints the API URL, auth mode, client id (when set), and config path; it does not print secrets or bearer tokens. `inbai login --clear` removes stored login credentials from the config file. Environment variables (`INBAI_OPERATOR_TOKEN`, `INBAI_CLIENT_ID`/`INBAI_CLIENT_SECRET`) still take precedence over stored credentials when set.
+`--url` updates `apiUrl` in the config file (defaulting to the saved `apiUrl` or `http://127.0.0.1:8787`). `INBAI_CLIENT_ID` may be used instead of `--client-id`. `--json` prints the API URL, auth mode, client id (when set), and config path; it does not print secrets or bearer tokens. Logging in with a client id stores `clientId` and `clientSecret` and leaves `operatorToken` in the config file, because `inbaid serve` reads its operator token from that file. The CLI then acts as that client, since stored client credentials come before the stored `operatorToken`. `inbai login --clear` removes the stored `clientId` and `clientSecret` only and leaves `operatorToken`. Logging in with `INBAI_OPERATOR_TOKEN` stores that token and removes the stored client credentials. Environment variables (`INBAI_OPERATOR_TOKEN`, `INBAI_CLIENT_ID`/`INBAI_CLIENT_SECRET`) still take precedence over stored credentials when set.
 
 ## domain add
 

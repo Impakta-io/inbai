@@ -24,7 +24,7 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	}
 	apiURL := fs.String("url", "", "inbaid API URL (default config apiUrl or http://127.0.0.1:8787)")
 	clientIDFlag := fs.String("client-id", "", "OAuth client id (uses INBAI_CLIENT_SECRET)")
-	clear := fs.Bool("clear", false, "remove stored login credentials from config")
+	clear := fs.Bool("clear", false, "remove stored client credentials from config (operatorToken is kept)")
 	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
@@ -50,12 +50,11 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	if *clear {
 		cfg.ClientID = ""
 		cfg.ClientSecret = ""
-		cfg.OperatorToken = ""
 		if err := writeConfig(path, cfg); err != nil {
 			writef(stderr, "write config: %s\n", err)
 			return 1
 		}
-		emit(stdout, *asJSON, "Cleared stored credentials.\n", map[string]any{"cleared": true, "config": path})
+		emit(stdout, *asJSON, "Cleared stored client credentials. operatorToken is unchanged.\n", map[string]any{"cleared": true, "config": path})
 		return 0
 	}
 	base := strings.TrimSpace(*apiURL)
@@ -97,7 +96,6 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 		cfg.APIURL = base
 		cfg.ClientID = clientID
 		cfg.ClientSecret = clientSecret
-		cfg.OperatorToken = ""
 		if err := writeConfig(path, cfg); err != nil {
 			writef(stderr, "write config: %s\n", err)
 			return 1
