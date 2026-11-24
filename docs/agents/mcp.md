@@ -1,4 +1,4 @@
-Status: partial — `inbaid` serves the mail tools over Streamable HTTP, and `inbai mcp serve` serves them over stdio. `wait_for_message` uses the event feed when `INBAI_DATABASE_URL` is set, and otherwise polls the mailbox.
+Status: current — `inbaid` serves the mail tools over Streamable HTTP, and `inbai mcp serve` serves them over stdio. `wait_for_message` uses the event feed when `INBAI_DATABASE_URL` is set, and otherwise polls the mailbox.
 
 # MCP
 
@@ -15,6 +15,8 @@ The command reads the API address from the config file (`apiUrl`, otherwise `htt
 1. `INBAI_ACCESS_TOKEN`
 2. `INBAI_CLIENT_ID` and `INBAI_CLIENT_SECRET`, exchanged at `POST /oauth/token`
 3. `INBAI_OPERATOR_TOKEN`
+4. Stored OAuth client credentials from `inbai login`, exchanged at `POST /oauth/token`
+5. Stored operator token from `inbai login`
 
 ```sh
 export INBAI_CLIENT_ID='the-id'

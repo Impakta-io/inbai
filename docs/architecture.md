@@ -4,7 +4,7 @@ Status: current
 
 inbAI is a control plane in front of a mail server. It provisions domains and inboxes, holds agent identity and grants, enforces quotas, and delivers events. It does not implement SMTP, IMAP, or spam filtering.
 
-`inbai init` creates the Stalwart domain, operator, and service account described below. Inbox and message commands call `inbaid`, and `inbaid` calls the service layer, which calls Stalwart over JMAP. Grants are checked in that layer. They are not stored in PostgreSQL yet. An operator may use `INBAI_OPERATOR_TOKEN`. An agent uses an OAuth client credential, and the access token only names that agent. MCP is served at `/mcp` and by `inbai mcp serve`. The rest of this document is the design the remaining code will follow.
+`inbai init` creates the Stalwart domain, operator, and service account described below. Inbox and message commands call `inbaid`, and `inbaid` calls the service layer, which calls the configured `MailBackend` (Stalwart over JMAP by default, or IMAP/SMTP when `INBAI_MAIL=imap`). Grants are checked in that service layer and stored in PostgreSQL when `INBAI_DATABASE_URL` is set (or in memory without a database). An operator may use `INBAI_OPERATOR_TOKEN` or save credentials with `inbai login`. An agent uses an OAuth client credential, and the access token only names that agent. MCP is served at `/mcp` and by `inbai mcp serve`.
 
 ## Components
 

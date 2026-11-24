@@ -1,4 +1,4 @@
-Status: partial — an operator can issue a client credential and a grant. The agent can call the REST API or MCP with the access token.
+Status: current — an operator can issue a client credential and a grant. The agent can call the REST API or MCP with the access token.
 
 # Agents that use inbAI
 

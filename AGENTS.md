@@ -2,7 +2,7 @@ Status: current
 
 # Instructions for coding agents
 
-These instructions are for an agent editing this repository. An agent that sends or receives mail follows [docs/agents](docs/agents/overview.md) once that API exists. It does not exist yet.
+These instructions are for an agent editing this repository. An agent that sends or receives mail follows [docs/agents](docs/agents/overview.md).
 
 ## Commands
 

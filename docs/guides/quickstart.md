@@ -6,7 +6,13 @@ This walks an operator from the Compose stack to one inbox. An agent connects wi
 
 ## Install
 
-Follow [install](install.md) and start the Compose stack in [deploy/compose](../../deploy/compose/README.md). Leave Stalwart in recovery mode for the next step.
+Install the CLI with Homebrew (or download a release archive / build from source — see [install](install.md)):
+
+```sh
+brew install impakta-io/tap/inbai
+```
+
+Then start the Compose stack in [deploy/compose](../../deploy/compose/README.md). Leave Stalwart in recovery mode for the next step.
 
 ## Bootstrap
 
@@ -25,10 +31,11 @@ Publish the zone, then run `inbai doctor`. A healthy host exits 0. The Compose c
 
 ## Create an inbox
 
-The Compose service listens on `127.0.0.1:8787` after init writes `config.json` and Stalwart leaves recovery mode. The token is the one passed to Compose as `INBAI_OPERATOR_TOKEN`.
+The Compose service listens on `127.0.0.1:8787` after init writes `config.json` and Stalwart leaves recovery mode. The token is the one passed to Compose as `INBAI_OPERATOR_TOKEN`. You can save it in `config.json` once with `inbai login`, or keep exporting `INBAI_OPERATOR_TOKEN`:
 
 ```sh
 export INBAI_OPERATOR_TOKEN='choose-a-token'
+inbai login --url http://127.0.0.1:8787
 inbai inbox create alice
 inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
 inbai message list alice@example.com
