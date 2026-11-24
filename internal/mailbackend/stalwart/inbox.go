@@ -109,36 +109,34 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 	if len(identities.List) == 0 || identities.List[0].ID == "" {
 		return fmt.Errorf("account %s has no identity", msg.AccountID)
 	}
-	boxes, err := client.invoke(ctx, "q", "Mailbox/query", map[string]any{
-		"accountId": msg.AccountID,
-		"filter":    map[string]any{"role": "inbox"},
-	})
+	roles, err := mailboxesByRole(ctx, client, msg.AccountID)
 	if err != nil {
 		return err
 	}
-	var query struct {
-		IDs []string `json:"ids"`
+	targetBox := roles["sent"]
+	if targetBox == "" {
+		targetBox = roles["drafts"]
 	}
-	if err := json.Unmarshal(boxes, &query); err != nil {
-		return err
+	if targetBox == "" {
+		targetBox = roles["inbox"]
 	}
-	if len(query.IDs) == 0 {
-		return fmt.Errorf("account %s has no inbox", msg.AccountID)
+	if targetBox == "" {
+		return fmt.Errorf("account %s has no mailbox", msg.AccountID)
 	}
-	draft := map[string]any{
-		"mailboxIds": map[string]bool{query.IDs[0]: true},
+	outbound := map[string]any{
+		"mailboxIds": map[string]bool{targetBox: true},
 		"from":       []any{map[string]any{"email": msg.From}},
 		"to":         []any{map[string]any{"email": msg.To}},
 		"subject":    msg.Subject,
-		"keywords":   map[string]bool{"$draft": true},
+		"keywords":   map[string]bool{"$seen": true},
 		"textBody":   []any{map[string]any{"partId": "p", "type": "text/plain"}},
 		"bodyValues": map[string]any{"p": map[string]any{"value": msg.Body}},
 	}
 	if len(msg.InReplyTo) > 0 {
-		draft["inReplyTo"] = msg.InReplyTo
+		outbound["inReplyTo"] = msg.InReplyTo
 	}
 	if len(msg.References) > 0 {
-		draft["references"] = msg.References
+		outbound["references"] = msg.References
 	}
 	if len(msg.Attachments) > 0 {
 		files := make([]any, 0, len(msg.Attachments))
@@ -158,12 +156,12 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 				"disposition": "attachment",
 			})
 		}
-		draft["attachments"] = files
+		outbound["attachments"] = files
 	}
 	_, err = client.invokeMany(ctx, []jmapCall{
 		{Name: "Email/set", ID: "e", Args: map[string]any{
 			"accountId": msg.AccountID,
-			"create":    map[string]any{"m": draft},
+			"create":    map[string]any{"m": outbound},
 		}},
 		{Name: "EmailSubmission/set", ID: "s", Args: map[string]any{
 			"accountId": msg.AccountID,
@@ -180,6 +178,53 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 		}},
 	})
 	return err
+}
+
+func mailboxesByRole(ctx context.Context, client *Client, accountID string) (map[string]string, error) {
+	raw, err := client.invoke(ctx, "m", "Mailbox/get", map[string]any{
+		"accountId":  accountID,
+		"ids":        nil,
+		"properties": []string{"id", "role"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var got struct {
+		List []struct {
+			ID   string `json:"id"`
+			Role string `json:"role"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return nil, err
+	}
+	roles := make(map[string]string, len(got.List))
+	for _, box := range got.List {
+		if box.Role != "" && box.ID != "" {
+			roles[strings.ToLower(box.Role)] = box.ID
+		}
+	}
+	return roles, nil
+}
+
+func inboxMailboxID(ctx context.Context, client *Client, accountID string) (string, error) {
+	raw, err := client.invoke(ctx, "q", "Mailbox/query", map[string]any{
+		"accountId": accountID,
+		"filter":    map[string]any{"role": "inbox"},
+	})
+	if err != nil {
+		return "", err
+	}
+	var query struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &query); err != nil {
+		return "", err
+	}
+	if len(query.IDs) == 0 {
+		return "", fmt.Errorf("account %s has no inbox", accountID)
+	}
+	return query.IDs[0], nil
 }
 
 // ListMessages returns the first page of messages in the account.

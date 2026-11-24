@@ -23,8 +23,19 @@ func TestMailChangesUsesTheStoredState(t *testing.T) {
 		case "Email/changes":
 			sawSince, _ = args[0]["sinceState"].(string)
 			writeMethods(w, []any{[]any{"Email/changes", map[string]any{
-				"newState": "s1", "hasMoreChanges": false, "created": []string{"m1"}, "destroyed": []any{},
+				"newState": "s1", "hasMoreChanges": false, "created": []string{"m1", "m-sent"}, "destroyed": []any{},
 			}, "c"}})
+		case "Mailbox/query":
+			if len(names) != 2 || names[1] != "Email/get" {
+				t.Fatalf("expected batched Mailbox/query + Email/get, got %v", names)
+			}
+			writeMethods(w, []any{
+				[]any{"Mailbox/query", map[string]any{"ids": []string{"inbox-box"}}, "b"},
+				[]any{"Email/get", map[string]any{"list": []any{
+					map[string]any{"id": "m1", "mailboxIds": map[string]bool{"inbox-box": true}},
+					map[string]any{"id": "m-sent", "mailboxIds": map[string]bool{"sent-box": true}},
+				}}, "g"},
+			})
 		default:
 			t.Errorf("method %s", names[0])
 			http.Error(w, "unexpected", http.StatusBadRequest)
