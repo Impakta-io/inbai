@@ -260,6 +260,12 @@ INSERT INTO agent_suspension (agent) VALUES ($1) ON CONFLICT DO NOTHING`, agent)
 	return err
 }
 
+// ResumeAgent removes the suspension SuspendAgent recorded. An agent that is not suspended is unchanged.
+func (p *Postgres) ResumeAgent(ctx context.Context, agent string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM agent_suspension WHERE agent = $1`, agent)
+	return err
+}
+
 // AppendAudit records one operator action. The row does not store secrets.
 func (p *Postgres) AppendAudit(ctx context.Context, actor, action, target string) error {
 	_, err := p.pool.Exec(ctx, `INSERT INTO audit_event (actor, action, target) VALUES ($1, $2, $3)`, actor, action, target)

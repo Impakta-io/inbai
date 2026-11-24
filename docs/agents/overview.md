@@ -38,7 +38,7 @@ curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
 
 `ACCOUNT_ID` is the inbox's account id. `inbai inbox list` prints it after each address, and `inbai inbox list --json` and `POST /v1/inboxes` return it as `id`.
 
-An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUNT_ID read`, `inbai agent revoke ada ACCOUNT_ID read`, and `inbai agent suspend ada`. Those commands call the same routes. Permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another.
+An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUNT_ID read`, `inbai agent revoke ada ACCOUNT_ID read`, `inbai agent suspend ada`, and `inbai agent resume ada`. Those commands call the same routes. Permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another.
 
 - `read` lists, searches, and reads messages and attachments.
 - `send` submits a new message to any recipient.
@@ -46,6 +46,6 @@ An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUN
 - `delete` removes a message.
 - `manage` sets the sender allowlist and the storage quota.
 
-A message is always sent as the inbox. Without `from` it uses the inbox's own address. Any other `from` must be an address the mail server lets that inbox send as, or the call is `403`. This applies to the operator too. `inbox:provision` is granted on `*` and lets that agent create inboxes. It does not grant read or send. `DELETE /v1/grants/ada/ACCOUNT_ID/read` removes that permission. `POST /v1/agents/ada/suspend` stops the agent on the next call. A name with no credential is `404`. If the suspension cannot be stored, the call fails and no audit row is written. There is no command to undo a suspension.
+A message is always sent as the inbox. Without `from` it uses the inbox's own address. Any other `from` must be an address the mail server lets that inbox send as, or the call is `403`. This applies to the operator too. `inbox:provision` is granted on `*` and lets that agent create inboxes. It does not grant read or send. `DELETE /v1/grants/ada/ACCOUNT_ID/read` removes that permission. `POST /v1/agents/ada/suspend` stops the agent on the next call. A name with no credential is `404`. If the suspension cannot be stored, the call fails and no audit row is written. `POST /v1/agents/ada/resume` lifts the suspension. The agent can exchange its secret again, and an access token issued before the suspension is accepted again until its ten minutes run out: a suspension blocks tokens, it does not revoke them. Grants are unchanged. A webhook the suspension disabled stays disabled, so the agent deletes it and creates a new one. Resuming an agent that is not suspended is `204` and still writes an audit row. A name with no credential is `404`, and an agent token is `403`. If the change cannot be stored, the call fails, the agent stays suspended, and no audit row is written.
 
 The REST routes are in [REST](rest.md). The same mail operations are available over MCP. See [MCP](mcp.md). Config files for common agent frameworks are in [examples](../../examples/README.md). Message bodies returned by MCP are marked as external content. See [Untrusted mail](untrusted-mail.md).

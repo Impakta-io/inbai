@@ -170,11 +170,12 @@ func (s *Service) reserved(id, name, domain string) bool {
 	return s.reservedLocals[name]
 }
 
-// Identities creates and suspends agent credentials. The token still only names the caller.
-// Suspend reports found as false when no credential names the agent.
+// Identities creates, suspends, and resumes agent credentials. The token still only names the caller.
+// Suspend and Resume report found as false when no credential names the agent.
 type Identities interface {
 	Create(agent string, operator bool) (id, secret string, err error)
 	Suspend(agent string) (found bool, err error)
+	Resume(agent string) (found bool, err error)
 }
 
 // SetDB stores grants, quotas, idempotency keys, and jobs in PostgreSQL.
@@ -282,6 +283,28 @@ func (s *Service) SuspendAgent(caller Caller, identities Identities, agent strin
 		return fmt.Errorf("%w: agent %s has no credential", ErrNotFound, agent)
 	}
 	return s.record(context.Background(), caller, "agent.suspend", agent)
+}
+
+// ResumeAgent lifts a suspension. Only an operator may do that.
+// The audit row is written after the change is stored. An agent that is not suspended
+// is still a success and still writes the row, as Revoke does for a grant that is gone.
+// An agent that no credential names is ErrNotFound.
+// Grants are unchanged, and a webhook the suspension disabled stays disabled.
+func (s *Service) ResumeAgent(caller Caller, identities Identities, agent string) error {
+	if !caller.Operator {
+		return ErrForbidden
+	}
+	if identities == nil || agent == "" {
+		return fmt.Errorf("%w: credentials are not configured", ErrInvalid)
+	}
+	found, err := identities.Resume(agent)
+	if err != nil {
+		return fmt.Errorf("resume %s: %w", agent, err)
+	}
+	if !found {
+		return fmt.Errorf("%w: agent %s has no credential", ErrNotFound, agent)
+	}
+	return s.record(context.Background(), caller, "agent.resume", agent)
 }
 
 func knownPermission(perm Permission) bool {

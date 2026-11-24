@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/webhooks/{id}", s.deleteWebhook)
 	mux.HandleFunc("POST /v1/agents", s.createAgent)
 	mux.HandleFunc("POST /v1/agents/{name}/suspend", s.suspendAgent)
+	mux.HandleFunc("POST /v1/agents/{name}/resume", s.resumeAgent)
 	mux.HandleFunc("POST /v1/grants", s.createGrant)
 	mux.HandleFunc("DELETE /v1/grants/{agent}/{inbox}/{permission}", s.revokeGrant)
 	mux.HandleFunc("GET /v1/audit", s.audit)
@@ -237,6 +238,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) suspendAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.Service.SuspendAgent(s.requestCaller(r), s.identities(), r.PathValue("name")); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) resumeAgent(w http.ResponseWriter, r *http.Request) {
+	if err := s.Service.ResumeAgent(s.requestCaller(r), s.identities(), r.PathValue("name")); err != nil {
 		writeServiceError(w, err)
 		return
 	}

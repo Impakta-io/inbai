@@ -126,6 +126,17 @@ func TestSuspendedAgentWebhookIsNotSent(t *testing.T) {
 	if list.StatusCode != http.StatusOK || !strings.Contains(body, `"active":false`) || !strings.Contains(body, `"disabledReason":"agent suspended"`) {
 		t.Fatalf("list %d %s", list.StatusCode, body)
 	}
+	if res := operatorJSON(t, h.api.URL, http.MethodPost, "/v1/agents/ada/resume", ""); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("resume %d %s", res.StatusCode, readBody(t, res))
+	}
+	h.event(t, "m4")
+	if h.hits.Load() != 1 {
+		t.Fatalf("a webhook the suspension disabled was sent after resume %d times", h.hits.Load())
+	}
+	list = call(t, h.api.URL, http.MethodGet, "/v1/webhooks?inbox=inbox-a", "operator-token", "", "")
+	if body := readBody(t, list); !strings.Contains(body, `"active":false`) {
+		t.Fatalf("list after resume %s", body)
+	}
 }
 
 func TestRevokedAgentWebhookIsNotSent(t *testing.T) {

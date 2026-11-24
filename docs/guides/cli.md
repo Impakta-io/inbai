@@ -110,11 +110,11 @@ Delivery to another server still depends on the DNS records from `domain add` an
 
 ## agent
 
-`inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. The permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. `inbai agent grant ada '*' inbox:provision` lets that agent create inboxes. The inbox id for that permission is `*`. A read grant does not include it. `inbai agent revoke ada <inbox-id> read` removes one permission. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `--json` prints the result. All four commands use the operator token.
+`inbai agent create ada` asks `inbaid` for a client id and a secret. The secret is shown once. `inbai agent grant ada <inbox-id> read` records one permission. The permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. `inbai agent grant ada '*' inbox:provision` lets that agent create inboxes. The inbox id for that permission is `*`. A read grant does not include it. `inbai agent revoke ada <inbox-id> read` removes one permission. `inbai agent suspend ada` stops that agent from exchanging a secret or using an access token. `inbai agent resume ada` lifts the suspension: the agent's secret works again, and so does an access token it got before the suspension, until that token expires. Grants are unchanged. A webhook the suspension disabled stays disabled, and the agent creates a new one. Resuming an agent that is not suspended succeeds. `--json` prints the result. All five commands use the operator token.
 
 ## audit
 
-`inbai audit` prints actions that created an agent, granted or revoked a permission, suspended an agent, or created or deleted an inbox. `--after` asks for rows after an id. `--limit` sets the page size. A line that starts with `next` is the id to pass back. `--json` prints the API response. The command uses the operator token. A secret is not written in the log.
+`inbai audit` prints actions that created an agent, granted or revoked a permission, suspended or resumed an agent, or created or deleted an inbox. `--after` asks for rows after an id. `--limit` sets the page size. A line that starts with `next` is the id to pass back. `--json` prints the API response. The command uses the operator token. A secret is not written in the log.
 
 ## retention
 

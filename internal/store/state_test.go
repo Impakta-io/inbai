@@ -81,6 +81,16 @@ func TestPostgresKeepsGrantsQuotaAndCredentials(t *testing.T) {
 	if err != nil || !stopped {
 		t.Fatalf("suspended %v err %v", stopped, err)
 	}
+	if err := first.ResumeAgent(ctx, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err = second.AgentSuspended(ctx, "ada")
+	if err != nil || stopped {
+		t.Fatalf("suspended after resume %v err %v", stopped, err)
+	}
+	if err := first.ResumeAgent(ctx, "ada"); err != nil {
+		t.Fatalf("resume when not suspended %v", err)
+	}
 }
 
 func TestJobKeepsTheAgentThatStartedIt(t *testing.T) {

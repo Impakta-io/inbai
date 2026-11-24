@@ -120,6 +120,28 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/agents/{name}/resume:
+    post:
+      operationId: resumeAgent
+      summary: Lift a suspension. An agent that is not suspended is still a success.
+      description: |
+        The agent can exchange its secret again.
+        An access token issued before the suspension and not yet expired is accepted again.
+        Grants are unchanged. A webhook the suspension disabled stays disabled; the agent deletes it and creates a new one.
+        The audit log records agent.resume, also when the agent was not suspended.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Resumed, or was not suspended
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/grants/{agent}/{inbox}/{permission}:
     delete:
       operationId: revokeGrant
