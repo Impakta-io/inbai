@@ -25,17 +25,22 @@ func SearchMessages(ctx context.Context, client *Client, accountID, query string
 const maxBodyValueBytes = 1 << 20
 
 // GetMessage returns one message, including its plain-text body and threading headers.
-func GetMessage(ctx context.Context, client *Client, accountID, messageID string) (Message, error) {
+// authservID is the authserv-id our Stalwart writes in Authentication-Results,
+// which is its hostname. See mailbackend.AuthenticationOf.
+func GetMessage(ctx context.Context, client *Client, accountID, messageID, authservID string) (Message, error) {
 	if client == nil {
 		return Message{}, fmt.Errorf("missing stalwart client")
 	}
 	if accountID == "" || messageID == "" {
 		return Message{}, fmt.Errorf("message needs an account and an id")
 	}
+	// :all returns every Authentication-Results field in header order, top
+	// first (RFC 8621 section 4.1.3). Without it, JMAP returns only the last
+	// one, the one nearest the body, which the sender can write.
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":           accountID,
 		"ids":                 []string{messageID},
-		"properties":          []string{"subject", "preview", "receivedAt", "from", "replyTo", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
+		"properties":          []string{"subject", "preview", "receivedAt", "from", "replyTo", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText:all"},
 		"fetchTextBodyValues": true,
 		"maxBodyValueBytes":   maxBodyValueBytes,
 	})
@@ -49,7 +54,24 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	if len(list) == 0 {
 		return Message{}, fmt.Errorf("account %s has no message %s", accountID, messageID)
 	}
+	list[0].Authentication = authenticationOf(raw, authservID)
 	return list[0], nil
+}
+
+// authenticationOf reads the Authentication-Results fields and the junk
+// keyword of the one message in an Email/get response.
+func authenticationOf(raw json.RawMessage, authservID string) mailbackend.Authentication {
+	var got struct {
+		List []struct {
+			Keywords json.RawMessage `json:"keywords"`
+			Auth     json.RawMessage `json:"header:Authentication-Results:asText:all"`
+		} `json:"list"`
+	}
+	if json.Unmarshal(raw, &got) != nil || len(got.List) == 0 {
+		return mailbackend.Authentication{}
+	}
+	item := got.List[0]
+	return mailbackend.AuthenticationOf(headerTexts(item.Auth), authservID, junkKeyword(item.Keywords))
 }
 
 // DeleteMessage removes one message from the account.
@@ -179,10 +201,8 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 				Size   int    `json:"size"`
 				BlobID string `json:"blobId"`
 			} `json:"attachments"`
-			Keywords json.RawMessage `json:"keywords"`
-			Auth     json.RawMessage `json:"header:Authentication-Results:asText"`
-			From     json.RawMessage `json:"from"`
-			ReplyTo  json.RawMessage `json:"replyTo"`
+			From    json.RawMessage `json:"from"`
+			ReplyTo json.RawMessage `json:"replyTo"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -211,24 +231,18 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 		}
 		out[i].From = fromEmail(item.From)
 		out[i].ReplyTo = fromEmail(item.ReplyTo)
-		out[i].Authentication = mailbackend.AuthenticationOf(headerText(item.Auth), junkKeyword(item.Keywords))
 	}
 	return out, nil
 }
 
-func headerText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return text
-	}
+// headerTexts reads a header:...:asText:all value, an array of strings.
+// Anything else reads as no headers.
+func headerTexts(raw json.RawMessage) []string {
 	var many []string
-	if json.Unmarshal(raw, &many) == nil && len(many) > 0 {
-		return many[0]
+	if json.Unmarshal(raw, &many) != nil {
+		return nil
 	}
-	return ""
+	return many
 }
 
 func fromEmail(raw json.RawMessage) string {

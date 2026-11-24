@@ -35,6 +35,8 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		SMTP:     getenv("INBAI_SMTP_ADDRESS"),
 		TLS:      getenv("INBAI_IMAP_TLS") == "1",
 		Accounts: getenv("INBAI_IMAP_ACCOUNTS"),
+
+		AuthservID: getenv("INBAI_AUTHSERV_ID"),
 	})
 	if err != nil {
 		writef(stderr, "imap: %s\n", err)

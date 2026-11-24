@@ -23,10 +23,13 @@ export INBAI_IMAP_ADDRESS=mail.example.com:993
 export INBAI_SMTP_ADDRESS=mail.example.com:587
 export INBAI_IMAP_TLS=1
 export INBAI_IMAP_ACCOUNTS=/path/to/accounts.json
+export INBAI_AUTHSERV_ID=mail.example.com
 inbaid serve
 ```
 
 `INBAI_IMAP_TLS=1` wraps both connections in TLS. Leave it unset only for a server on localhost that does not offer TLS.
+
+`INBAI_AUTHSERV_ID` is the authserv-id your mail server writes in the `Authentication-Results` headers it adds, usually its host name, for example `mail.example.com`. A message read reports SPF, DKIM, and DMARC only from the top-most header with that authserv-id. When it is unset, a message read reports none of them. See [untrusted mail](../../docs/agents/untrusted-mail.md).
 
 The event cursor is `uidvalidity:uidnext`. A new UID is a created event. A message that is deleted is not reported, because a UIDNEXT cursor cannot see it. If the server changes UIDVALIDITY, the sync stops and the stored cursor stays where it was.
 

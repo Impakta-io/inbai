@@ -12,6 +12,11 @@ import (
 // Mail is the Stalwart implementation of mailbackend.Backend.
 type Mail struct {
 	Client *Client
+	// AuthservID is the authserv-id Stalwart writes in the
+	// Authentication-Results fields it adds: its default hostname, which
+	// inbai init sets and stores as hostname in config.json. When it is
+	// empty, messages carry no SPF, DKIM, or DMARC result.
+	AuthservID string
 }
 
 func (m Mail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (string, error) {
@@ -68,7 +73,7 @@ func (m Mail) Search(ctx context.Context, accountID, query string, page mailback
 }
 
 func (m Mail) Get(ctx context.Context, accountID, messageID string) (mailbackend.Message, error) {
-	raw, err := GetMessage(ctx, m.Client, accountID, messageID)
+	raw, err := GetMessage(ctx, m.Client, accountID, messageID, m.AuthservID)
 	if err != nil {
 		return mailbackend.Message{}, err
 	}

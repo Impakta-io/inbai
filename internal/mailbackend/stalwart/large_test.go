@@ -31,7 +31,7 @@ func TestGetMessageReadsResponseOverOneMiB(t *testing.T) {
 		}}}, "g"}})
 	}))
 	defer srv.Close()
-	got, err := GetMessage(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, "alice-id", "msg")
+	got, err := GetMessage(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, "alice-id", "msg", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestInvokeReportsResponseTooLarge(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	_, err := GetMessage(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, "alice-id", "msg")
+	_, err := GetMessage(context.Background(), &Client{BaseURL: srv.URL, APIKey: "key"}, "alice-id", "msg", "")
 	if err == nil || !strings.Contains(err.Error(), "response too large") {
 		t.Fatalf("err = %v", err)
 	}
