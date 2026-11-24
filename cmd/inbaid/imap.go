@@ -13,7 +13,6 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/api"
 	"github.com/Impakta-io/inbai/internal/auth"
-	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend/imap"
 	"github.com/Impakta-io/inbai/internal/service"
@@ -24,6 +23,11 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 	domain := getenv("INBAI_DOMAIN")
 	if domain == "" {
 		writef(stderr, "INBAI_DOMAIN is required\n")
+		return 2
+	}
+	retentionDays, err := imapRetentionDays(getenv)
+	if err != nil {
+		writef(stderr, "retention: %s\n", err)
 		return 2
 	}
 	backend, err := imap.Open(imap.Config{
@@ -75,9 +79,9 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 			return 2
 		}
 		go feed.RunWebhooks(context.Background(), nil)
-		go newWorker(log, svc, feed, backend, config.DefaultRetentionDays, stderr).Run(context.Background())
+		go newWorker(log, svc, feed, backend, retentionDays, stderr).Run(context.Background())
 	} else {
-		go retainLoop(svc, config.DefaultRetentionDays, stderr)
+		go retainLoop(svc, retentionDays, stderr)
 	}
 	handler := (&api.Server{
 		Service:       svc,
@@ -88,7 +92,7 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		DomainID:      "external",
 		RoleID:        "external",
 		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
-		RetentionDays: config.DefaultRetentionDays,
+		RetentionDays: retentionDays,
 		Log:           stderr,
 	}).Handler()
 	writef(stdout, "listening on %s\n", addr)
@@ -98,4 +102,12 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		return 1
 	}
 	return 0
+}
+
+// imapRetentionDays is the server retention period in IMAP mode. The mailboxes
+// already exist and hold mail inbAI did not create, so the fallback is zero
+// (keep mail). INBAI_RETENTION_DAYS opts in. A period stored with
+// inbai retention --days still overrides it.
+func imapRetentionDays(getenv func(string) string) (int, error) {
+	return parseLimit(getenv, "INBAI_RETENTION_DAYS", 0)
 }
