@@ -32,7 +32,7 @@ inbai init --url http://127.0.0.1:8080 --domain example.com
 
 The service account uses the service role from [ADR 0009](../../docs/adr/0009-impersonating-service-account.md). That role can impersonate inboxes. The operator account can also change the outbound route. The service account cannot.
 
-The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service uses `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. The signing key is stored in that database, so another `inbaid` process that uses the same URL verifies the same tokens. Set `INBAI_SIGNING_KEY` on every process only when you want to choose the key. That value must match the key already stored. Without a database, a missing key is printed once.
+The Postgres service also creates a database named `inbai` for the event log. The `inbaid` service uses `postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable` on the Compose network. This file does not publish port 5432. Inside the container, `INBAI_STALWART_URL` is `https://stalwart`, so the server does not use the `https://127.0.0.1` address stored for the host CLI. `INBAI_TLS_INSECURE=1` skips verification of the certificate Stalwart generates. The signing key is stored in that database, so another `inbaid` process that uses the same database and `--addr` verifies the same tokens. Set `INBAI_SIGNING_KEY` on every process only when you want to choose the key. That value must match the key already stored. Without a database, a missing key is printed once.
 
 Leave recovery mode before creating an inbox. `inbaid` answers mail routes only after Stalwart is serving HTTPS.
 
@@ -44,14 +44,15 @@ inbai domain add
 
 Port 443 is Stalwart's HTTPS listener. The certificate is the one Stalwart generates, so `domain add` skips certificate verification when the stored URL is localhost. Copy the printed zone file into DNS. Run `inbai domain add` again to see which MX and TXT records are published.
 
+Do not set `INBAI_OPERATOR_TOKEN` here. `inbai init` has already stored a generated token in `config.json`. The `inbaid` container reads that token because its own `INBAI_OPERATOR_TOKEN` is empty, and `inbai` on the host reads it from the same file. An exported value that differs from the stored token makes `inbai` send the wrong one and fail with 401. To choose the token yourself, export `INBAI_OPERATOR_TOKEN` before `inbai init` and before the first `docker compose up -d`.
+
 ```sh
-export INBAI_OPERATOR_TOKEN='choose-a-token'
 inbai inbox create alice
 inbai message send --from alice@example.com --to alice@example.com --subject hello --body hello
 inbai message list alice@example.com
 ```
 
-Running `inbaid serve` on the host remains valid. Both processes accept the same tokens when they use this database, and both claim bulk generation, cursor sweeps, retention sweeps, and webhook deliveries from the database queue.
+Do not run `inbaid serve` on the host next to the container. Port 5432 is not published, so a host process cannot reach this database. Tokens carry the listen address as their audience. The container listens on `0.0.0.0:8787` and a host process on `127.0.0.1:8787`, so one does not accept the other's tokens. To run a second replica that does share tokens and queues, give it the same database and the same `--addr`.
 
 ## Outbound relay
 

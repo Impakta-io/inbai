@@ -4,13 +4,13 @@ Status: current
 
 Development builds report `0.0.0-dev`. Published pre-alpha releases are listed in [CHANGELOG.md](../../CHANGELOG.md).
 
-When releases start, they follow semantic versioning:
+Releases follow semantic versioning:
 
 - A patch release fixes a bug without changing the API.
 - A minor release adds behavior that existing callers can ignore.
 - A major release changes or removes behavior that callers rely on.
 
-A release is a tag, `vMAJOR.MINOR.PATCH`, plus an entry in [CHANGELOG.md](../../CHANGELOG.md). Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds `inbai` and `inbaid` for macOS (`arm64` and `amd64`), Linux (`amd64` and `arm64`), and Windows (`amd64`) with `-ldflags "-X github.com/Impakta-io/inbai/internal/version.Version=<version>"`, publishes the archives, `checksums.txt`, and rendered `inbai.rb` formula on a GitHub Release, and marks tags containing `-` as prereleases. A maintainer creates the tag.
+A release is a tag, `vMAJOR.MINOR.PATCH`, plus an entry in [CHANGELOG.md](../../CHANGELOG.md). Pushing a `v*` tag runs `.github/workflows/release.yml`, which runs `go test ./...` and the reference and docs checks, then builds `inbai` and `inbaid` for macOS (`arm64` and `amd64`), Linux (`amd64` and `arm64`), and Windows (`amd64`) with `-ldflags "-X github.com/Impakta-io/inbai/internal/version.Version=<version>"`, publishes the archives, `checksums.txt`, and rendered `inbai.rb` formula on a GitHub Release, and marks tags containing `-` as prereleases. A maintainer creates the tag.
 
 ## Homebrew tap
 
