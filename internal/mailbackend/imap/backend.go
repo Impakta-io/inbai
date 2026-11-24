@@ -94,6 +94,19 @@ func (b *Backend) ListInboxes(_ context.Context, page mailbackend.Page) ([]mailb
 	return mailbackend.Slice(out, func(account mailbackend.Account) string { return account.ID }, page)
 }
 
+// SenderAddresses returns the account's login user from the account file.
+// This backend has no alias list, so that is the only address the account sends as.
+func (b *Backend) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	login, err := b.login(account)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(login.User, "@") {
+		return nil, fmt.Errorf("imap: account %s logs in as %q, which is not an email address", account, login.User)
+	}
+	return []string{login.User}, nil
+}
+
 // Download reports that IMAP messages are read with Get. There is no blob id.
 func (b *Backend) Download(context.Context, string, string) ([]byte, error) {
 	return nil, errors.New("imap: this backend has no blob download")
@@ -185,7 +198,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			return fmt.Errorf("imap: message %s was not found", messageID)
 		}
 		text := string(got.literals[0])
-		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM)])")
+		authItems, err := s.command("UID", "FETCH", messageID, "(UID FLAGS BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM REPLY-TO)])")
 		if err != nil {
 			return err
 		}
@@ -198,6 +211,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			ID:             messageID,
 			Text:           text,
 			From:           headerField(header, "From"),
+			ReplyTo:        headerField(header, "Reply-To"),
 			Authentication: mailbackend.AuthenticationOf(header, isJunk(flagsOf(auth.text))),
 		}
 		return nil

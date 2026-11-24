@@ -181,6 +181,9 @@ func (f *fakeMail) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]st
 	return nil, nil
 }
 func (f *fakeMail) Deliver(context.Context, mailbackend.Outbound) error { return nil }
+func (f *fakeMail) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	return []string{account + "@example.com"}, nil
+}
 func (f *fakeMail) List(context.Context, string, mailbackend.Page) ([]mailbackend.Message, string, error) {
 	f.listed = true
 	return f.messages, "", nil
@@ -203,4 +206,49 @@ func (f *fakeMail) ListInboxes(context.Context, mailbackend.Page) ([]mailbackend
 func (f *fakeMail) DeleteInbox(context.Context, string) error { return nil }
 func (f *fakeMail) Download(context.Context, string, string) ([]byte, error) {
 	return nil, nil
+}
+
+func TestSendAndReplyLeaveFromAndTheReplyRecipientToTheService(t *testing.T) {
+	box := &recordBox{}
+	call := func(name, args string) string {
+		got, _ := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+name+`","arguments":{`+args+`}}}`), box)
+		return string(got)
+	}
+	if got := call("send_message", `"inbox":"inbox-a","to":"bob@example.com","subject":"hi"`); strings.Contains(got, `"isError"`) || box.sent.From != "" || box.sent.To != "bob@example.com" {
+		t.Fatalf("send %s %+v", got, box.sent)
+	}
+	if got := call("send_message", `"inbox":"inbox-a","subject":"hi"`); !strings.Contains(got, "missing to") {
+		t.Fatalf("send without to %s", got)
+	}
+	if got := call("reply_message", `"inbox":"inbox-a","messageId":"m","text":"thanks"`); strings.Contains(got, `"isError"`) || box.replied.From != "" || box.replied.To != "" || box.replied.Body != "thanks" {
+		t.Fatalf("reply %s %+v", got, box.replied)
+	}
+	listed, _ := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`), box)
+	if strings.Contains(string(listed), `"required":["inbox","from"`) || strings.Contains(string(listed), `"required":["inbox","messageId","from"`) {
+		t.Fatalf("from is still required: %s", listed)
+	}
+}
+
+// recordBox keeps the last message each tool passed on.
+type recordBox struct {
+	sent, replied mailbackend.Outbound
+}
+
+func (b *recordBox) List(context.Context, string, string) ([]mailbackend.Message, error) {
+	return nil, nil
+}
+func (b *recordBox) Get(context.Context, string, string) (mailbackend.Message, error) {
+	return mailbackend.Message{}, nil
+}
+func (b *recordBox) Send(_ context.Context, _ string, msg mailbackend.Outbound) error {
+	b.sent = msg
+	return nil
+}
+func (b *recordBox) Reply(_ context.Context, _, _ string, msg mailbackend.Outbound) error {
+	b.replied = msg
+	return nil
+}
+func (b *recordBox) Delete(context.Context, string, string) error { return nil }
+func (b *recordBox) Wait(context.Context, string, *int64, time.Duration) ([]mailbackend.Message, int64, error) {
+	return nil, 0, nil
 }

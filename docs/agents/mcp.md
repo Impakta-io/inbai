@@ -33,10 +33,16 @@ Every tool takes `inbox`, the Stalwart account id. A missing grant returns a too
 | `list_messages` | `inbox` | Lists messages. |
 | `search_messages` | `inbox`, `query` | Searches message text. |
 | `get_message` | `inbox`, `messageId` | Reads one message. |
-| `send_message` | `inbox`, `from`, `to`, `subject` | Submits plain text. `text` is optional. |
-| `reply_message` | `inbox`, `messageId`, `from`, `to` | Replies. The server sets `In-Reply-To` and `References`. |
+| `send_message` | `inbox`, `to`, `subject` | Submits plain text. `text` and `from` are optional. Needs `send`. |
+| `reply_message` | `inbox`, `messageId` | Replies to the original sender. `to`, `from`, and `text` are optional. The server sets `In-Reply-To` and `References`, and the subject when it is empty. Needs `reply`. |
 | `delete_message` | `inbox`, `messageId` | Deletes one message. |
 | `wait_for_message` | `inbox` | Returns changes from the event feed after the cursor `after`, waiting up to `timeoutSeconds` for one. See [wait_for_message](#wait_for_message). |
+
+## Sender and reply recipient
+
+`send_message` and `reply_message` send as the inbox. Without `from` the message uses the inbox's own address. Any other `from` must be an address the mail server lets that inbox send as. Otherwise the tool returns an error and nothing is sent.
+
+`reply_message` sends to the original message's first `Reply-To` address, or to its `From` when it has no `Reply-To`. With only a `reply` grant, `to` must be omitted or equal that address. A different `to` also needs `send` on the inbox. A message with neither header cannot be replied to.
 
 ## wait_for_message
 

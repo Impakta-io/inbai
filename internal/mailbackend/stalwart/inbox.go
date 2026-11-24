@@ -44,6 +44,7 @@ type Message struct {
 	References     []string                   `json:"references,omitempty"`
 	ReceivedAt     time.Time                  `json:"receivedAt,omitempty"`
 	From           string                     `json:"from,omitempty"`
+	ReplyTo        string                     `json:"replyTo,omitempty"`
 	Attachments    []Attachment               `json:"attachments,omitempty"`
 	Authentication mailbackend.Authentication `json:"authentication,omitempty"`
 }
@@ -91,23 +92,9 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 	if msg.AccountID == "" || msg.From == "" || msg.To == "" {
 		return fmt.Errorf("delivery needs an account, a sender, and a recipient")
 	}
-	identity, err := client.invoke(ctx, "i", "Identity/get", map[string]any{
-		"accountId": msg.AccountID,
-		"ids":       nil,
-	})
+	identityID, err := identityFor(ctx, client, msg.AccountID, msg.From)
 	if err != nil {
 		return err
-	}
-	var identities struct {
-		List []struct {
-			ID string `json:"id"`
-		} `json:"list"`
-	}
-	if err := json.Unmarshal(identity, &identities); err != nil {
-		return err
-	}
-	if len(identities.List) == 0 || identities.List[0].ID == "" {
-		return fmt.Errorf("account %s has no identity", msg.AccountID)
 	}
 	roles, err := mailboxesByRole(ctx, client, msg.AccountID)
 	if err != nil {
@@ -168,7 +155,7 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 			"create": map[string]any{
 				"s": map[string]any{
 					"emailId":    "#m",
-					"identityId": identities.List[0].ID,
+					"identityId": identityID,
 					"envelope": map[string]any{
 						"mailFrom": map[string]any{"email": msg.From},
 						"rcptTo":   []any{map[string]any{"email": msg.To}},
@@ -192,6 +179,72 @@ func Deliver(ctx context.Context, client *Client, msg Delivery) error {
 		return err
 	}
 	return nil
+}
+
+// SenderAddresses returns the email of each JMAP Identity on the account, in the order Stalwart lists them.
+func SenderAddresses(ctx context.Context, client *Client, accountID string) ([]string, error) {
+	if client == nil {
+		return nil, fmt.Errorf("missing stalwart client")
+	}
+	if accountID == "" {
+		return nil, fmt.Errorf("sender addresses need an account")
+	}
+	found, err := identities(ctx, client, accountID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(found))
+	for _, one := range found {
+		out = append(out, one.Email)
+	}
+	return out, nil
+}
+
+type identity struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+// identities returns the account's JMAP Identities that have both an id and an email.
+func identities(ctx context.Context, client *Client, accountID string) ([]identity, error) {
+	raw, err := client.invoke(ctx, "i", "Identity/get", map[string]any{
+		"accountId":  accountID,
+		"ids":        nil,
+		"properties": []string{"id", "email"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var got struct {
+		List []identity `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return nil, err
+	}
+	out := make([]identity, 0, len(got.List))
+	for _, one := range got.List {
+		if one.ID != "" && one.Email != "" {
+			out = append(out, one)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("account %s has no identity", accountID)
+	}
+	return out, nil
+}
+
+// identityFor returns the id of the Identity whose email is from, compared case-insensitively.
+func identityFor(ctx context.Context, client *Client, accountID, from string) (string, error) {
+	found, err := identities(ctx, client, accountID)
+	if err != nil {
+		return "", err
+	}
+	for _, one := range found {
+		if strings.EqualFold(one.Email, from) {
+			return one.ID, nil
+		}
+	}
+	return "", fmt.Errorf("account %s has no identity for %s", accountID, from)
 }
 
 // createdOnly returns the id Stalwart created for key. Unlike createdID, it

@@ -36,6 +36,14 @@ curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
   http://127.0.0.1:8787/v1/grants
 ```
 
-An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUNT_ID read`, `inbai agent revoke ada ACCOUNT_ID read`, and `inbai agent suspend ada`. Those commands call the same routes. Permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another. `inbox:provision` is granted on `*` and lets that agent create inboxes. It does not grant read or send. `DELETE /v1/grants/ada/ACCOUNT_ID/read` removes that permission. `POST /v1/agents/ada/suspend` stops the agent on the next call. A name with no credential is `404`. If the suspension cannot be stored, the call fails and no audit row is written. There is no command to undo a suspension.
+An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUNT_ID read`, `inbai agent revoke ada ACCOUNT_ID read`, and `inbai agent suspend ada`. Those commands call the same routes. Permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another.
+
+- `read` lists, searches, and reads messages and attachments.
+- `send` submits a new message to any recipient.
+- `reply` answers a message in the inbox. The reply goes to that message's `Reply-To` address, or to its `From` when it has no `Reply-To`. Replying to any other address also needs `send`. `reply` does not include `read`.
+- `delete` removes a message.
+- `manage` sets the sender allowlist and the storage quota.
+
+A message is always sent as the inbox. Without `from` it uses the inbox's own address. Any other `from` must be an address the mail server lets that inbox send as, or the call is `403`. This applies to the operator too. `inbox:provision` is granted on `*` and lets that agent create inboxes. It does not grant read or send. `DELETE /v1/grants/ada/ACCOUNT_ID/read` removes that permission. `POST /v1/agents/ada/suspend` stops the agent on the next call. A name with no credential is `404`. If the suspension cannot be stored, the call fails and no audit row is written. There is no command to undo a suspension.
 
 The REST routes are in [REST](rest.md). The same mail operations are available over MCP. See [MCP](mcp.md). Config files for common agent frameworks are in [examples](../../examples/README.md). Message bodies returned by MCP are marked as external content. See [Untrusted mail](untrusted-mail.md).

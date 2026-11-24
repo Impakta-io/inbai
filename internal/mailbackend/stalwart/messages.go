@@ -35,7 +35,7 @@ func GetMessage(ctx context.Context, client *Client, accountID, messageID string
 	raw, err := client.invoke(ctx, "g", "Email/get", map[string]any{
 		"accountId":           accountID,
 		"ids":                 []string{messageID},
-		"properties":          []string{"subject", "preview", "receivedAt", "from", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
+		"properties":          []string{"subject", "preview", "receivedAt", "from", "replyTo", "messageId", "inReplyTo", "references", "textBody", "bodyValues", "attachments", "keywords", "header:Authentication-Results:asText"},
 		"fetchTextBodyValues": true,
 		"maxBodyValueBytes":   maxBodyValueBytes,
 	})
@@ -179,6 +179,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 			Keywords json.RawMessage `json:"keywords"`
 			Auth     json.RawMessage `json:"header:Authentication-Results:asText"`
 			From     json.RawMessage `json:"from"`
+			ReplyTo  json.RawMessage `json:"replyTo"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &got); err != nil {
@@ -206,6 +207,7 @@ func decodeMessages(raw json.RawMessage, full bool) ([]Message, error) {
 			})
 		}
 		out[i].From = fromEmail(item.From)
+		out[i].ReplyTo = fromEmail(item.ReplyTo)
 		out[i].Authentication = mailbackend.AuthenticationOf(headerText(item.Auth), junkKeyword(item.Keywords))
 	}
 	return out, nil

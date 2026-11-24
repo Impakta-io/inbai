@@ -146,7 +146,7 @@ func TestSendQuotaAndIdempotency(t *testing.T) {
 	svc := New(mail)
 	svc.inboxDaily = 1
 	svc.domainDaily = 2
-	msg := mailbackend.Outbound{AccountID: "inbox-a", From: "a@example.com", To: "b@example.com", Subject: "hi"}
+	msg := mailbackend.Outbound{AccountID: "inbox-a", To: "b@example.com", Subject: "hi"}
 	if err := svc.Deliver(context.Background(), Caller{Operator: true}, msg, "key-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +172,7 @@ func TestWorkspaceQuotaAndRecipientDomainRateLimit(t *testing.T) {
 	svc.SetSendLimits(10, 10, 3, 2)
 
 	// Two sends to target.test succeed; third in same minute hits recipient-domain rate limit.
+	mail.senders = map[string][]string{"inbox-a": {"a@dom1.test"}, "inbox-b": {"b@dom2.test"}, "inbox-c": {"c@dom3.test"}}
 	m1 := mailbackend.Outbound{AccountID: "inbox-a", From: "a@dom1.test", To: "u1@target.test", Subject: "1"}
 	m2 := mailbackend.Outbound{AccountID: "inbox-b", From: "b@dom2.test", To: "u2@target.test", Subject: "2"}
 	m3 := mailbackend.Outbound{AccountID: "inbox-c", From: "c@dom3.test", To: "u3@target.test", Subject: "3"}
@@ -205,7 +206,7 @@ func TestFailedSendDoesNotConsumeQuota(t *testing.T) {
 	mail := &fakeMail{sendErr: errors.New("down")}
 	svc := New(mail)
 	svc.inboxDaily = 1
-	msg := mailbackend.Outbound{AccountID: "inbox-a", From: "a@example.com", To: "b@example.com"}
+	msg := mailbackend.Outbound{AccountID: "inbox-a", To: "b@example.com"}
 	if err := svc.Deliver(context.Background(), Caller{Operator: true}, msg, ""); err == nil {
 		t.Fatal("expected send error")
 	}
@@ -361,7 +362,7 @@ func waitForJob(t *testing.T, svc *Service, id string) {
 
 func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 	mail := &fakeMail{messages: []mailbackend.Message{{
-		ID: "m", Subject: "hello", MessageID: []string{"<a@example.com>"},
+		ID: "m", Subject: "hello", MessageID: []string{"<a@example.com>"}, From: "b@example.com",
 	}}}
 	svc := New(mail)
 	svc.Allow("ada", "inbox-a", PermRead)
@@ -371,7 +372,7 @@ func TestReplyAndDeleteUseTheirOwnGrants(t *testing.T) {
 	if err := svc.Delete(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m"); !errors.Is(err, ErrForbidden) || mail.deleted {
 		t.Fatalf("delete err %v deleted %v", err, mail.deleted)
 	}
-	reply := mailbackend.Outbound{From: "a@example.com", To: "b@example.com"}
+	reply := mailbackend.Outbound{To: "b@example.com"}
 	if err := svc.Reply(context.Background(), Caller{Agent: "ada"}, "inbox-a", "m", reply, ""); !errors.Is(err, ErrForbidden) || mail.got {
 		t.Fatalf("reply err %v got %v", err, mail.got)
 	}
@@ -575,6 +576,19 @@ type fakeMail struct {
 	batches  []int
 	started  chan struct{}
 	release  chan struct{}
+	senders  map[string][]string
+	lookErr  error
+}
+
+// SenderAddresses returns lookErr, senders[account], or <account>@example.com when the test set none.
+func (f *fakeMail) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	if f.lookErr != nil {
+		return nil, f.lookErr
+	}
+	if list, ok := f.senders[account]; ok {
+		return list, nil
+	}
+	return []string{account + "@example.com"}, nil
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {

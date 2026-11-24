@@ -104,7 +104,7 @@ func TestReplySetsThreadingHeaders(t *testing.T) {
 		names, args := allCalls(t, strings.NewReader(string(body)))
 		switch names[0] {
 		case "Identity/get":
-			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
+			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident", "email": "alice@example.com"}}}, "i"}})
 		case "Mailbox/get":
 			writeMethods(w, []any{[]any{"Mailbox/get", map[string]any{"list": []any{
 				map[string]any{"id": "inbox-box", "role": "inbox"},

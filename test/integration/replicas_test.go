@@ -389,6 +389,10 @@ func (m *sharedMail) CreateInboxes(ctx context.Context, specs []mailbackend.Inbo
 
 func (m *sharedMail) Deliver(context.Context, mailbackend.Outbound) error { return nil }
 
+func (m *sharedMail) SenderAddresses(_ context.Context, accountID string) ([]string, error) {
+	return []string{accountID + "@example.com"}, nil
+}
+
 func (m *sharedMail) List(_ context.Context, accountID string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	m.mu.Lock()
 	list := append([]mailbackend.Message(nil), m.messages[accountID]...)

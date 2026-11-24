@@ -29,7 +29,9 @@ inbaid serve
 
 The event cursor is `uidvalidity:uidnext`. A new UID is a created event. A message that is deleted is not reported, because a UIDNEXT cursor cannot see it. If the server changes UIDVALIDITY, the sync stops and the stored cursor stays where it was.
 
-Message ids are IMAP UIDs. List and search return the subject. Get returns the text body. An attachment on send is a MIME part.
+Message ids are IMAP UIDs. List and search return the subject. Get returns the text body and the `From` and `Reply-To` headers. An attachment on send is a MIME part.
+
+Mail is sent as the account's `user`, so `user` must be an email address. This backend has no alias list. A `from` other than `user` is refused with `403`.
 
 ## Retention
 

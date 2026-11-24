@@ -80,7 +80,10 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 			case cmd == "UID SEARCH ALL" || strings.HasPrefix(cmd, "UID SEARCH TEXT"):
 				say(write, "* SEARCH 8\r\n%s OK\r\n", tag)
 			case strings.Contains(cmd, "AUTHENTICATION-RESULTS"):
-				header := "Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=fail\r\nFrom: Ada <ada@example.com>\r\n"
+				if !strings.Contains(cmd, "REPLY-TO") {
+					t.Errorf("get did not ask for Reply-To: %s", cmd)
+				}
+				header := "Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=fail\r\nFrom: Ada <ada@example.com>\r\nReply-To: Help <help@example.com>\r\n"
 				say(write, "* 1 FETCH (UID 8 FLAGS (\\Junk) BODY[HEADER.FIELDS (AUTHENTICATION-RESULTS)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
 			case strings.HasPrefix(cmd, "UID FETCH") && strings.Contains(cmd, "HEADER"):
 				header := "Subject: Hello\r\n\r\n"
@@ -114,7 +117,7 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 		t.Fatalf("search %+v err %v", found, err)
 	}
 	message, err := backend.Get(ctx, "ada", "8")
-	if err != nil || message.Text != "body" || message.From != "Ada <ada@example.com>" || message.Authentication.SPF != "pass" || message.Authentication.DMARC != "fail" || message.Authentication.Spam != "spam" {
+	if err != nil || message.Text != "body" || message.From != "Ada <ada@example.com>" || message.ReplyTo != "Help <help@example.com>" || message.Authentication.SPF != "pass" || message.Authentication.DMARC != "fail" || message.Authentication.Spam != "spam" {
 		t.Fatalf("get %+v err %v", message, err)
 	}
 	if err := backend.Delete(ctx, "ada", "8"); err != nil {
@@ -443,5 +446,23 @@ func TestDeliverRefusesLineBreaksInAttachmentType(t *testing.T) {
 	defer mu.Unlock()
 	if connected {
 		t.Fatal("opened a connection for a refused message")
+	}
+}
+
+func TestSenderAddressesIsTheLoginAddress(t *testing.T) {
+	backend := &Backend{accounts: map[string]Login{
+		"ada": {User: "ada@example.com", Password: "secret"},
+		"bea": {User: "bea", Password: "secret"},
+	}}
+	ctx := context.Background()
+	got, err := backend.SenderAddresses(ctx, "ada")
+	if err != nil || len(got) != 1 || got[0] != "ada@example.com" {
+		t.Fatalf("addresses %v err %v", got, err)
+	}
+	if _, err := backend.SenderAddresses(ctx, "bea"); err == nil || !strings.Contains(err.Error(), "not an email address") {
+		t.Fatalf("bare login err %v", err)
+	}
+	if _, err := backend.SenderAddresses(ctx, "missing"); err == nil {
+		t.Fatal("an unknown account has sender addresses")
 	}
 }

@@ -96,6 +96,7 @@ type Message struct {
 	References     []string       `json:"references,omitempty"`
 	ReceivedAt     time.Time      `json:"receivedAt,omitempty"`
 	From           string         `json:"from,omitempty"`
+	ReplyTo        string         `json:"replyTo,omitempty"`
 	Attachments    []Attachment   `json:"attachments,omitempty"`
 	Authentication Authentication `json:"authentication,omitempty"`
 	SenderAllowed  *bool          `json:"senderAllowed,omitempty"`
@@ -106,6 +107,9 @@ type Backend interface {
 	CreateInbox(context.Context, InboxSpec) (string, error)
 	CreateInboxes(context.Context, []InboxSpec) ([]string, error)
 	Deliver(context.Context, Outbound) error
+	// SenderAddresses returns the addresses the account may send as.
+	// The first is the account's own address. The service refuses any other sender.
+	SenderAddresses(ctx context.Context, accountID string) ([]string, error)
 	List(context.Context, string, Page) ([]Message, string, error)
 	Search(context.Context, string, string, Page) ([]Message, string, error)
 	Get(context.Context, string, string) (Message, error)
