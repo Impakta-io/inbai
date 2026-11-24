@@ -2,7 +2,7 @@ Status: current
 
 # Documentation
 
-The operator CLI calls `inbaid` for inbox and message commands. `init`, `domain add`, and `doctor` talk to Stalwart. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
+The operator CLI calls `inbaid` for inbox, message, agent, audit, and retention commands. `init`, `domain add`, `domain relay`, and `doctor` talk to Stalwart. `backup` and `restore` open the inbAI database. Pages marked `Status: planned` name the work that will fill them in. Pages marked `Status: current` describe the repository as it is, or a rule that is already in force.
 
 ## Use cases
 

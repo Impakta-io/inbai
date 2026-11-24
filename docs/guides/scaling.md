@@ -9,20 +9,21 @@ The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Sta
 `inbaid serve` must already be running. The tool provisions addresses, sends one extra probe message, then lists and reads.
 
 ```sh
-# At least 32 characters. Generate one with openssl, or use the token `inbaid` runs with.
-export INBAI_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+# The token inbaid runs with: operatorToken in its config.json,
+# or the INBAI_OPERATOR_TOKEN it was started with.
+export INBAI_OPERATOR_TOKEN='the-operator-token'
 go run ./tools/load -url http://127.0.0.1:8787 -inboxes 10 -messages 1 -concurrency 4
 ```
 
 `-inboxes` and `-messages` are the size of that run. A count above 50 addresses becomes a job, and the tool waits for it. The send quotas and per-recipient-domain rate limit still apply, so a large send run stops with HTTP 429 until the operator raises them via `INBAI_QUOTA_INBOX_DAILY`, `INBAI_QUOTA_DOMAIN_DAILY`, `INBAI_QUOTA_WORKSPACE_DAILY`, and `INBAI_RATE_RECIPIENT_PER_MINUTE`. The JSON report counts those as errors.
 
-`events` is `seen` when the probe message appears on `GET /v1/events`, `empty` when the wait ends without one, and `unavailable` when the server has no database. `eventLagMs` is the time from the probe send returning to seeing that event. A server without `INBAI_DATABASE_URL` cannot record one.
+`events` is `seen` when the probe message appears on `GET /v1/events`, `empty` when the wait ends without one, and `unavailable` when the server has no database. `eventLagMs` is the time from the probe send returning to seeing that event. A server without a database cannot record one.
 
 The numbers in the JSON are that run only. This repository does not treat them as a capacity claim.
 
 ## More than one inbaid
 
-Each replica uses the same `INBAI_DATABASE_URL`. That database holds the signing key, so the replicas verify the same access tokens. Set `INBAI_SIGNING_KEY` only when every process must use a key you chose, and set the same value on each. The event log, cursors, webhook deliveries, the job queue, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs are in that database, so a replica that restarts can read them. Any replica can claim bulk generation, cursor sweeps, retention sweeps, the hourly prune, and webhook deliveries using `FOR UPDATE SKIP LOCKED`.
+Each replica uses the same database, through `INBAI_DATABASE_URL` or `databaseUrl` in its config file. That database holds the signing key, so the replicas verify the same access tokens. Set `INBAI_SIGNING_KEY` only when every process must use a key you chose, and set the same value on each. The event log, cursors, webhook deliveries, the job queue, the suppression list, grants, client credentials, send quotas, idempotency keys, and bulk jobs are in that database, so a replica that restarts can read them. Any replica can claim bulk generation, cursor sweeps, retention sweeps, the hourly prune, and webhook deliveries using `FOR UPDATE SKIP LOCKED`.
 
 Each replica posts up to `INBAI_WEBHOOK_WORKERS` webhooks at once, 16 unless set, so the total is that number times the replicas. A worker holds no database connection while it waits on a receiver. A claim marks the webhook busy in the database until the POST finishes or 30 seconds pass, so one webhook never has two POSTs in flight, even from two replicas. Raise the setting when many receivers are slow and deliveries queue up. Each worker can hold one open connection to a receiver.
 

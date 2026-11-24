@@ -29,7 +29,15 @@ inbaid serve
 
 If you prefer to manage Stalwart yourself or run `inbaid` inside Docker Compose as well, follow [deploy/compose](../../deploy/compose/README.md) and pass `--url` with `INBAI_RECOVERY_PASSWORD`.
 
-`inbai init` writes a config file. The default path is `$XDG_CONFIG_HOME/inbai/config.json`, or the platform user config directory when that variable is unset. On macOS that directory is `$HOME/Library/Application Support/inbai`. The file mode is `0600`. A config directory that init creates gets mode `0700`. The file contains the service API key, operator token, and, in Docker mode, the operator password and database URL, so do not commit it. `--config` chooses another path.
+`inbai init` writes a config file. The default path is `config.json` in the `inbai` directory of the user config directory. These docs call that directory `<config-dir>`:
+
+| OS | `<config-dir>` |
+| --- | --- |
+| Linux | `$XDG_CONFIG_HOME/inbai`, or `~/.config/inbai` when that variable is unset |
+| macOS | `~/Library/Application Support/inbai` |
+| Windows | `%AppData%\inbai` |
+
+`inbai` and `inbaid serve` read the same path. The file mode is `0600`. A config directory that init creates gets mode `0700`. The file contains the service API key, operator token, and, in Docker mode, the operator password and database URL, so do not commit it. `--config` chooses another path.
 
 When using an external Stalwart instance, `INBAI_RECOVERY_PASSWORD` is the recovery administrator password. Init uses it once, stores an API key, and sets the same value as the password for `operator@<domain>`. `inbai domain relay` asks for that password again as `INBAI_OPERATOR_PASSWORD`.
 
@@ -40,7 +48,7 @@ In the repository Compose file, the `inbaid` container reaches Stalwart at `http
 - One Linux host with Docker Engine and the Compose plugin (`docker compose`).
 - A public IPv4 address with reverse DNS (`PTR`) matching your mail hostname.
 - Inbound TCP port `25` (SMTP) and port `443` (HTTPS) reachable from the internet. Outbound TCP port `25` is required for direct delivery, or outbound TCP port `587`/`465` when using an SMTP relay (`inbai domain relay`).
-- Keep port `8080` (Stalwart recovery management) and port `8787` (`inbaid`) bound to `127.0.0.1` as in `deploy/compose/compose.yaml`, and place a TLS reverse proxy in front of `inbaid` if remote clients call it.
+- Keep port `8080` (Stalwart recovery management) and port `8787` (`inbaid`) bound to `127.0.0.1` as in `deploy/compose/compose.yaml`, and place a TLS reverse proxy in front of `inbaid` if remote clients call it. A CLI on another machine then runs `inbai login --url` with the proxy's URL, as described in [CLI](cli.md#login).
 
 After DNS records are published, run `inbai doctor` to verify MX, TXT, PTR, port 25, TLS on port 443, and blocklists.
 
@@ -72,6 +80,6 @@ To remove the containers and delete all stored mail, accounts, and inbAI state i
 docker compose down -v
 ```
 
-Remove `$INBAI_CONFIG_DIR/config.json` as well if you are decommissioning the host.
+Remove `<config-dir>/config.json` as well if you are decommissioning the host. With the repository Compose file, that is the file in `$INBAI_CONFIG_DIR`.
 
 The stack that `inbai init` starts in Docker mode takes the same commands with `-f <config-dir>/stack/compose.yaml`. After `down -v` there, `inbai init` can be run again with the same domain. It sees that the new Stalwart refuses the saved API key and saves a new one. With an external Stalwart, such as this Compose file, init does not check the key. Remove `config.json` before running init again after `down -v`.

@@ -6,7 +6,7 @@ An agent calls the REST API with a credential an operator issued. The access tok
 
 ## Credential
 
-An operator creates the client while `inbaid serve` is running:
+An operator creates the client while `inbaid serve` is running. The examples use the operator token, which `inbai init` stored as `operatorToken` in `config.json`. Export that value as `INBAI_OPERATOR_TOKEN` first, or run the `inbai agent` commands below, which read it from the file:
 
 ```sh
 curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
@@ -35,6 +35,8 @@ curl -s -X POST -H "Authorization: Bearer $INBAI_OPERATOR_TOKEN" \
   -d '{"agent":"ada","inbox":"ACCOUNT_ID","permission":"read"}' \
   http://127.0.0.1:8787/v1/grants
 ```
+
+`ACCOUNT_ID` is the inbox's account id. `inbai inbox list` prints it after each address, and `inbai inbox list --json` and `POST /v1/inboxes` return it as `id`.
 
 An operator can also run `inbai agent create ada`, `inbai agent grant ada ACCOUNT_ID read`, `inbai agent revoke ada ACCOUNT_ID read`, and `inbai agent suspend ada`. Those commands call the same routes. Permissions on an inbox are `read`, `send`, `reply`, `delete`, and `manage`. A grant for one inbox does not apply to another.
 

@@ -40,7 +40,7 @@ func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	}
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	quotaBytes := fs.Int64("quota-bytes", 0, "optional per-inbox disk storage cap in bytes")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -183,7 +183,7 @@ func messageCmd(args []string, stdout, stderr io.Writer, getenv func(string) str
 func messageList(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("message list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	query := fs.String("query", "", "search message text")
 	cursor := fs.String("cursor", "", "opaque cursor from the previous page")
@@ -235,7 +235,7 @@ func messageList(args []string, stdout, stderr io.Writer, getenv func(string) st
 func messageSend(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("message send", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	from := fs.String("from", "", "sender address")
 	to := fs.String("to", "", "recipient address")
@@ -276,7 +276,7 @@ func messageSend(args []string, stdout, stderr io.Writer, getenv func(string) st
 func messageGet(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("message get", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -358,7 +358,7 @@ func messageAttachment(args []string, stdout, stderr io.Writer, getenv func(stri
 func messageReply(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("message reply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	to := fs.String("to", "", "recipient address")
 	body := fs.String("body", "", "plain text body")
@@ -392,7 +392,7 @@ func messageReply(args []string, stdout, stderr io.Writer, getenv func(string) s
 func messageDelete(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("message delete", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2

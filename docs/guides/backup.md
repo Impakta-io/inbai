@@ -4,7 +4,9 @@ Status: partial — `inbai backup` and `inbai restore` copy the inbAI database. 
 
 inbAI state and mail live in different places. A backup of one does not include the other.
 
-The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the job queue, the suppression list, grants, client credentials, send quotas, idempotency keys, bulk jobs, the audit log, retention periods, sender allowlists, and the signing key. `inbai backup` writes those tables to one file. The file does not contain message bodies. A file written before grants were stored leaves the grant, credential, quota, idempotency, and job tables as they are. A file written before the audit log leaves that table as it is. A file written before retention periods were stored leaves that table as it is. A file written before sender allowlists were stored leaves that table as it is. A file written before the signing key was stored leaves that row as it is. A file written before the job queue was stored leaves that table as it is. A file written before idempotency keys were bound to a request restores each key as completed, and a repeat of any request with that key returns its first result. Rows the hourly prune deleted are not in the file. The file records when each event was logged and the last event id, so a restore keeps both. In a file written before that, each event counts as logged at the restore, and new event ids start after the highest one in the file.
+The inbAI database holds inbox cursors, the event feed, webhook subscriptions and their secrets, webhook deliveries, the job queue, the suppression list, grants, client credentials, send quotas, idempotency keys, bulk jobs, the audit log, retention periods, sender allowlists, and the signing key. `inbai backup` writes those tables to one file. The file does not contain message bodies. Rows the hourly prune deleted are not in the file. The file records when each event was logged and the last event id, so a restore keeps both.
+
+A file written by an earlier version restores too. A table that file does not include is left as it is. Its idempotency keys restore as completed, so a repeat of any request with such a key returns its first result. Its events count as logged at the restore, and new event ids start after the highest one in the file.
 
 Stalwart holds messages and attachments in its own database and volume. Copy those with the tools that administer Stalwart. inbAI does not read Stalwart's tables.
 
@@ -18,6 +20,8 @@ inbai backup --file inbai.json
 ```
 
 On the Compose network that URL reaches the `inbai` database. The Compose file does not publish port 5432, so run the command where that host name resolves.
+
+After Docker-mode `inbai init`, the URL is `databaseUrl` in `config.json`. It points at `127.0.0.1:5433`, so the command runs on the host. `inbai backup` reads only the variable, so export that value.
 
 The file mode is `0600`. It contains webhook secrets, hashed client secrets, and the signing key. Keep it with the same care as the database password.
 

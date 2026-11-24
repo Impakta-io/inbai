@@ -14,7 +14,7 @@ import (
 func inboxGenerate(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("inbox generate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	count := fs.Int("count", 0, "number of addresses to create")
 	prefix := fs.String("prefix", "u", "local-part prefix")

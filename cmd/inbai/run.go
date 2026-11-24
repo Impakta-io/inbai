@@ -81,7 +81,7 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")
 	apiURLFlag := fs.String("api-url", "", "inbaid API URL to store for later commands (default: keep the stored one, else http://127.0.0.1:8787)")
 	stalwartURL := fs.String("stalwart-url", "", "Stalwart URL to store for later commands")
-	configPath := fs.String("config", "", "config file to write (default is the user config directory)")
+	configPath := fs.String("config", "", "config file to write (default inbai/config.json in the user config directory)")
 	stackDir := fs.String("stack-dir", "", "directory for local Docker Compose files (default <config-dir>/stack)")
 	public := fs.Bool("public", false, "bind SMTP (25) and HTTPS (443) on all interfaces in Docker mode")
 	pgPort := fs.Int("pg-port", 5433, "local PostgreSQL port in Docker mode")

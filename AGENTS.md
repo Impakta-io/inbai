@@ -47,15 +47,18 @@ A change is done when those commands pass, the diff is small enough for a person
 | `internal/auth` | Credentials and token verification. A token names the caller only. |
 | `internal/mailbackend` | The mail interface. |
 | `internal/mailbackend/stalwart` | The Stalwart implementation of that interface. |
+| `internal/mailbackend/imap` | The IMAP and SMTP implementation, used with `INBAI_MAIL=imap`. |
 | `internal/store` | PostgreSQL state. Message bodies do not belong here. |
 | `internal/jobs` | Background jobs. |
 | `internal/events` | Cursors, the event feed, and webhooks. |
 | `internal/config` | Process configuration. |
 | `internal/doctor` | Host checks for `inbai doctor`. |
 | `internal/version` | The version string both binaries print. |
+| `internal/load` | The measurement run behind `tools/load`. |
 | `api/openapi.yaml` | The HTTP contract. Change this before the client or the handlers. |
 | `tools/docscheck` | Checks public Markdown. |
 | `tools/reference` | Writes the CLI and HTTP reference pages. |
+| `tools/load` | Runs a load measurement against a running `inbaid`. |
 | `docs` | Documentation. A behavior change updates the doc in the same change. |
 
 Each `internal` package has a `doc.go` that states its job. Read it before editing the package.

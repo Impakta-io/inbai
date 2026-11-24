@@ -15,7 +15,7 @@ Each line is `ok` or `fix`. The command exits 0 only when every line is `ok`.
 | `DNS` | Publish the quoted MX or TXT record. TXT is where SPF, DKIM, and DMARC live. |
 | `PTR` | Ask the host's IP provider to set reverse DNS to the mail hostname. |
 | `Port 25` | Allow inbound TCP 25 from the internet to the mail host. |
-| `TLS` | Serve a certificate on port 443 that public clients trust and that names the mail host. The Compose stack's generated certificate does not. |
+| `TLS` | Serve a certificate on port 443 that public clients trust and that names the mail host. The certificate Stalwart generates does not, and inbAI does not install one. Configure it in Stalwart. A local trial keeps this line as a fix. |
 | `Blocklist` | The address is listed, or the list refused the query. Request removal before sending mail. |
 
 `doctor` checks Spamhaus ZEN and SpamCop. It does not send a message.
@@ -30,7 +30,7 @@ The response header `X-Request-Id` is the same value. Send that header when you 
 
 `inbai domain relay` authenticates to Stalwart as `operator@<domain>`, not with the service API key. It uses `INBAI_OPERATOR_PASSWORD` when set, then the operator password Docker-mode `inbai init` stored in `config.json`, then `INBAI_RECOVERY_PASSWORD`. Common failures:
 
-- **Permission denied from Stalwart on `domain relay`:** servers initialized before the operator role existed do not have MTA route permissions on `operator@<domain>`. Run `inbai init` again to update the operator role, then retry `inbai domain relay`. Docker mode handles recovery mode itself. An external Stalwart must be started in recovery mode first and left afterwards.
+- **Permission denied from Stalwart on `domain relay`:** the operator role on `operator@<domain>` lacks the MTA route permissions. Run `inbai init` again. A rerun adds any permission a role is missing. Then retry `inbai domain relay`. Docker mode handles recovery mode itself. An external Stalwart must be started in recovery mode first and left afterwards.
 - **`domain relay needs INBAI_OPERATOR_PASSWORD` after Docker-mode init:** the config was written by an older `inbai`, which did not keep the operator password. Run `inbai init` again with the same domain. It sets a new operator password and stores it.
 - **401 from Stalwart on `domain relay`:** the password does not match `operator@<domain>`. Unset `INBAI_OPERATOR_PASSWORD` to use the stored one, or, after external-mode init, export the value init used as `INBAI_RECOVERY_PASSWORD`.
 - **Missing relay password:** `inbai domain relay` reads the upstream SMTP password only from `INBAI_RELAY_PASSWORD`. It is not accepted as a flag.
@@ -48,6 +48,10 @@ docker compose -p inbai -f "<config-dir>/stack/compose.yaml" down -v
 
 That deletes the earlier install's mail, inboxes, and accounts. Run `inbai init` again afterwards.
 
+## `inbai` gets 401 from `inbaid`
+
+An exported `INBAI_OPERATOR_TOKEN` comes before `operatorToken` in `config.json`, for `inbai` and for `inbaid serve`. When the two processes see different values, every call is `401`. Unset the variable in both shells to use the stored token, or export the same value in both.
+
 ## Requests fail with 401 after `docker compose down -v`
 
 The service API key in `config.json` belonged to the deleted Stalwart database. Run `inbai init` again with the same domain. It sees that Stalwart refuses the key, issues a new one, and saves it. Then restart `inbaid`.
@@ -60,4 +64,4 @@ When the database already holds a signing key shorter than 32 bytes, because an 
 
 ## Signing key mismatch on startup
 
-When `INBAI_DATABASE_URL` is set, `inbaid` stores the access-token signing key in PostgreSQL. If you also set `INBAI_SIGNING_KEY`, it must match the stored key. A different value stops startup with `signing key does not match the database`. Unset `INBAI_SIGNING_KEY` to adopt the stored key, or set the same value on every replica.
+When `inbaid` has a database (`databaseUrl` in `config.json`, or `INBAI_DATABASE_URL`), it stores the access-token signing key in PostgreSQL. If you also set `INBAI_SIGNING_KEY`, it must match the stored key. A different value stops startup with `signing key does not match the database`. Unset `INBAI_SIGNING_KEY` to adopt the stored key, or set the same value on every replica.
