@@ -979,6 +979,10 @@ components:
           format: date-time
         text:
           type: string
+          description: Plain-text body. At most 1 MiB. A longer body is cut, and textTruncated is true. Stalwart may end a cut body with "...".
+        textTruncated:
+          type: boolean
+          description: Present and true only when text was cut at the 1 MiB limit. The message is longer than text shows. Do not quote, summarize as complete, or reply to it as if the whole body were read.
         messageId:
           type: array
           items:

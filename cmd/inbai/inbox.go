@@ -306,6 +306,9 @@ func messageGet(args []string, stdout, stderr io.Writer, getenv func(string) str
 		return 0
 	}
 	writef(stdout, "%s\n%s\n", message.Subject, message.Text)
+	if message.TextTruncated {
+		writef(stdout, "note: the body was cut at the 1 MiB limit; the message is longer than shown\n")
+	}
 	for _, file := range message.Attachments {
 		if file.BlobID == "" {
 			writef(stdout, "attachment %s\n", file.Name)

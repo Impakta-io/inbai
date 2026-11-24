@@ -32,11 +32,12 @@ type apiInbox struct {
 }
 
 type apiMessage struct {
-	ID          string `json:"id"`
-	Subject     string `json:"subject"`
-	Preview     string `json:"preview"`
-	Text        string `json:"text,omitempty"`
-	Attachments []struct {
+	ID            string `json:"id"`
+	Subject       string `json:"subject"`
+	Preview       string `json:"preview"`
+	Text          string `json:"text,omitempty"`
+	TextTruncated bool   `json:"textTruncated,omitempty"`
+	Attachments   []struct {
 		Name   string `json:"name"`
 		Type   string `json:"type"`
 		Size   int    `json:"size"`

@@ -139,6 +139,7 @@ func toMessage(message Message) mailbackend.Message {
 		Subject:        message.Subject,
 		Preview:        message.Preview,
 		Text:           message.Text,
+		TextTruncated:  message.TextTruncated,
 		MessageID:      message.MessageID,
 		InReplyTo:      message.InReplyTo,
 		References:     message.References,
