@@ -534,6 +534,43 @@ func TestSuspendAgentRecordsAfterTheSuspensionIsStored(t *testing.T) {
 	}
 }
 
+func TestResumeAgentReportsTheStoreErrorAndWritesNoAudit(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}, err: errors.New("connection refused")}
+	if err := svc.ResumeAgent(Caller{Operator: true}, ids, "ada"); !errors.Is(err, ids.err) {
+		t.Fatalf("err = %v", err)
+	}
+	if rows := auditRows(t, svc); len(rows) != 0 {
+		t.Fatalf("audit %+v", rows)
+	}
+}
+
+func TestResumeUnknownAgentIsNotFound(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}}
+	if err := svc.ResumeAgent(Caller{Operator: true}, ids, "bob"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	if rows := auditRows(t, svc); len(rows) != 0 {
+		t.Fatalf("audit %+v", rows)
+	}
+}
+
+func TestResumeAgentRecordsAfterTheResumeIsStored(t *testing.T) {
+	svc := New(&fakeMail{})
+	ids := &fakeIdentities{known: map[string]bool{"ada": true}}
+	if err := svc.ResumeAgent(Caller{Agent: "ada"}, ids, "ada"); !errors.Is(err, ErrForbidden) || ids.resumed != "" {
+		t.Fatalf("agent err %v resumed %q", err, ids.resumed)
+	}
+	if err := svc.ResumeAgent(Caller{Operator: true}, ids, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	rows := auditRows(t, svc)
+	if ids.resumed != "ada" || len(rows) != 1 || rows[0].Action != "agent.resume" || rows[0].Target != "ada" {
+		t.Fatalf("resumed %q audit %+v", ids.resumed, rows)
+	}
+}
+
 func auditRows(t *testing.T, svc *Service) []store.AuditRow {
 	t.Helper()
 	rows, _, err := svc.Audit(context.Background(), Caller{Operator: true}, 0, 0)
@@ -730,6 +767,7 @@ type fakeIdentities struct {
 	known     map[string]bool
 	err       error
 	suspended string
+	resumed   string
 }
 
 func (f *fakeIdentities) Create(agent string, operator bool) (string, string, error) {
@@ -744,6 +782,17 @@ func (f *fakeIdentities) Suspend(agent string) (bool, error) {
 		return false, nil
 	}
 	f.suspended = agent
+	return true, nil
+}
+
+func (f *fakeIdentities) Resume(agent string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	if !f.known[agent] {
+		return false, nil
+	}
+	f.resumed = agent
 	return true, nil
 }
 

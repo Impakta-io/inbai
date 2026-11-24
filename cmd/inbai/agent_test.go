@@ -12,7 +12,7 @@ import (
 )
 
 func TestAgentCommandsTalkToTheAPI(t *testing.T) {
-	var revoked bool
+	var revoked, resumed bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer operator-token" {
 			t.Errorf("auth %s", r.Header.Get("Authorization"))
@@ -26,6 +26,13 @@ func TestAgentCommandsTalkToTheAPI(t *testing.T) {
 			_, _ = w.Write([]byte(`{"agent":"ada","inbox":"inbox-a","permission":"read"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/ada/suspend":
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/ada/resume":
+			resumed = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/bob/resume":
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"title":"Not found","status":404,"detail":"not found: agent bob has no credential"}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/grants/ada/inbox-a/read":
 			revoked = true
 			w.WriteHeader(http.StatusNoContent)
@@ -57,6 +64,26 @@ func TestAgentCommandsTalkToTheAPI(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"suspended":"ada"`) {
 		t.Fatalf("suspend stdout %s", stdout.String())
+	}
+	stdout.Reset()
+	if code := run([]string{"agent", "resume", "--config", path, "--json", "ada"}, &stdout, &stderr, env); code != 0 || !resumed {
+		t.Fatalf("resume %d resumed %v %s", code, resumed, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"resumed":"ada"`) {
+		t.Fatalf("resume stdout %s", stdout.String())
+	}
+	stdout.Reset()
+	if code := run([]string{"agent", "resume", "--config", path, "ada"}, &stdout, &stderr, env); code != 0 || !strings.Contains(stdout.String(), "Resumed ada") {
+		t.Fatalf("resume text %d %s %s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"agent", "resume", "--config", path, "bob"}, &stdout, &stderr, env); code != 1 || !strings.Contains(stderr.String(), "agent resume:") {
+		t.Fatalf("resume unknown %d %s", code, stderr.String())
+	}
+	stderr.Reset()
+	if code := run([]string{"agent", "resume", "--config", path}, &stdout, &stderr, env); code != 2 || !strings.Contains(stderr.String(), "usage: inbai agent resume <name>") {
+		t.Fatalf("resume usage %d %s", code, stderr.String())
 	}
 	stdout.Reset()
 	if code := run([]string{"agent", "revoke", "--config", path, "ada", "inbox-a", "read"}, &stdout, &stderr, env); code != 0 || !revoked {

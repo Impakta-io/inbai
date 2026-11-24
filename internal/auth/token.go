@@ -32,6 +32,7 @@ type Store interface {
 	Client(ctx context.Context, id string) (agent string, hash []byte, operator bool, ok bool, err error)
 	AgentExists(ctx context.Context, agent string) (bool, error)
 	SuspendAgent(ctx context.Context, agent string) error
+	ResumeAgent(ctx context.Context, agent string) error
 	AgentSuspended(ctx context.Context, agent string) (bool, error)
 }
 
@@ -164,6 +165,35 @@ func (d *Directory) Suspend(agent string) (found bool, err error) {
 	for _, client := range d.clients {
 		if client.agent == agent {
 			d.suspended[agent] = true
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Resume lifts a suspension, so the agent can exchange its secret again.
+// An access token issued before the suspension is accepted again until it expires:
+// a suspension blocks tokens, it does not revoke them.
+// found is false when no credential names the agent. Nothing is changed then.
+// The suspension is removed when err is nil and found is true. An agent that is not
+// suspended is found and left as it is.
+func (d *Directory) Resume(agent string) (found bool, err error) {
+	if d.db != nil {
+		ctx := context.Background()
+		found, err := d.db.AgentExists(ctx, agent)
+		if err != nil || !found {
+			return false, err
+		}
+		if err := d.db.ResumeAgent(ctx, agent); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, client := range d.clients {
+		if client.agent == agent {
+			delete(d.suspended, agent)
 			return true, nil
 		}
 	}

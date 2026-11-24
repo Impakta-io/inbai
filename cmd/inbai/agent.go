@@ -7,12 +7,13 @@ import (
 	"context"
 	"flag"
 	"io"
+	"net/http"
 	"time"
 )
 
 func agentCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
-		writef(stderr, "usage: inbai agent [create|grant|suspend|revoke]\n")
+		writef(stderr, "usage: inbai agent [create|grant|suspend|resume|revoke]\n")
 		return 2
 	}
 	switch args[0] {
@@ -22,6 +23,8 @@ func agentCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 		return agentGrant(args[1:], stdout, stderr, getenv)
 	case "suspend":
 		return agentSuspend(args[1:], stdout, stderr, getenv)
+	case "resume":
+		return agentResume(args[1:], stdout, stderr, getenv)
 	case "revoke":
 		return agentRevoke(args[1:], stdout, stderr, getenv)
 	default:
@@ -147,4 +150,39 @@ func agentSuspend(args []string, stdout, stderr io.Writer, getenv func(string) s
 	}
 	writef(stdout, "Suspended %s\n", fs.Arg(0))
 	return 0
+}
+
+func agentResume(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	fs := flag.NewFlagSet("agent resume", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "config file")
+	asJSON := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		writef(stderr, "usage: inbai agent resume <name>\n")
+		return 2
+	}
+	_, _, client, code := openAPI(configPath, stderr, getenv)
+	if code != 0 {
+		return code
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := client.resumeAgent(ctx, fs.Arg(0)); err != nil {
+		writef(stderr, "agent resume: %s\n", err)
+		return 1
+	}
+	if *asJSON {
+		emit(stdout, true, "", map[string]string{"resumed": fs.Arg(0)})
+		return 0
+	}
+	writef(stdout, "Resumed %s\n", fs.Arg(0))
+	return 0
+}
+
+func (c apiClient) resumeAgent(ctx context.Context, name string) error {
+	_, err := c.call(ctx, http.MethodPost, "/v1/agents/"+pathSegment(name)+"/resume", map[string]string{}, nil)
+	return err
 }

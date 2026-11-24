@@ -63,6 +63,71 @@ func TestSuspendThatIsNotStoredFailsWithoutAudit(t *testing.T) {
 	}
 }
 
+func TestResumedAgentIsAcceptedOnRESTAndMCP(t *testing.T) {
+	db := newCredentialStore()
+	srv, _ := suspendServer(t, db)
+	cred := suspendTestAgentCredential(t, srv.URL, "ada")
+	token := exchangeTestToken(t, srv.URL, cred)
+
+	if res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/bob/resume", ""); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown agent %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/ada/resume", ""); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("resume when not suspended %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/ada/suspend", ""); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("suspend %d", res.StatusCode)
+	}
+	if res := agentJSON(t, srv.URL, token, http.MethodPost, "/v1/agents/ada/resume", ""); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("suspended agent resumed itself %d", res.StatusCode)
+	}
+	other := exchangeTestToken(t, srv.URL, suspendTestAgentCredential(t, srv.URL, "bob"))
+	if res := agentJSON(t, srv.URL, other, http.MethodPost, "/v1/agents/ada/resume", ""); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("agent caller %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := agentGet(t, srv.URL, token, "/v1/inboxes/inbox-a/messages"); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("still suspended %d", res.StatusCode)
+	}
+
+	if res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/ada/resume", ""); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("resume %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := agentGet(t, srv.URL, token, "/v1/inboxes/inbox-a/messages"); res.StatusCode != http.StatusOK {
+		t.Fatalf("rest with the token issued before the suspension %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := agentJSON(t, srv.URL, token, http.MethodPost, "/mcp", mcpList); res.StatusCode != http.StatusOK {
+		t.Fatalf("mcp %d %s", res.StatusCode, readBody(t, res))
+	}
+	if res := agentGet(t, srv.URL, exchangeTestToken(t, srv.URL, cred), "/v1/inboxes/inbox-a/messages"); res.StatusCode != http.StatusOK {
+		t.Fatalf("rest with a new token %d", res.StatusCode)
+	}
+	if got := auditActions(t, srv.URL); got != "agent.create grant agent.resume agent.suspend agent.create grant agent.resume" {
+		t.Fatalf("audit %q", got)
+	}
+}
+
+func TestResumeThatIsNotStoredFailsWithoutAudit(t *testing.T) {
+	db := newCredentialStore()
+	srv, _ := suspendServer(t, db)
+	token := suspendTestAgentToken(t, srv.URL, "ada")
+	if res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/ada/suspend", ""); res.StatusCode != http.StatusNoContent {
+		t.Fatalf("suspend %d", res.StatusCode)
+	}
+
+	db.setResumeError(errors.New("connection refused"))
+	res := operatorJSON(t, srv.URL, http.MethodPost, "/v1/agents/ada/resume", "")
+	if res.StatusCode < 500 {
+		t.Fatalf("resume %d", res.StatusCode)
+	}
+	db.setResumeError(nil)
+	if got := auditActions(t, srv.URL); strings.Contains(got, "agent.resume") {
+		t.Fatalf("audit %q", got)
+	}
+	if res := agentGet(t, srv.URL, token, "/v1/inboxes/inbox-a/messages"); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("agent %d", res.StatusCode)
+	}
+}
+
 func TestTokenIsNotAcceptedWhenSuspensionCannotBeRead(t *testing.T) {
 	db := newCredentialStore()
 	srv, mail := suspendServer(t, db)
@@ -102,23 +167,40 @@ func suspendServer(t *testing.T, db auth.Store) (*httptest.Server, *fakeMail) {
 
 func suspendTestAgentToken(t *testing.T, base, name string) string {
 	t.Helper()
+	return exchangeTestToken(t, base, suspendTestAgentCredential(t, base, name))
+}
+
+type testCredential struct {
+	ID     string `json:"id"`
+	Secret string `json:"secret"`
+}
+
+// suspendTestAgentCredential creates an agent with read on inbox-a.
+func suspendTestAgentCredential(t *testing.T, base, name string) testCredential {
+	t.Helper()
 	create := operatorJSON(t, base, http.MethodPost, "/v1/agents", `{"name":"`+name+`"}`)
 	if create.StatusCode != http.StatusCreated {
 		t.Fatalf("agent %d %s", create.StatusCode, readBody(t, create))
 	}
-	var cred struct {
-		ID     string `json:"id"`
-		Secret string `json:"secret"`
-	}
+	var cred testCredential
 	mustJSON(t, create, &cred)
 	grant := operatorJSON(t, base, http.MethodPost, "/v1/grants", `{"agent":"`+name+`","inbox":"inbox-a","permission":"read"}`)
 	if grant.StatusCode != http.StatusCreated {
 		t.Fatalf("grant %d %s", grant.StatusCode, readBody(t, grant))
 	}
+	return cred
+}
+
+// exchangeTestToken exchanges a client secret at /oauth/token and fails the test when it is refused.
+func exchangeTestToken(t *testing.T, base string, cred testCredential) string {
+	t.Helper()
 	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {cred.ID}, "client_secret": {cred.Secret}}
 	res, err := http.Post(base+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("token %d %s", res.StatusCode, readBody(t, res))
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
@@ -152,6 +234,7 @@ type credentialStore struct {
 	hashes     map[string][]byte
 	suspended  map[string]bool
 	suspendErr error
+	resumeErr  error
 	readErr    error
 }
 
@@ -163,6 +246,12 @@ func (c *credentialStore) setErrors(suspend, read error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.suspendErr, c.readErr = suspend, read
+}
+
+func (c *credentialStore) setResumeError(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.resumeErr = err
 }
 
 func (c *credentialStore) SaveClient(_ context.Context, id, agent string, hash []byte, _ bool) error {
@@ -197,6 +286,16 @@ func (c *credentialStore) SuspendAgent(_ context.Context, agent string) error {
 		return c.suspendErr
 	}
 	c.suspended[agent] = true
+	return nil
+}
+
+func (c *credentialStore) ResumeAgent(_ context.Context, agent string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.resumeErr != nil {
+		return c.resumeErr
+	}
+	delete(c.suspended, agent)
 	return nil
 }
 

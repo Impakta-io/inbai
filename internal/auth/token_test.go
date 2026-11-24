@@ -99,6 +99,80 @@ func TestSuspendReturnsTheStoreError(t *testing.T) {
 	}
 }
 
+func TestResumeLetsTheAgentExchangeAndUseItsTokenAgain(t *testing.T) {
+	for name, db := range map[string]*fakeStore{"memory": nil, "db": newFakeStore()} {
+		t.Run(name, func(t *testing.T) {
+			dir := NewDirectory([]byte("signing-key"), "http://127.0.0.1:8787")
+			if db != nil {
+				dir.SetDB(db)
+			}
+			id, secret, err := dir.Create("ada", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, _, err := dir.Exchange(id, secret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found, err := dir.Suspend("ada"); err != nil || !found {
+				t.Fatalf("suspend found %v err %v", found, err)
+			}
+			if _, _, err := dir.Verify(token); !errors.Is(err, ErrRejected) {
+				t.Fatalf("suspended verify %v", err)
+			}
+			if found, err := dir.Resume("ada"); err != nil || !found {
+				t.Fatalf("resume found %v err %v", found, err)
+			}
+			if subject, _, err := dir.Verify(token); err != nil || subject != "ada" {
+				t.Fatalf("token issued before the suspension: subject %q err %v", subject, err)
+			}
+			if _, _, err := dir.Exchange(id, secret); err != nil {
+				t.Fatalf("exchange after resume %v", err)
+			}
+			if found, err := dir.Resume("ada"); err != nil || !found {
+				t.Fatalf("resume when not suspended found %v err %v", found, err)
+			}
+		})
+	}
+}
+
+func TestResumeUnknownAgentIsNotFound(t *testing.T) {
+	dir := NewDirectory([]byte("signing-key"), "http://127.0.0.1:8787")
+	if found, err := dir.Resume("nobody"); err != nil || found {
+		t.Fatalf("memory resume found %v err %v", found, err)
+	}
+	dir.SetDB(newFakeStore())
+	if found, err := dir.Resume("nobody"); err != nil || found {
+		t.Fatalf("db resume found %v err %v", found, err)
+	}
+}
+
+func TestResumeReturnsTheStoreErrorAndTheAgentStaysSuspended(t *testing.T) {
+	db := newFakeStore()
+	dir := NewDirectory([]byte("signing-key"), "http://127.0.0.1:8787")
+	dir.SetDB(db)
+	id, secret, err := dir.Create("ada", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := dir.Suspend("ada"); err != nil || !found {
+		t.Fatalf("suspend found %v err %v", found, err)
+	}
+	db.resumeErr = errors.New("connection refused")
+	if _, err := dir.Resume("ada"); !errors.Is(err, db.resumeErr) {
+		t.Fatalf("resume err %v", err)
+	}
+	db.resumeErr = nil
+	db.existsErr = errors.New("connection refused")
+	if _, err := dir.Resume("ada"); !errors.Is(err, db.existsErr) {
+		t.Fatalf("lookup err %v", err)
+	}
+	db.existsErr = nil
+	if _, _, err := dir.Exchange(id, secret); !errors.Is(err, ErrRejected) {
+		t.Fatalf("a failed resume let the agent back in: %v", err)
+	}
+}
+
 func TestVerifyFailsClosedWhenSuspensionCannotBeRead(t *testing.T) {
 	db := newFakeStore()
 	dir := NewDirectory([]byte("signing-key"), "http://127.0.0.1:8787")
@@ -134,6 +208,7 @@ type fakeStore struct {
 	suspended  map[string]bool
 	existsErr  error
 	suspendErr error
+	resumeErr  error
 	readErr    error
 }
 
@@ -176,6 +251,16 @@ func (f *fakeStore) SuspendAgent(_ context.Context, agent string) error {
 		return f.suspendErr
 	}
 	f.suspended[agent] = true
+	return nil
+}
+
+func (f *fakeStore) ResumeAgent(_ context.Context, agent string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.resumeErr != nil {
+		return f.resumeErr
+	}
+	delete(f.suspended, agent)
 	return nil
 }
 
