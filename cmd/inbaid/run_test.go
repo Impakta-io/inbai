@@ -5,9 +5,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/version"
 )
 
@@ -23,9 +27,56 @@ func TestRunPrintsVersionWithoutArguments(t *testing.T) {
 
 func TestServeRequiresOperatorToken(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"serve"}, &stdout, &stderr, func(string) string { return "" })
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	code := run([]string{"serve", "--config", missing}, &stdout, &stderr, func(string) string { return "" })
 	if code != 2 || !strings.Contains(stderr.String(), "INBAI_OPERATOR_TOKEN") {
 		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+}
+
+func TestServeReadsOperatorTokenFromConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw, err := json.Marshal(config.File{OperatorToken: "saved-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"serve", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	// Token was read from config, so serve moves past the token check and fails on the missing service API key.
+	if code != 2 || !strings.Contains(stderr.String(), "service API key") {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+}
+
+func TestResolveTokenAndDatabaseURL(t *testing.T) {
+	cfg := config.File{
+		OperatorToken: "cfg-token",
+		DatabaseURL:   "postgres://cfg/inbai",
+	}
+	if got := resolveToken(cfg, func(string) string { return "" }); got != "cfg-token" {
+		t.Fatalf("token fallback %q", got)
+	}
+	if got := resolveToken(cfg, func(k string) string {
+		if k == "INBAI_OPERATOR_TOKEN" {
+			return "env-token"
+		}
+		return ""
+	}); got != "env-token" {
+		t.Fatalf("token override %q", got)
+	}
+	if got := resolveDatabaseURL(cfg, func(string) string { return "" }); got != "postgres://cfg/inbai" {
+		t.Fatalf("dsn fallback %q", got)
+	}
+	if got := resolveDatabaseURL(cfg, func(k string) string {
+		if k == "INBAI_DATABASE_URL" {
+			return "postgres://env/inbai"
+		}
+		return ""
+	}); got != "postgres://env/inbai" {
+		t.Fatalf("dsn override %q", got)
 	}
 }
 

@@ -28,7 +28,7 @@ Generated from the usage lines in [cmd/inbai](../../cmd/inbai). Do not edit this
 - `usage: inbai inbox quota [get|set]`
 - `usage: inbai inbox quota get [--config path] [--json] <inbox-id>`
 - `usage: inbai inbox quota set [--config path] [--json] <inbox-id> <limit-bytes>`
-- `usage: inbai init --domain name [--url url] [--hostname name] [--stalwart-url url] [--config path] [--json]`
+- `usage: inbai init --domain name [--public] [--no-docker] [--url url] [--hostname name] [--stalwart-url url] [--stack-dir dir] [--config path] [--json]`
 - `usage: inbai login [--url url] [--client-id id] [--clear] [--config path] [--json]`
 - `usage: inbai mcp serve [--config path]`
 - `usage: inbai message [send|list|get|reply|delete|attachment]`

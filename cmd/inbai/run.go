@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Impakta-io/inbai/internal/config"
@@ -68,14 +69,22 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		writef(stderr, "usage: inbai init --domain name [--url url] [--hostname name] [--stalwart-url url] [--config path] [--json]\n")
+		writef(stderr, "usage: inbai init --domain name [--public] [--no-docker] [--url url] [--hostname name] [--stalwart-url url] [--stack-dir dir] [--config path] [--json]\n")
 		fs.PrintDefaults()
 	}
-	url := fs.String("url", "http://127.0.0.1:8080", "Stalwart recovery API, reachable on the host")
+	url := fs.String("url", "http://127.0.0.1:8080", "Stalwart recovery API, reachable on the host (skips local Docker setup)")
 	domain := fs.String("domain", "", "DNS domain to create")
 	hostname := fs.String("hostname", "", "mail hostname (default mail.<domain>)")
-	stalwartURL := fs.String("stalwart-url", "https://127.0.0.1", "Stalwart URL to store for later commands")
+	stalwartURL := fs.String("stalwart-url", "", "Stalwart URL to store for later commands")
 	configPath := fs.String("config", "", "config file to write (default is the user config directory)")
+	stackDir := fs.String("stack-dir", "", "directory for local Docker Compose files (default <config-dir>/stack)")
+	public := fs.Bool("public", false, "bind SMTP (25), submission (587), and HTTPS (443) on all interfaces in Docker mode")
+	pgPort := fs.Int("pg-port", 5433, "local PostgreSQL port in Docker mode")
+	httpsPort := fs.Int("https-port", 0, "Stalwart HTTPS port in Docker mode (default 8443, or 443 with --public)")
+	smtpPort := fs.Int("smtp-port", 0, "Stalwart SMTP port in Docker mode (default 2525, or 25 with --public)")
+	submissionPort := fs.Int("submission-port", 0, "Stalwart submission port in Docker mode (default 5870, or 587 with --public)")
+	recoveryPort := fs.Int("recovery-port", 8080, "Stalwart recovery port in Docker mode")
+	noDocker := fs.Bool("no-docker", false, "connect to an already-running Stalwart instead of starting Docker Compose")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -87,14 +96,19 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stderr, "init needs --domain\n")
 		return 2
 	}
+	visited := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
 	password := ""
 	if getenv != nil {
 		password = getenv(recoveryPasswordEnv)
 	}
-	if password == "" {
+	useExternal := *noDocker || visited["url"] || password != ""
+	if useExternal && password == "" {
 		writef(stderr, "init needs %s\n", recoveryPasswordEnv)
 		return 2
 	}
+
 	path := *configPath
 	if path == "" {
 		var err error
@@ -114,26 +128,94 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		return 1
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	result, err := stalwart.Bootstrap(ctx, &stalwart.Client{
-		BaseURL:  *url,
-		User:     "admin",
-		Password: password,
-	}, stalwart.Input{
-		Domain:           *domain,
-		Hostname:         *hostname,
-		OperatorPassword: password,
-		CreateAPIKey:     existing.APIKey == "",
-	})
-	if err != nil {
-		writef(stderr, "init: %s\n", err)
-		return 1
+	var (
+		result         stalwart.Result
+		finalStalwart  string
+		finalDBURL     = existing.DatabaseURL
+		finalStackDir  = existing.StackDir
+		usedDockerMode = !useExternal
+	)
+	if useExternal {
+		finalStalwart = *stalwartURL
+		if finalStalwart == "" {
+			finalStalwart = "https://127.0.0.1"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		result, err = stalwart.Bootstrap(ctx, &stalwart.Client{
+			BaseURL:  *url,
+			User:     "admin",
+			Password: password,
+		}, stalwart.Input{
+			Domain:           *domain,
+			Hostname:         *hostname,
+			OperatorPassword: password,
+			CreateAPIKey:     existing.APIKey == "",
+		})
+		if err != nil {
+			writef(stderr, "init: %s\n", err)
+			return 1
+		}
+	} else {
+		dir := *stackDir
+		if dir == "" {
+			if existing.StackDir != "" {
+				dir = existing.StackDir
+			} else {
+				dir = filepath.Join(filepath.Dir(path), "stack")
+			}
+		}
+		project := ""
+		if getenv != nil {
+			project = getenv("COMPOSE_PROJECT_NAME")
+		}
+		var progressOut io.Writer
+		if !*asJSON {
+			progressOut = stderr
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		dockerRes, err := initDockerStack(ctx, dockerInitOptions{
+			Domain:         *domain,
+			Hostname:       *hostname,
+			StackDir:       dir,
+			Project:        project,
+			Public:         *public,
+			PGPort:         *pgPort,
+			HTTPSPort:      *httpsPort,
+			SMTPPort:       *smtpPort,
+			SubmissionPort: *submissionPort,
+			RecoveryPort:   *recoveryPort,
+			StalwartURL:    *stalwartURL,
+			Existing:       existing,
+			Progress:       progressOut,
+		})
+		if err != nil {
+			writef(stderr, "init: %s\n", err)
+			return 1
+		}
+		result = dockerRes.Bootstrap
+		finalStalwart = dockerRes.StalwartURL
+		finalDBURL = dockerRes.DatabaseURL
+		finalStackDir = dockerRes.StackDir
 	}
+
+	operatorToken := existing.OperatorToken
+	if operatorToken == "" && getenv != nil {
+		operatorToken = strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN"))
+	}
+	if operatorToken == "" {
+		operatorToken, err = generateOperatorToken()
+		if err != nil {
+			writef(stderr, "operator token: %s\n", err)
+			return 1
+		}
+	}
+
 	cfg := config.File{
 		Domain:            *domain,
 		Hostname:          result.Hostname,
-		StalwartURL:       *stalwartURL,
+		StalwartURL:       finalStalwart,
 		ServiceAccountID:  result.ServiceAccountID,
 		OperatorAccountID: result.OperatorAccountID,
 		InboxRoleID:       result.InboxRoleID,
@@ -142,6 +224,11 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		Inboxes:           existing.Inboxes,
 		APIKey:            result.APIKey,
 		APIURL:            config.DefaultAPIURL,
+		ClientID:          existing.ClientID,
+		ClientSecret:      existing.ClientSecret,
+		OperatorToken:     operatorToken,
+		DatabaseURL:       finalDBURL,
+		StackDir:          finalStackDir,
 		RetentionDays:     config.DefaultRetentionDays,
 	}
 	if existing.APIKey != "" {
@@ -158,15 +245,22 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 		return 1
 	}
 	if *asJSON {
-		emit(stdout, true, "", map[string]any{
+		payload := map[string]any{
 			"domain":         cfg.Domain,
 			"hostname":       cfg.Hostname,
 			"operator":       "operator@" + cfg.Domain,
 			"serviceAccount": "service@" + cfg.Domain,
 			"retentionDays":  cfg.RetentionDays,
 			"config":         path,
-			"next":           "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail.",
-		})
+		}
+		if usedDockerMode {
+			payload["stackDir"] = cfg.StackDir
+			payload["stalwartUrl"] = cfg.StalwartURL
+			payload["next"] = "Run inbaid serve to start the API server."
+		} else {
+			payload["next"] = "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail."
+		}
+		emit(stdout, true, "", payload)
 		return 0
 	}
 	writef(stdout, "Domain %s is ready.\n", cfg.Domain)
@@ -174,6 +268,12 @@ func initCmd(args []string, stdout, stderr io.Writer, getenv func(string) string
 	writef(stdout, "Service account is service@%s.\n", cfg.Domain)
 	writef(stdout, "Message retention defaults to %d days.\n", cfg.RetentionDays)
 	writef(stdout, "Wrote %s\n", path)
+	if usedDockerMode {
+		writef(stdout, "Stack files are in %s\n", cfg.StackDir)
+		writef(stdout, "Start the server with: inbaid serve\n")
+		writef(stdout, "Stop the stack with: docker compose -f %q down\n", filepath.Join(cfg.StackDir, "compose.yaml"))
+		return 0
+	}
 	writef(stdout, "Set STALWART_RECOVERY_MODE=0 and start the stack again before sending mail.\n")
 	return 0
 }

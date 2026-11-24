@@ -6,16 +6,24 @@ With no arguments, `inbai` prints `inbai 0.0.0-dev` and exits. `inbai version` p
 
 ## init
 
-`inbai init` bootstraps Stalwart while it is in recovery mode.
+`inbai init` sets up PostgreSQL, Stalwart, your domain, and `config.json` in one command when Docker Compose is available:
+
+```sh
+inbai init --domain example.com
+```
+
+By default, Docker mode writes a Compose stack into `<config-dir>/stack`, generates a PostgreSQL password and an operator token, starts Stalwart in recovery mode with an ephemeral password (never written to disk), bootstraps the domain, writes `config.json` (mode `0600`), and restarts Stalwart out of recovery mode. Loopback-only ports (`8443`, `2525`, `5870`, `5433`, `8080`) are used by default; pass `--public` on a server to bind ports `25`, `587`, and `443` on all interfaces, or override ports with `--pg-port`, `--https-port`, `--smtp-port`, `--submission-port`, and `--recovery-port`. `--stack-dir` chooses another directory for the Compose files.
+
+To bootstrap an already-running Stalwart instance instead of starting Docker Compose, pass `--url` (or `--no-docker`) with `INBAI_RECOVERY_PASSWORD`:
 
 ```sh
 export INBAI_RECOVERY_PASSWORD='the-recovery-password'
 inbai init --url http://127.0.0.1:8080 --domain example.com
 ```
 
-`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands and defaults to `https://127.0.0.1`. `--config` sets the file path. `--json` prints the domain, the operator login, the retention default, and the config path. It does not print the service API key. The command prints the 30-day retention default.
+`--hostname` defaults to `mail.example.com`. `--stalwart-url` is the HTTPS URL stored for later commands (`https://127.0.0.1:8443` in local Docker mode, `https://127.0.0.1` with `--public` or external mode). `--config` sets the file path. `--json` prints the domain, the operator login, the retention default, and the config path. It never prints the service API key, the operator token, or the database URL. The command prints the 30-day retention default.
 
-Running init again reuses the domain, the roles, and the accounts. It keeps the API key already in the config file.
+Running init again reuses the domain, the roles, the accounts, the PostgreSQL password, the API key, and the operator token already saved on disk.
 
 ## login
 

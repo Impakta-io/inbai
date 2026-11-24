@@ -32,17 +32,24 @@ make build test lint docs-check
 
 The binaries are `bin/inbai` and `bin/inbaid`. Windows commands are in [development.md](docs/contributing/development.md).
 
-### Run the server stack
+### Quick start
 
-`inbaid` runs alongside PostgreSQL and Stalwart using Docker Compose. Follow [deploy/compose/README.md](deploy/compose/README.md) or the [Quickstart](docs/guides/quickstart.md) to boot the stack, run `inbai init`, and send your first message:
+With Docker installed, one command starts PostgreSQL and Stalwart, bootstraps your domain, and writes your config and operator token:
 
 ```sh
-cd deploy/compose
-# Set PG_PASSWORD, INBAI_OPERATOR_TOKEN, INBAI_CONFIG_DIR, and STALWART_RECOVERY_MODE=1
-docker compose up -d
+inbai init --domain inbai.test
+inbaid serve
 ```
 
-See [Install](docs/guides/install.md) for host requirements, upgrades, and teardown.
+In a second terminal:
+
+```sh
+inbai inbox create alice
+inbai message send --from alice@inbai.test --to alice@inbai.test --subject hello --body hello
+inbai message list alice@inbai.test
+```
+
+For a public mail host, pass `--public` (`inbai init --public --domain example.com`) or use the repository's [Compose stack](deploy/compose/README.md). See [Quickstart](docs/guides/quickstart.md) and [Install](docs/guides/install.md) for host requirements, upgrades, and teardown.
 
 ## Read next
 
