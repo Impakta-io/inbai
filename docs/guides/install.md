@@ -6,6 +6,14 @@ The supported server is one Linux host with Docker Engine, a public IPv4 address
 
 The stack file is [deploy/compose](../../deploy/compose/README.md). It starts PostgreSQL, Stalwart, and `inbaid`. `inbaid` waits until `inbai init` has written `config.json`, then listens on `127.0.0.1:8787`.
 
+## CLI binary
+
+Build from source with Go 1.27.4 or newer (`make build` writes `bin/inbai` and `bin/inbaid`). Once a release tag is published to `Impakta-io/homebrew-tap` (see [releasing](../contributing/releasing.md)), macOS and Linux users can install both binaries with Homebrew:
+
+```sh
+brew install impakta-io/tap/inbai
+```
+
 ## First boot
 
 Build the CLI, start the stack in recovery mode, and run init. The commands and the loopback-only recovery port are in the Compose document. Set `INBAI_OPERATOR_TOKEN` and `INBAI_CONFIG_DIR` before `docker compose up`. `INBAI_CONFIG_DIR` is the directory that contains `config.json`.
