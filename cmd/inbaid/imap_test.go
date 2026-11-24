@@ -83,6 +83,72 @@ func TestIMAPRetentionRejectsABadValue(t *testing.T) {
 	}
 }
 
+func TestIMAPTLSAliasStillMeansImplicitTLSOnBoth(t *testing.T) {
+	env := map[string]string{
+		"INBAI_IMAP_ADDRESS": "mail.example.com:993",
+		"INBAI_SMTP_ADDRESS": "mail.example.com:465",
+		"INBAI_IMAP_TLS":     "1",
+	}
+	var stderr bytes.Buffer
+	cfg := imapConfig(func(key string) string { return env[key] }, &stderr)
+	if cfg.IMAPSecurity != "tls" || cfg.SMTPSecurity != "tls" {
+		t.Fatalf("imap %q smtp %q", cfg.IMAPSecurity, cfg.SMTPSecurity)
+	}
+	if !strings.Contains(stderr.String(), "INBAI_IMAP_TLS=1 is deprecated") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+	env["INBAI_SMTP_SECURITY"] = "starttls"
+	if cfg := imapConfig(func(key string) string { return env[key] }, io.Discard); cfg.IMAPSecurity != "tls" || cfg.SMTPSecurity != "starttls" {
+		t.Fatalf("explicit setting lost to the alias: imap %q smtp %q", cfg.IMAPSecurity, cfg.SMTPSecurity)
+	}
+	stderr.Reset()
+	if cfg := imapConfig(func(string) string { return "" }, &stderr); cfg.IMAPSecurity != "" || cfg.SMTPSecurity != "" || stderr.Len() != 0 {
+		t.Fatalf("no alias: %+v stderr %s", cfg, stderr.String())
+	}
+}
+
+func TestIMAPModeIgnoresTheStalwartInsecureFlag(t *testing.T) {
+	env := map[string]string{"INBAI_TLS_INSECURE": "1"}
+	var stderr bytes.Buffer
+	if cfg := imapConfig(func(key string) string { return env[key] }, &stderr); cfg.InsecureTLS {
+		t.Fatal("INBAI_TLS_INSECURE turned off IMAP certificate checks")
+	}
+	if !strings.Contains(stderr.String(), "INBAI_TLS_INSECURE applies to Stalwart mode only") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+	env = map[string]string{"INBAI_IMAP_TLS_INSECURE": "1"}
+	stderr.Reset()
+	if cfg := imapConfig(func(key string) string { return env[key] }, &stderr); !cfg.InsecureTLS {
+		t.Fatal("INBAI_IMAP_TLS_INSECURE=1 kept certificate checks")
+	}
+	if !strings.Contains(stderr.String(), "certificates are not verified") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+}
+
+func TestIMAPPlaintextLoginToARemoteHostStopsStartup(t *testing.T) {
+	accounts := filepath.Join(t.TempDir(), "accounts.json")
+	if err := os.WriteFile(accounts, []byte(`{"ada":{"user":"ada@example.com","password":"secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"INBAI_OPERATOR_TOKEN": "0123456789abcdef0123456789abcdef0123",
+		"INBAI_MAIL":           "imap",
+		"INBAI_DOMAIN":         "example.com",
+		"INBAI_IMAP_ADDRESS":   "mail.example.com:143",
+		"INBAI_SMTP_ADDRESS":   "mail.example.com:587",
+		"INBAI_IMAP_SECURITY":  "none",
+		"INBAI_IMAP_ACCOUNTS":  accounts,
+	}
+	// The address cannot be bound, so a build that accepts the setting exits
+	// instead of serving.
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"serve", "--addr", "127.0.0.1:-1"}, &stdout, &stderr, func(key string) string { return env[key] })
+	if code != 2 || !strings.Contains(stderr.String(), "INBAI_ALLOW_PLAINTEXT_AUTH") {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+}
+
 // startIMAPServe runs inbaid serve in IMAP mode without a database. The server
 // keeps running until the test binary exits, because serve has no shutdown.
 func startIMAPServe(t *testing.T, imapAddr, retention string) string {
@@ -104,6 +170,8 @@ func startIMAPServe(t *testing.T, imapAddr, retention string) string {
 		"INBAI_IMAP_ADDRESS":   imapAddr,
 		"INBAI_SMTP_ADDRESS":   imapAddr,
 		"INBAI_IMAP_ACCOUNTS":  accounts,
+		"INBAI_IMAP_SECURITY":  "none",
+		"INBAI_SMTP_SECURITY":  "none",
 		"INBAI_RETENTION_DAYS": retention,
 	}
 	go run([]string{"serve", "--addr", addr}, io.Discard, io.Discard, func(key string) string { return env[key] })

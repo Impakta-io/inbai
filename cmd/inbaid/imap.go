@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -30,17 +31,11 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stderr, "retention: %s\n", err)
 		return 2
 	}
-	backend, err := imap.Open(imap.Config{
-		IMAP:     getenv("INBAI_IMAP_ADDRESS"),
-		SMTP:     getenv("INBAI_SMTP_ADDRESS"),
-		TLS:      getenv("INBAI_IMAP_TLS") == "1",
-		Accounts: getenv("INBAI_IMAP_ACCOUNTS"),
-
-		AuthservID: getenv("INBAI_AUTHSERV_ID"),
-	})
+	backend, err := imap.Open(imapConfig(getenv, stderr))
 	if err != nil {
-		writef(stderr, "imap: %s\n", err)
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "empty") {
+		writef(stderr, "imap: %s\n", strings.TrimPrefix(err.Error(), "imap: "))
+		var setting *imap.SettingError
+		if os.IsNotExist(err) || errors.As(err, &setting) || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "empty") {
 			return 2
 		}
 		return 1
@@ -49,6 +44,8 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		writef(stderr, "%s\n", err)
 		return 2
 	}
+	imapMode, smtpMode := backend.Security()
+	writef(stdout, "imap %s uses %s, smtp %s uses %s\n", getenv("INBAI_IMAP_ADDRESS"), imapMode, getenv("INBAI_SMTP_ADDRESS"), smtpMode)
 	var log *store.Postgres
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -108,6 +105,39 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		return 1
 	}
 	return 0
+}
+
+// imapConfig reads the IMAP backend settings. INBAI_IMAP_TLS=1 is the old
+// single switch for implicit TLS on both connections. It still means that,
+// for each protocol whose own setting is empty, and it is reported as
+// deprecated.
+func imapConfig(getenv func(string) string, stderr io.Writer) imap.Config {
+	cfg := imap.Config{
+		IMAP:           getenv("INBAI_IMAP_ADDRESS"),
+		SMTP:           getenv("INBAI_SMTP_ADDRESS"),
+		IMAPSecurity:   getenv("INBAI_IMAP_SECURITY"),
+		SMTPSecurity:   getenv("INBAI_SMTP_SECURITY"),
+		AllowPlaintext: getenv("INBAI_ALLOW_PLAINTEXT_AUTH") == "1",
+		InsecureTLS:    getenv("INBAI_IMAP_TLS_INSECURE") == "1",
+		Accounts:       getenv("INBAI_IMAP_ACCOUNTS"),
+		AuthservID:     getenv("INBAI_AUTHSERV_ID"),
+	}
+	if getenv("INBAI_IMAP_TLS") == "1" {
+		writef(stderr, "INBAI_IMAP_TLS=1 is deprecated. It means INBAI_IMAP_SECURITY=tls and INBAI_SMTP_SECURITY=tls where those are unset. Implicit TLS fails on a STARTTLS port such as 587. Set INBAI_IMAP_SECURITY and INBAI_SMTP_SECURITY instead.\n")
+		if cfg.IMAPSecurity == "" {
+			cfg.IMAPSecurity = string(imap.SecurityTLS)
+		}
+		if cfg.SMTPSecurity == "" {
+			cfg.SMTPSecurity = string(imap.SecurityTLS)
+		}
+	}
+	if cfg.InsecureTLS {
+		writef(stderr, "INBAI_IMAP_TLS_INSECURE=1: IMAP and SMTP server certificates are not verified.\n")
+	}
+	if getenv("INBAI_TLS_INSECURE") != "" {
+		writef(stderr, "INBAI_TLS_INSECURE applies to Stalwart mode only and is ignored with INBAI_MAIL=imap. Use INBAI_IMAP_TLS_INSECURE=1 to skip IMAP and SMTP certificate checks.\n")
+	}
+	return cfg
 }
 
 // imapRetentionDays is the server retention period in IMAP mode. The mailboxes
