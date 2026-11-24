@@ -18,13 +18,22 @@ Prebuilt archives for macOS, Linux, and Windows are also published on [GitHub Re
 
 ## First boot
 
-Build the CLI, start the stack in recovery mode, and run init. The commands and the loopback-only recovery port are in the Compose document. Set `INBAI_OPERATOR_TOKEN` and `INBAI_CONFIG_DIR` before `docker compose up`. `INBAI_CONFIG_DIR` is the directory that contains `config.json`.
+For a standalone install (including Homebrew installs without cloning the repository), run:
 
-`inbai init` writes a config file. The default path is `$XDG_CONFIG_HOME/inbai/config.json`, or the platform user config directory when that variable is unset. On macOS that directory is `$HOME/Library/Application Support/inbai`. The file mode is `0600`. It contains the service API key, so do not commit it. `--config` chooses another path. Point `INBAI_CONFIG_DIR` at the directory of the file you use.
+```sh
+inbai init --domain example.com
+inbaid serve
+```
 
-`INBAI_RECOVERY_PASSWORD` is the recovery administrator password. Init uses it once, stores an API key, and sets the same value as the password for `operator@<domain>`. `inbai domain relay` asks for that password again as `INBAI_OPERATOR_PASSWORD`.
+`inbai init` writes the PostgreSQL and Stalwart Compose files into `<config-dir>/stack`, starts Stalwart in recovery mode, bootstraps the domain and service account, generates an operator token, writes `config.json`, and switches Stalwart out of recovery mode. Pass `--public` on a public mail host to bind ports `25`, `587`, and `443` on all interfaces instead of loopback-only local ports.
 
-The container reaches Stalwart at `https://stalwart` and does not verify Stalwart's generated certificate. The config file keeps the host URL `https://127.0.0.1` for `inbai domain add` and `inbai doctor`.
+If you prefer to manage Stalwart yourself or run `inbaid` inside Docker Compose as well, follow [deploy/compose](../../deploy/compose/README.md) and pass `--url` with `INBAI_RECOVERY_PASSWORD`.
+
+`inbai init` writes a config file. The default path is `$XDG_CONFIG_HOME/inbai/config.json`, or the platform user config directory when that variable is unset. On macOS that directory is `$HOME/Library/Application Support/inbai`. The file mode is `0600`. It contains the service API key, operator token, and database URL (in Docker mode), so do not commit it. `--config` chooses another path.
+
+When using an external Stalwart instance, `INBAI_RECOVERY_PASSWORD` is the recovery administrator password. Init uses it once, stores an API key, and sets the same value as the password for `operator@<domain>`. `inbai domain relay` asks for that password again as `INBAI_OPERATOR_PASSWORD`.
+
+In the repository Compose file, the `inbaid` container reaches Stalwart at `https://stalwart` and does not verify Stalwart's generated certificate. The config file keeps the host URL (`https://127.0.0.1` or `https://127.0.0.1:8443`) for `inbai domain add`, `inbai doctor`, and host-run `inbaid serve`.
 
 ## Host requirements
 

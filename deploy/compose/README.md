@@ -10,13 +10,14 @@ From this directory, with a password that is not committed:
 
 ```sh
 export PG_PASSWORD='choose-a-password'
-export INBAI_OPERATOR_TOKEN='choose-a-token'
 export INBAI_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/inbai"
 export STALWART_RECOVERY_MODE=1
 export STALWART_RECOVERY_ADMIN="admin:${PG_PASSWORD}"
 mkdir -p "$INBAI_CONFIG_DIR"
 docker compose up -d
 ```
+
+`INBAI_OPERATOR_TOKEN` is optional. When it is unset, `inbai init` generates an operator token and stores it in `config.json`, which both `inbaid` and `inbai` read automatically. Set `INBAI_OPERATOR_TOKEN` only if you want to choose or override the token.
 
 On macOS, set `INBAI_CONFIG_DIR` to `"$HOME/Library/Application Support/inbai"` instead. That is the directory `inbai init` writes unless `--config` selects another file. `INBAI_CONFIG_DIR` must be that directory, and the file inside it must be named `config.json`.
 

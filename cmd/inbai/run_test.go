@@ -30,13 +30,18 @@ func TestRunPrintsVersionWithoutArguments(t *testing.T) {
 }
 
 func TestInitRequiresRecoveryPassword(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"init", "--domain", "example.com"}, &stdout, &stderr, func(string) string { return "" })
-	if code != 2 {
-		t.Fatalf("exit %d stdout %s stderr %s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "INBAI_RECOVERY_PASSWORD") {
-		t.Fatalf("stderr %s", stderr.String())
+	for _, args := range [][]string{
+		{"init", "--no-docker", "--domain", "example.com"},
+		{"init", "--url", "http://127.0.0.1:8080", "--domain", "example.com"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr, func(string) string { return "" })
+		if code != 2 {
+			t.Fatalf("args %v exit %d stdout %s stderr %s", args, code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "INBAI_RECOVERY_PASSWORD") {
+			t.Fatalf("args %v stderr %s", args, stderr.String())
+		}
 	}
 }
 
@@ -104,6 +109,10 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 	if cfg["domain"] != "example.com" || cfg["apiKey"] == "" || cfg["retentionDays"] != float64(30) {
 		t.Fatalf("config %s", raw)
 	}
+	opToken, _ := cfg["operatorToken"].(string)
+	if !strings.HasPrefix(opToken, "inb_") || len(opToken) < 20 {
+		t.Fatalf("operatorToken %q", opToken)
+	}
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -136,6 +145,9 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 	if kept["apiKey"] != cfg["apiKey"] {
 		t.Fatalf("api key changed from %v to %v", cfg["apiKey"], kept["apiKey"])
 	}
+	if kept["operatorToken"] != cfg["operatorToken"] {
+		t.Fatalf("operator token changed from %v to %v", cfg["operatorToken"], kept["operatorToken"])
+	}
 	stdout.Reset()
 	stderr.Reset()
 	code = run([]string{"init", "--json", "--url", srv.URL, "--domain", "example.com", "--config", path}, &stdout, &stderr, func(key string) string {
@@ -154,8 +166,8 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 	if printed["domain"] != "example.com" || printed["retentionDays"] != float64(30) || printed["operator"] != "operator@example.com" {
 		t.Fatalf("printed %s", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "shown-once") || strings.Contains(stdout.String(), "apiKey") {
-		t.Fatalf("json included the API key: %s", stdout.String())
+	if strings.Contains(stdout.String(), "shown-once") || strings.Contains(stdout.String(), "apiKey") || strings.Contains(stdout.String(), opToken) || strings.Contains(stdout.String(), "operatorToken") {
+		t.Fatalf("json included secret material: %s", stdout.String())
 	}
 }
 

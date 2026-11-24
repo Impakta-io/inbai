@@ -53,12 +53,11 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	token := getenv("INBAI_OPERATOR_TOKEN")
-	if token == "" {
-		writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
-		return 2
-	}
-	if getenv("INBAI_MAIL") == "imap" {
+	if getenv != nil && getenv("INBAI_MAIL") == "imap" {
+		if strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN")) == "" {
+			writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
+			return 2
+		}
 		return serveIMAP(*addr, stdout, stderr, getenv)
 	}
 	path, err := configPathOf(*configPath)
@@ -66,9 +65,14 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		writef(stderr, "config: %s\n", err)
 		return 1
 	}
-	cfg, err := readConfig(path)
-	if err != nil {
-		writef(stderr, "read config: %s\n", err)
+	cfg, cfgErr := readConfig(path)
+	token := resolveToken(cfg, getenv)
+	if token == "" {
+		writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
+		return 2
+	}
+	if cfgErr != nil {
+		writef(stderr, "read config: %s\n", cfgErr)
 		return 1
 	}
 	if cfg.APIKey == "" || cfg.StalwartURL == "" || cfg.Domain == "" || cfg.InboxRoleID == "" {
@@ -90,7 +94,7 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		}
 	}
 	var log *store.Postgres
-	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
+	if dsn := resolveDatabaseURL(cfg, getenv); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		log, err = store.Open(ctx, dsn)
 		cancel()
@@ -164,6 +168,24 @@ func retainLoop(svc *service.Service, days int, stderr io.Writer) {
 	for range ticker.C {
 		sweep()
 	}
+}
+
+func resolveToken(cfg config.File, getenv func(string) string) string {
+	if getenv != nil {
+		if token := strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN")); token != "" {
+			return token
+		}
+	}
+	return strings.TrimSpace(cfg.OperatorToken)
+}
+
+func resolveDatabaseURL(cfg config.File, getenv func(string) string) string {
+	if getenv != nil {
+		if dsn := strings.TrimSpace(getenv("INBAI_DATABASE_URL")); dsn != "" {
+			return dsn
+		}
+	}
+	return strings.TrimSpace(cfg.DatabaseURL)
 }
 
 func serverMail(cfg config.File, getenv func(string) string) (config.File, bool) {

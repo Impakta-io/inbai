@@ -41,7 +41,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      INBAI_OPERATOR_TOKEN: ${INBAI_OPERATOR_TOKEN:?set INBAI_OPERATOR_TOKEN}
+      INBAI_OPERATOR_TOKEN: ${INBAI_OPERATOR_TOKEN:-}
       INBAI_DATABASE_URL: postgres://stalwart:${PG_PASSWORD}@postgres:5432/inbai?sslmode=disable
       INBAI_STALWART_URL: https://stalwart
       INBAI_TLS_INSECURE: "1"

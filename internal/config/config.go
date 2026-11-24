@@ -26,6 +26,8 @@ type File struct {
 	ClientID          string            `json:"clientId,omitempty"`
 	ClientSecret      string            `json:"clientSecret,omitempty"`
 	OperatorToken     string            `json:"operatorToken,omitempty"`
+	DatabaseURL       string            `json:"databaseUrl,omitempty"`
+	StackDir          string            `json:"stackDir,omitempty"`
 	RetentionDays     int               `json:"retentionDays"`
 	Inboxes           map[string]string `json:"inboxes,omitempty"`
 }
