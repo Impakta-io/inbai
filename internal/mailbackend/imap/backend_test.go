@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -61,14 +62,20 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 		read := bufio.NewReader(conn)
 		say(write, "* OK ready\r\n")
 		_ = write.Flush()
+		var state connState
 		for {
 			line, err := read.ReadString('\n')
 			if err != nil {
 				return
 			}
 			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			if refusal := state.step(cmd); refusal != "" {
+				say(write, "%s BAD %s\r\n", tag, refusal)
+				_ = write.Flush()
+				continue
+			}
 			switch {
-			case strings.HasPrefix(cmd, "LOGIN"), strings.HasPrefix(cmd, "SELECT"), strings.HasPrefix(cmd, "UID STORE"):
+			case strings.HasPrefix(cmd, "LOGIN"), strings.HasPrefix(cmd, "SELECT"), strings.HasPrefix(cmd, "EXAMINE"), strings.HasPrefix(cmd, "UID STORE"):
 				say(write, "%s OK\r\n", tag)
 			case cmd == "UID SEARCH ALL" || strings.HasPrefix(cmd, "UID SEARCH TEXT"):
 				say(write, "* SEARCH 8\r\n%s OK\r\n", tag)
@@ -123,6 +130,96 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 	}
 }
 
+func TestMailChangesExaminesTheMailboxBeforeSearching(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	addr := listen(t, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		write := bufio.NewWriter(conn)
+		read := bufio.NewReader(conn)
+		say(write, "* OK ready\r\n")
+		_ = write.Flush()
+		var state connState
+		for {
+			line, err := read.ReadString('\n')
+			if err != nil {
+				return
+			}
+			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			mu.Lock()
+			seen = append(seen, cmd)
+			mu.Unlock()
+			if refusal := state.step(cmd); refusal != "" {
+				say(write, "%s BAD %s\r\n", tag, refusal)
+			} else if strings.HasPrefix(cmd, "STATUS") {
+				say(write, "* STATUS INBOX (UIDVALIDITY 4 UIDNEXT 9)\r\n%s OK\r\n", tag)
+			} else if strings.HasPrefix(cmd, "UID SEARCH") {
+				say(write, "* SEARCH 8\r\n%s OK\r\n", tag)
+			} else {
+				say(write, "%s OK\r\n", tag)
+			}
+			_ = write.Flush()
+			if strings.HasPrefix(cmd, "LOGOUT") {
+				return
+			}
+		}
+	})
+	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada", Password: "secret"}}}
+	delta, err := backend.MailChanges(context.Background(), "ada", "4:8")
+	if err != nil || len(delta.Created) != 1 || delta.Created[0] != "8" {
+		t.Fatalf("delta %+v err %v", delta, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(seen, "|")
+	if !strings.Contains(joined, "EXAMINE INBOX|UID SEARCH") {
+		t.Fatalf("commands %s", joined)
+	}
+}
+
+func TestTaggedNoWithOKInTheTextIsAFailure(t *testing.T) {
+	for _, status := range []string{"NO mailbox is OK to delete? no", "BAD OK", "NO"} {
+		s := &session{r: bufio.NewReader(strings.NewReader("a001 " + status + "\r\n")), w: io.Discard}
+		if _, err := s.command("NOOP"); err == nil {
+			t.Fatalf("%q was treated as success", status)
+		}
+	}
+	s := &session{r: bufio.NewReader(strings.NewReader("a001 OK done\r\n")), w: io.Discard}
+	if _, err := s.command("NOOP"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHugeLiteralIsRefusedWithoutAllocating(t *testing.T) {
+	s := &session{r: bufio.NewReader(strings.NewReader("* 1 FETCH (UID 1 BODY[TEXT] {99999999999}\r\n")), w: io.Discard}
+	_, err := s.command("UID", "FETCH", "1", "(UID BODY.PEEK[TEXT])")
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := s.command("LOGOUT"); err == nil {
+		t.Fatal("reused a connection that failed mid-response")
+	}
+	just := &session{r: bufio.NewReader(strings.NewReader("* 1 FETCH (UID 1 BODY[TEXT] {" + strconv.Itoa(maxLiteral+1) + "}\r\n")), w: io.Discard}
+	if _, err := just.command("NOOP"); err == nil {
+		t.Fatal("accepted a literal over the cap")
+	}
+}
+
+func TestJunkKeywords(t *testing.T) {
+	for flags, want := range map[string]bool{`\Seen $Junk`: true, `\Junk`: true, `Junk`: true, `$junk`: true, `\Seen $NotJunk`: false, ``: false} {
+		if got := isJunk(strings.Fields(flags)); got != want {
+			t.Errorf("%q: got %v", flags, got)
+		}
+	}
+	text := `* 1 FETCH (UID 8 FLAGS (\Seen $Junk) BODY[HEADER.FIELDS (FROM)] {5}`
+	if !isJunk(flagsOf(text)) {
+		t.Fatal("did not read $Junk from a FETCH response")
+	}
+	if isJunk(flagsOf(`* 1 FETCH (UID 8 FLAGS () BODY[TEXT] {5}`)) {
+		t.Fatal("empty flags were junk")
+	}
+}
+
 func TestUIDValidityChangeDoesNotAdvance(t *testing.T) {
 	addr := listen(t, func(conn net.Conn) {
 		defer func() { _ = conn.Close() }()
@@ -130,12 +227,18 @@ func TestUIDValidityChangeDoesNotAdvance(t *testing.T) {
 		read := bufio.NewReader(conn)
 		say(write, "* OK ready\r\n")
 		_ = write.Flush()
+		var state connState
 		for {
 			line, err := read.ReadString('\n')
 			if err != nil {
 				return
 			}
 			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			if refusal := state.step(cmd); refusal != "" {
+				say(write, "%s BAD %s\r\n", tag, refusal)
+				_ = write.Flush()
+				continue
+			}
 			if strings.HasPrefix(cmd, "STATUS") {
 				say(write, "* STATUS INBOX (UIDVALIDITY 9 UIDNEXT 1)\r\n%s OK\r\n", tag)
 			} else if strings.HasPrefix(cmd, "LOGOUT") {
@@ -229,6 +332,42 @@ func listen(t *testing.T, handle func(net.Conn)) string {
 		}
 	}()
 	return ln.Addr().String()
+}
+
+// connState enforces the RFC 3501 states: SEARCH, FETCH, STORE and EXPUNGE
+// are valid only after SELECT or EXAMINE, and nothing but LOGIN works before
+// LOGIN.
+type connState struct {
+	loggedIn bool
+	selected bool
+}
+
+// step records cmd and returns a refusal text, or "" when the command is valid
+// in the current state.
+func (c *connState) step(cmd string) string {
+	verb, _, _ := strings.Cut(cmd, " ")
+	if verb == "UID" {
+		verb = "UID " + strings.Fields(cmd)[1]
+	}
+	switch verb {
+	case "LOGIN":
+		c.loggedIn = true
+	case "LOGOUT", "NOOP":
+	case "STATUS":
+		if !c.loggedIn {
+			return "not authenticated"
+		}
+	case "SELECT", "EXAMINE":
+		if !c.loggedIn {
+			return "not authenticated"
+		}
+		c.selected = true
+	default:
+		if !c.selected {
+			return "command needs a selected mailbox: " + verb
+		}
+	}
+	return ""
 }
 
 func say(w io.Writer, format string, args ...any) {

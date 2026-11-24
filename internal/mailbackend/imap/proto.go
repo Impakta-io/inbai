@@ -19,10 +19,17 @@ type item struct {
 	literals [][]byte
 }
 
+// maxLiteral is the largest literal the client will read from a server. The
+// API accepts a 16 MiB JSON body and the Stalwart backend reads up to 25 MiB,
+// so 64 MiB is above any message the rest of the system handles and still
+// stops a server from making the client allocate gigabytes.
+const maxLiteral = 64 << 20
+
 type session struct {
-	r   *bufio.Reader
-	w   io.Writer
-	seq int
+	r      *bufio.Reader
+	w      io.Writer
+	seq    int
+	broken error
 }
 
 func (s *session) greet() error {
@@ -37,6 +44,9 @@ func (s *session) greet() error {
 }
 
 func (s *session) command(parts ...string) ([]item, error) {
+	if s.broken != nil {
+		return nil, s.broken
+	}
 	s.seq++
 	tag := fmt.Sprintf("a%03d", s.seq)
 	if _, err := fmt.Fprintf(s.w, "%s %s\r\n", tag, strings.Join(parts, " ")); err != nil {
@@ -46,10 +56,12 @@ func (s *session) command(parts ...string) ([]item, error) {
 	for {
 		got, err := s.readItem()
 		if err != nil {
+			s.broken = err
 			return nil, err
 		}
 		if strings.HasPrefix(got.text, tag+" ") {
-			if !strings.Contains(got.text, " OK") {
+			status, _, _ := strings.Cut(strings.TrimPrefix(got.text, tag+" "), " ")
+			if !strings.EqualFold(status, "OK") {
 				return nil, fmt.Errorf("imap: %s", got.text)
 			}
 			return untagged, nil
@@ -67,6 +79,9 @@ func (s *session) readItem() (item, error) {
 	n, ok := literalSize(line)
 	if !ok {
 		return item{text: line}, nil
+	}
+	if n > maxLiteral {
+		return item{}, fmt.Errorf("imap: server sent a %d byte literal, more than the %d byte limit", n, maxLiteral)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(s.r, buf); err != nil {
@@ -179,23 +194,52 @@ func subjectOf(header []byte) string {
 	return ""
 }
 
+// internalDate reads the quoted date-time after INTERNALDATE. The RFC 3501
+// date-time allows a space-padded day, so the value is trimmed before parsing.
 func internalDate(text string) time.Time {
-	fields := strings.Fields(text)
-	for i, field := range fields {
-		if !strings.EqualFold(field, "INTERNALDATE") || i+1 >= len(fields) {
-			continue
-		}
-		raw := strings.Trim(fields[i+1], "\"")
-		if i+2 < len(fields) && i+3 < len(fields) {
-			raw = strings.Trim(fields[i+1], "\"") + " " + fields[i+2] + " " + strings.Trim(fields[i+3], "\"")
-		}
-		parsed, err := time.Parse("02-Jan-2006 15:04:05 -0700", raw)
-		if err != nil {
-			return time.Time{}
-		}
-		return parsed.UTC()
+	upper := strings.ToUpper(text)
+	at := strings.Index(upper, "INTERNALDATE")
+	if at < 0 {
+		return time.Time{}
 	}
-	return time.Time{}
+	rest := strings.TrimLeft(text[at+len("INTERNALDATE"):], " ")
+	if !strings.HasPrefix(rest, `"`) {
+		return time.Time{}
+	}
+	raw, _, ok := strings.Cut(rest[1:], `"`)
+	if !ok {
+		return time.Time{}
+	}
+	parsed, err := time.Parse("2-Jan-2006 15:04:05 -0700", strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
+// flagsOf returns the flags in the FLAGS (...) list of a FETCH response.
+func flagsOf(text string) []string {
+	at := strings.Index(strings.ToUpper(text), "FLAGS (")
+	if at < 0 {
+		return nil
+	}
+	list, _, ok := strings.Cut(text[at+len("FLAGS ("):], ")")
+	if !ok {
+		return nil
+	}
+	return strings.Fields(list)
+}
+
+// isJunk reports whether the flags mark a message as spam. $Junk is the
+// standard keyword (RFC 5788). \Junk and Junk are what some servers use.
+func isJunk(flags []string) bool {
+	for _, flag := range flags {
+		switch strings.ToLower(flag) {
+		case `$junk`, `\junk`, `junk`:
+			return true
+		}
+	}
+	return false
 }
 
 func formatState(validity, next int) string {

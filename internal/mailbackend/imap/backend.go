@@ -198,7 +198,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			ID:             messageID,
 			Text:           text,
 			From:           headerField(header, "From"),
-			Authentication: mailbackend.AuthenticationOf(header, strings.Contains(auth.text, `\Junk`)),
+			Authentication: mailbackend.AuthenticationOf(header, isJunk(flagsOf(auth.text))),
 		}
 		return nil
 	})
@@ -264,6 +264,9 @@ func (b *Backend) MailChanges(ctx context.Context, account, since string) (mailb
 		delta.State = formatState(validity, next)
 		if next <= oldNext {
 			return nil
+		}
+		if _, err := s.command("EXAMINE", "INBOX"); err != nil {
+			return err
 		}
 		items, err = s.command("UID", "SEARCH", "UID", fmt.Sprintf("%d:%d", oldNext, next-1))
 		if err != nil {
