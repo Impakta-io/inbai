@@ -54,6 +54,8 @@ type IdempotencyRow struct {
 }
 
 // JobSnap is one bulk-create job. Inboxes is the JSON array stored with the job.
+// Agent is the agent that started it. A file written before jobs recorded their agent omits it,
+// and such a job restores as one only an operator can read.
 type JobSnap struct {
 	ID      string          `json:"id"`
 	Status  string          `json:"status"`
@@ -61,6 +63,7 @@ type JobSnap struct {
 	Created int             `json:"created"`
 	Error   string          `json:"error,omitempty"`
 	Inboxes json.RawMessage `json:"inboxes"`
+	Agent   string          `json:"agent,omitempty"`
 }
 
 // RetentionRow is the number of days one scope keeps mail. Zero disables deletion.

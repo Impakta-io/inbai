@@ -136,8 +136,96 @@ func TestBulkJobQueuedForAnotherReplica(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	job, err := first.Job(got.JobID)
+	job, err := first.Job(ctx, Caller{Operator: true}, got.JobID)
 	if err != nil || job.Status != "done" || job.Created != 2 || len(job.Inboxes) != 2 {
 		t.Fatalf("job %+v err %v", job, err)
+	}
+}
+
+func TestQueuedJobIsReadOnlyByItsAgentOrAnOperator(t *testing.T) {
+	dsn := os.Getenv("INBAI_TEST_DATABASE")
+	if dsn == "" {
+		t.Skip("INBAI_TEST_DATABASE is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(424242)`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock(424242)`) }()
+	db, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := pool.Exec(ctx, `TRUNCATE job_queue, bulk_job, idempotency`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM access_grant WHERE agent IN ('jobs-ada', 'jobs-bob')`); err != nil {
+		t.Fatal(err)
+	}
+	operator := Caller{Operator: true}
+	first := New(&fakeMail{})
+	first.SetDB(db)
+	first.SetSyncLimit(1)
+	for _, agent := range []string{"jobs-ada", "jobs-bob"} {
+		if err := first.Grant(operator, agent, "*", PermProvision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := first.Generate(ctx, Caller{Agent: "jobs-ada"}, GenerateRequest{
+		Prefix: "j", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+	}, "")
+	if err != nil || got.JobID == "" {
+		t.Fatalf("generate %+v err %v", got, err)
+	}
+	row, found, err := db.Job(ctx, got.JobID)
+	if err != nil || !found || row.Agent != "jobs-ada" {
+		t.Fatalf("stored job %+v found %v err %v", row, found, err)
+	}
+
+	// A second replica finishes the job. The stored agent is kept.
+	second := New(&fakeMail{})
+	second.SetDB(db)
+	claimed, ok, err := db.ClaimJob(ctx, first.now().UTC().Add(time.Second), time.Minute)
+	if err != nil || !ok || claimed.UniqueKey != got.JobID {
+		t.Fatalf("claim %+v ok %v err %v", claimed, ok, err)
+	}
+	var payload BulkPayload
+	if err := json.Unmarshal(claimed.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.RunBulkJob(ctx, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, caller := range []Caller{operator, {Agent: "jobs-ada"}} {
+		job, err := second.Job(ctx, caller, got.JobID)
+		if err != nil || job.Status != "done" || len(job.Inboxes) != 2 {
+			t.Fatalf("%+v read %+v err %v", caller, job, err)
+		}
+	}
+	for _, caller := range []Caller{{Agent: "jobs-bob"}, {Agent: "jobs-nobody"}, {}} {
+		if job, err := second.Job(ctx, caller, got.JobID); !errors.Is(err, ErrNotFound) || job.ID != "" {
+			t.Fatalf("%+v read %+v err %v, want not found", caller, job, err)
+		}
+	}
+	if err := second.Revoke(operator, "jobs-ada", "*", PermProvision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Job(ctx, Caller{Agent: "jobs-ada"}, got.JobID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked agent err %v, want not found", err)
+	}
+	if err := second.Revoke(operator, "jobs-bob", "*", PermProvision); err != nil {
+		t.Fatal(err)
 	}
 }

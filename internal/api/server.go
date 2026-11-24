@@ -552,7 +552,7 @@ func (s *Server) generateInboxes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
-	job, err := s.Service.Job(r.PathValue("id"))
+	job, err := s.Service.Job(r.Context(), s.requestCaller(r), r.PathValue("id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return

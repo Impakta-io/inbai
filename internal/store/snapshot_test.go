@@ -109,7 +109,10 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SaveIdempotency(ctx, "sent", "ada\ninbox-a\nkey", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SaveJob(ctx, JobRow{ID: "job-1", Status: "done", Total: 1, Created: 1, Inboxes: []byte(`[{"id":"a","address":"a@example.com"}]`)}); err != nil {
+	if err := db.SaveJob(ctx, JobRow{ID: "job-1", Status: "done", Total: 1, Created: 1, Inboxes: []byte(`[{"id":"a","address":"a@example.com"}]`), Agent: "ada"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveJob(ctx, JobRow{ID: "job-2", Status: "running", Total: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SaveClient(ctx, "client-1", "ada", []byte("hash"), false); err != nil {
@@ -185,8 +188,12 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 		t.Fatalf("idempotency restored found %v err %v", found, err)
 	}
 	job, found, err := db.Job(ctx, "job-1")
-	if err != nil || !found || job.Status != "done" || job.Created != 1 {
+	if err != nil || !found || job.Status != "done" || job.Created != 1 || job.Agent != "ada" {
 		t.Fatalf("job restored %+v found %v err %v", job, found, err)
+	}
+	job, found, err = db.Job(ctx, "job-2")
+	if err != nil || !found || job.Status != "running" || job.Agent != "" {
+		t.Fatalf("operator job restored %+v found %v err %v", job, found, err)
 	}
 	audits, err := db.AuditSince(ctx, 0, 10)
 	if err != nil || len(audits) != 1 || audits[0].Action != "grant" || audits[0].Target != "ada inbox-a read" {
@@ -217,5 +224,74 @@ func TestOldSnapshotOmitsTheNewTables(t *testing.T) {
 	}
 	if decoded.Grants != nil || decoded.Clients != nil || decoded.Jobs != nil || decoded.Audits != nil || decoded.Retention != nil || decoded.Allowlists != nil || decoded.SigningKey != nil || decoded.Queue != nil {
 		t.Fatalf("old file gained tables %+v", decoded)
+	}
+}
+
+// oldJobBackup is a file written before jobs recorded the agent that started them.
+const oldJobBackup = `{"version":1,"cursors":[],"events":[],"subscriptions":[],"deliveries":[],"suppressions":[],` +
+	`"grants":[],"quotas":[],"idempotency":[],"clients":[],"suspensions":[],` +
+	`"jobs":[{"id":"old-job","status":"done","total":1,"created":1,"inboxes":[{"id":"a","address":"a@example.com"}]}]}`
+
+func TestSnapshotKeepsTheJobAgent(t *testing.T) {
+	snap := emptySnapshot()
+	snap.Jobs = []JobSnap{
+		{ID: "agent-job", Status: "done", Total: 1, Created: 1, Inboxes: []byte(`[]`), Agent: "ada"},
+		{ID: "operator-job", Status: "running", Total: 1, Inboxes: []byte(`[]`)},
+	}
+	raw, err := Encode(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(raw), `"agent"`) != 1 {
+		t.Fatalf("only the agent job should name an agent: %s", raw)
+	}
+	decoded, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Jobs) != 2 || decoded.Jobs[0].Agent != "ada" || decoded.Jobs[1].Agent != "" {
+		t.Fatalf("jobs %+v", decoded.Jobs)
+	}
+
+	old, err := Decode([]byte(oldJobBackup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Jobs) != 1 || old.Jobs[0].ID != "old-job" || old.Jobs[0].Agent != "" {
+		t.Fatalf("old jobs %+v", old.Jobs)
+	}
+}
+
+func TestPostgresRestoresAnOldJobWithoutAnAgent(t *testing.T) {
+	dsn := os.Getenv("INBAI_TEST_DATABASE")
+	if dsn == "" {
+		t.Skip("INBAI_TEST_DATABASE is not set")
+	}
+	ctx := context.Background()
+	lockTestDB(t, dsn)
+	db, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := reset(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveJob(ctx, JobRow{ID: "current-job", Status: "running", Total: 1, Agent: "ada"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Decode([]byte(oldJobBackup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Import(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := db.Job(ctx, "current-job"); err != nil || found {
+		t.Fatalf("restore kept a job that is not in the file: found %v err %v", found, err)
+	}
+	job, found, err := db.Job(ctx, "old-job")
+	if err != nil || !found || job.Status != "done" || job.Created != 1 || job.Agent != "" {
+		t.Fatalf("old job %+v found %v err %v", job, found, err)
 	}
 }

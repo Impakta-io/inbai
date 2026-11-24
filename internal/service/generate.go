@@ -25,7 +25,7 @@ const (
 // ErrInvalid is returned when a request cannot be carried out.
 var ErrInvalid = errors.New("invalid request")
 
-// ErrNotFound is returned when a job does not exist.
+// ErrNotFound is returned when a job does not exist or the caller may not read it.
 var ErrNotFound = errors.New("not found")
 
 // Inbox is one address created by Generate.
@@ -42,6 +42,9 @@ type Job struct {
 	Created int     `json:"created"`
 	Inboxes []Inbox `json:"inboxes,omitempty"`
 	Error   string  `json:"error,omitempty"`
+
+	// agent started the job. It is empty when an operator did.
+	agent string
 }
 
 // GenerateRequest asks for many addresses in one domain.
@@ -147,6 +150,9 @@ func (s *Service) Generate(ctx context.Context, caller Caller, req GenerateReque
 		return GenerateResult{}, err
 	}
 	job := &Job{ID: id, Status: "running", Total: req.Count}
+	if !caller.Operator {
+		job.agent = caller.Agent
+	}
 	if err := s.putJob(ctx, job); err != nil {
 		return GenerateResult{}, err
 	}
@@ -219,16 +225,40 @@ func (s *Service) RunBulkJob(ctx context.Context, payload BulkPayload) error {
 }
 
 // Job returns a copy of a bulk-create job.
-func (s *Service) Job(id string) (Job, error) {
-	if s.db != nil {
-		row, ok, err := s.db.Job(context.Background(), id)
+// An operator may read any job. An agent may read a job it started, and only while it
+// holds inbox:provision on *, because the job lists the inboxes that grant created.
+// Any other caller gets ErrNotFound, the same as for an unknown id.
+// A job with no recorded agent was started by an operator or predates the record.
+func (s *Service) Job(ctx context.Context, caller Caller, id string) (Job, error) {
+	if !caller.Operator {
+		ok, err := s.allowed(ctx, caller, provisionScope, PermProvision)
 		if err != nil {
 			return Job{}, err
 		}
 		if !ok {
 			return Job{}, ErrNotFound
 		}
-		job := Job{ID: row.ID, Status: row.Status, Total: row.Total, Created: row.Created, Error: row.Error}
+	}
+	job, err := s.loadJob(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if !caller.Operator && (caller.Agent == "" || job.agent != caller.Agent) {
+		return Job{}, ErrNotFound
+	}
+	return job, nil
+}
+
+func (s *Service) loadJob(ctx context.Context, id string) (Job, error) {
+	if s.db != nil {
+		row, ok, err := s.db.Job(ctx, id)
+		if err != nil {
+			return Job{}, err
+		}
+		if !ok {
+			return Job{}, ErrNotFound
+		}
+		job := Job{ID: row.ID, Status: row.Status, Total: row.Total, Created: row.Created, Error: row.Error, agent: row.Agent}
 		if len(row.Inboxes) > 0 && string(row.Inboxes) != "[]" {
 			if err := json.Unmarshal(row.Inboxes, &job.Inboxes); err != nil {
 				return Job{}, err
@@ -247,7 +277,7 @@ func (s *Service) Job(id string) (Job, error) {
 
 func (s *Service) putJob(ctx context.Context, job *Job) error {
 	if s.db != nil {
-		return s.db.SaveJob(ctx, store.JobRow{ID: job.ID, Status: job.Status, Total: job.Total, Inboxes: []byte("[]")})
+		return s.db.SaveJob(ctx, store.JobRow{ID: job.ID, Status: job.Status, Total: job.Total, Inboxes: []byte("[]"), Agent: job.agent})
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
