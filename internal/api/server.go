@@ -640,12 +640,35 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		timeout = time.Duration(seconds) * time.Second
 	}
-	records, err := s.Service.Events(r.Context(), s.requestCaller(r), inbox, after, timeout)
+	caller := s.requestCaller(r)
+	if raw := r.URL.Query().Get("latest"); raw != "" {
+		latest, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "latest must be true or false")
+			return
+		}
+		if latest && r.URL.Query().Has("after") {
+			writeProblem(w, http.StatusBadRequest, "Bad request", "latest cannot be combined with after")
+			return
+		}
+		if latest {
+			head, err := s.Service.EventHead(r.Context(), caller, inbox)
+			if err != nil {
+				writeServiceError(w, err)
+				return
+			}
+			after = head
+		}
+	}
+	records, err := s.Service.Events(r.Context(), caller, inbox, after, timeout)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": records})
+	if len(records) > 0 {
+		after = records[len(records)-1].ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": records, "after": after})
 }
 
 func (s *Server) createWebhook(w http.ResponseWriter, r *http.Request) {

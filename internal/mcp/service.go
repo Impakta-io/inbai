@@ -43,28 +43,27 @@ func (s ServiceBox) Delete(ctx context.Context, inbox, messageID string) error {
 	return s.Service.Delete(ctx, s.Caller, inbox, messageID)
 }
 
-func (s ServiceBox) Wait(ctx context.Context, inbox string, timeout time.Duration) ([]mailbackend.Message, error) {
-	if s.Service.HasFeed() {
-		records, err := s.Service.Events(ctx, s.Caller, inbox, 0, timeout)
+// Wait reads the event feed. A nil after starts from the newest event when the call begins,
+// so a change recorded while it waits is returned and older history is not.
+func (s ServiceBox) Wait(ctx context.Context, inbox string, after *int64, timeout time.Duration) ([]mailbackend.Message, int64, error) {
+	var from int64
+	if after != nil {
+		from = *after
+	} else {
+		head, err := s.Service.EventHead(ctx, s.Caller, inbox)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		out := make([]mailbackend.Message, len(records))
-		for i, record := range records {
-			out[i] = mailbackend.Message{ID: record.MessageID, Subject: record.Kind}
-		}
-		return out, nil
+		from = head
 	}
-	deadline := time.Now().Add(timeout)
-	for {
-		messages, err := s.List(ctx, inbox, "")
-		if err != nil || len(messages) > 0 || !time.Now().Before(deadline) {
-			return messages, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(20 * time.Millisecond):
-		}
+	records, err := s.Service.Events(ctx, s.Caller, inbox, from, timeout)
+	if err != nil {
+		return nil, 0, err
 	}
+	out := make([]mailbackend.Message, len(records))
+	for i, record := range records {
+		out[i] = mailbackend.Message{ID: record.MessageID, Subject: record.Kind}
+		from = record.ID
+	}
+	return out, from, nil
 }

@@ -649,8 +649,14 @@ paths:
             type: string
         - name: after
           in: query
+          description: Return events with an id greater than this. The default 0 starts at the oldest event.
           schema:
             type: integer
+        - name: latest
+          in: query
+          description: When true, wait only for events recorded after the request starts. It cannot be combined with after.
+          schema:
+            type: boolean
         - name: timeout
           in: query
           description: Seconds to wait. The maximum is 25.
@@ -663,6 +669,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventList"
+        "400":
+          $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
         "503":
@@ -947,9 +955,12 @@ components:
           type: string
     EventList:
       type: object
-      required: [events]
+      required: [events, after]
       properties:
         events:
           type: array
           items:
             $ref: "#/components/schemas/Event"
+        after:
+          type: integer
+          description: The cursor to pass as after on the next call. It is the id of the last event returned, or the cursor the call waited from when none were returned.

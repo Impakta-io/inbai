@@ -154,6 +154,11 @@ func (f *Feed) Since(ctx context.Context, inbox string, after int64, limit int) 
 	return f.log.Since(ctx, inbox, after, limit)
 }
 
+// Head returns the id of the newest event for an inbox, or 0 when it has none.
+func (f *Feed) Head(ctx context.Context, inbox string) (int64, error) {
+	return f.log.Head(ctx, inbox)
+}
+
 // InboxByAddress resolves a recipient from an ingest hint.
 func (f *Feed) InboxByAddress(ctx context.Context, address string) (string, bool, error) {
 	return f.log.InboxByAddress(ctx, address)

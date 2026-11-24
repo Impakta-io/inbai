@@ -157,6 +157,18 @@ func (m *Memory) Since(_ context.Context, inbox string, after int64, limit int) 
 	return out, nil
 }
 
+// Head returns the id of the newest event for an inbox, or 0 when it has none.
+func (m *Memory) Head(_ context.Context, inbox string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.events) - 1; i >= 0; i-- {
+		if m.events[i].Inbox == inbox {
+			return m.events[i].ID, nil
+		}
+	}
+	return 0, nil
+}
+
 func (m *Memory) Subscribe(_ context.Context, sub Subscription) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

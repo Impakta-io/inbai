@@ -7,11 +7,14 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend"
 	"github.com/Impakta-io/inbai/internal/service"
+	"github.com/Impakta-io/inbai/internal/store"
 )
 
 func TestToolsListAndAMissingGrantDoesNotRead(t *testing.T) {
@@ -59,14 +62,111 @@ func TestStdioAnswersRequestsAndSkipsNotifications(t *testing.T) {
 	}
 }
 
-func TestWaitReturnsMessagesThatAreAlreadyThere(t *testing.T) {
-	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello"}}}
-	box := ServiceBox{Service: service.New(mail), Caller: service.Caller{Operator: true}}
+func TestWaitWithoutACursorWaitsForTheNextEvent(t *testing.T) {
+	log := &headLog{Log: &store.Memory{}, read: make(chan struct{})}
+	box := feedBox(t, log)
+	putEvents(t, log, "m-old-1", "m-old-2", "m-old-3")
+	done := make(chan string, 1)
+	go func() {
+		got, _ := Dispatch(context.Background(), waitCall(`"timeoutSeconds":5`), box)
+		done <- string(got)
+	}()
+	<-log.read
+	select {
+	case got := <-done:
+		t.Fatalf("wait returned before a new event: %s", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	putEvents(t, log, "m-new")
+	got := <-done
+	if strings.Contains(got, "m-old") || !strings.Contains(got, `\"id\":\"m-new\"`) || !strings.Contains(got, `\"after\":4`) {
+		t.Fatalf("wait %s", got)
+	}
+}
+
+func TestWaitWithACursorReturnsOnlyNewerEvents(t *testing.T) {
+	log := &store.Memory{}
+	box := feedBox(t, log)
+	putEvents(t, log, "m-1", "m-2", "m-3", "m-4")
 	start := time.Now()
-	got, _ := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait_for_message","arguments":{"inbox":"inbox-a","timeoutSeconds":30}}}`), box)
-	if time.Since(start) > time.Second || !strings.Contains(string(got), "hello") {
+	got, _ := Dispatch(context.Background(), waitCall(`"after":2,"timeoutSeconds":5`), box)
+	if time.Since(start) > time.Second || strings.Contains(string(got), "m-1") || strings.Contains(string(got), "m-2") ||
+		!strings.Contains(string(got), "m-3") || !strings.Contains(string(got), "m-4") || !strings.Contains(string(got), `\"after\":4`) {
 		t.Fatalf("wait %s after %s", got, time.Since(start))
 	}
+	again, _ := Dispatch(context.Background(), waitCall(`"after":4,"timeoutSeconds":0.05`), box)
+	if !strings.Contains(string(again), `\"messages\":[]`) || !strings.Contains(string(again), `\"after\":4`) {
+		t.Fatalf("wait %s", again)
+	}
+}
+
+func TestWaitTimeoutReturnsTheHeadCursor(t *testing.T) {
+	log := &store.Memory{}
+	box := feedBox(t, log)
+	putEvents(t, log, "m-1", "m-2")
+	got, _ := Dispatch(context.Background(), waitCall(`"timeoutSeconds":0.05`), box)
+	if strings.Contains(string(got), `"isError"`) || !strings.Contains(string(got), `\"messages\":[]`) || !strings.Contains(string(got), `\"after\":2`) {
+		t.Fatalf("wait %s", got)
+	}
+	bad, _ := Dispatch(context.Background(), waitCall(`"after":"2"`), box)
+	if !strings.Contains(string(bad), `"isError":true`) || !strings.Contains(string(bad), "after must be an event id") {
+		t.Fatalf("bad cursor %s", bad)
+	}
+}
+
+func TestWaitNeedsAGrantAndTheEventFeed(t *testing.T) {
+	log := &headLog{Log: &store.Memory{}, read: make(chan struct{})}
+	svc := service.New(&fakeMail{})
+	svc.SetFeed(events.New(log))
+	denied, _ := Dispatch(context.Background(), waitCall(`"timeoutSeconds":0.05`), ServiceBox{Service: svc, Caller: service.Caller{Agent: "ada"}})
+	if !strings.Contains(string(denied), `"isError":true`) || log.heads != 0 {
+		t.Fatalf("denied %s heads %d", denied, log.heads)
+	}
+	box := ServiceBox{Service: service.New(&fakeMail{messages: []mailbackend.Message{{ID: "m"}}}), Caller: service.Caller{Operator: true}}
+	got, _ := Dispatch(context.Background(), waitCall(`"timeoutSeconds":0.05`), box)
+	if !strings.Contains(string(got), `"isError":true`) || !strings.Contains(string(got), "event store is not configured") {
+		t.Fatalf("no feed %s", got)
+	}
+}
+
+func waitCall(args string) []byte {
+	return []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait_for_message","arguments":{"inbox":"inbox-a",` + args + `}}}`)
+}
+
+func feedBox(t *testing.T, log store.Log) ServiceBox {
+	t.Helper()
+	svc := service.New(&fakeMail{})
+	svc.SetFeed(events.New(log))
+	if err := svc.Grant(service.Caller{Operator: true}, "ada", "inbox-a", service.PermRead); err != nil {
+		t.Fatal(err)
+	}
+	return ServiceBox{Service: svc, Caller: service.Caller{Agent: "ada"}}
+}
+
+func putEvents(t *testing.T, log store.Log, ids ...string) {
+	t.Helper()
+	records := make([]store.Record, len(ids))
+	for i, id := range ids {
+		records[i] = store.Record{MessageID: id, Kind: "created"}
+	}
+	if err := log.Put(context.Background(), "inbox-a", "", "", records); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// headLog closes read after the first head lookup, so a test knows the waiter has its cursor.
+type headLog struct {
+	store.Log
+	read  chan struct{}
+	once  sync.Once
+	heads int
+}
+
+func (h *headLog) Head(ctx context.Context, inbox string) (int64, error) {
+	id, err := h.Log.Head(ctx, inbox)
+	h.heads++
+	h.once.Do(func() { close(h.read) })
+	return id, err
 }
 
 type fakeMail struct {

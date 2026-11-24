@@ -167,6 +167,19 @@ func (s *Service) Events(ctx context.Context, caller Caller, inbox string, after
 	}
 }
 
+// EventHead returns the id of the newest event for one inbox, or 0 when it has none.
+// A consumer that passes it to Events as after waits for events recorded from now on.
+// It needs the same read grant as Events. The log is not read when the grant is missing.
+func (s *Service) EventHead(ctx context.Context, caller Caller, inbox string) (int64, error) {
+	if err := s.permit(ctx, caller, inbox, PermRead); err != nil {
+		return 0, err
+	}
+	if s.feed == nil {
+		return 0, fmt.Errorf("%w", ErrUnavailable)
+	}
+	return s.feed.Head(ctx, inbox)
+}
+
 // SubscribeWebhook registers a signed webhook for one inbox.
 func (s *Service) SubscribeWebhook(ctx context.Context, caller Caller, inbox, rawURL string) (string, string, error) {
 	if err := s.permit(ctx, caller, inbox, PermRead); err != nil {

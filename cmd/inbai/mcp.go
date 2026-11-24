@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -220,20 +221,39 @@ func (b apiBox) Delete(ctx context.Context, inbox, messageID string) error {
 	return b.client.deleteMessage(ctx, inbox, messageID)
 }
 
-func (b apiBox) Wait(ctx context.Context, inbox string, timeout time.Duration) ([]mailbackend.Message, error) {
+func (b apiBox) Wait(ctx context.Context, inbox string, after *int64, timeout time.Duration) ([]mailbackend.Message, int64, error) {
 	seconds := int(timeout.Seconds())
 	if seconds < 0 {
 		seconds = 0
 	}
-	records, err := b.client.events(ctx, inbox, 0, seconds)
+	records, next, err := b.client.waitEvents(ctx, inbox, after, seconds)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]mailbackend.Message, len(records))
 	for i, record := range records {
 		out[i] = mailbackend.Message{ID: record.MessageID, Subject: record.Kind}
 	}
-	return out, nil
+	return out, next, nil
+}
+
+// waitEvents long-polls the event feed. A nil after asks the server to start at the newest event,
+// so the head is read and waited on in one request.
+func (c apiClient) waitEvents(ctx context.Context, inbox string, after *int64, timeout int) ([]apiEvent, int64, error) {
+	query := url.Values{}
+	query.Set("inbox", inbox)
+	if after != nil {
+		query.Set("after", strconv.FormatInt(*after, 10))
+	} else {
+		query.Set("latest", "true")
+	}
+	query.Set("timeout", strconv.Itoa(timeout))
+	var out struct {
+		Events []apiEvent `json:"events"`
+		After  int64      `json:"after"`
+	}
+	_, err := c.call(ctx, http.MethodGet, "/v1/events?"+query.Encode(), nil, &out)
+	return out.Events, out.After, err
 }
 
 func toMessages(in []apiMessage) []mailbackend.Message {

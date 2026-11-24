@@ -8,13 +8,15 @@ Set `INBAI_DATABASE_URL` before `inbaid serve`. The server creates the tables. W
 
 ## Feed
 
-`GET /v1/events?inbox=ACCOUNT_ID&after=0&timeout=25` returns events with `id` greater than `after`, oldest first. `timeout` is seconds and is capped at 25. The response is `{"events":[{"id":1,"inbox":"ACCOUNT_ID","messageId":"...","kind":"created"}]}`. `kind` is `created` or `destroyed`.
+`GET /v1/events?inbox=ACCOUNT_ID&after=0&timeout=25` returns up to 50 events with `id` greater than `after`, oldest first. It answers as soon as there is one, or when `timeout` elapses. `timeout` is seconds and is capped at 25. The response is `{"events":[{"id":1,"inbox":"ACCOUNT_ID","messageId":"...","kind":"created"}],"after":1}`. `kind` is `created` or `destroyed`. `after` in the response is the id of the last event returned, or the cursor the call waited from when it returned none.
 
-Keep the largest `id` you have handled and pass it as `after` on the next call. Delivery is at least once and ordered per inbox, so the same `id` can be seen again after a timeout. Handle it once, then move the cursor forward.
+`latest=true` in place of `after` waits only for events recorded after the request starts. A new consumer that does not want the history starts this way. `latest=true` with `after` is a 400.
+
+Pass the response's `after` as `after` on the next call. Delivery is at least once and ordered per inbox, so the same `id` can be seen again after a timeout. Handle it once, then move the cursor forward.
 
 A caller needs a `read` grant on that inbox. Another inbox is forbidden and the log is not read.
 
-`wait_for_message` uses this feed when the database is configured. The tool result's subject field is the event kind, and the id is the message id to pass to `get_message`.
+`wait_for_message` reads this feed, over `/mcp` and over `inbai mcp serve`. It takes the same `after` cursor and returns the next one as `after`. Without `after` it behaves like `latest=true`. Its maximum wait is 25 seconds. The tool result's subject field is the event kind, and the id is the message id to pass to `get_message`. Without the database the tool returns an error. See [MCP](mcp.md#wait_for_message).
 
 ## Webhooks
 
