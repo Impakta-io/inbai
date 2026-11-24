@@ -54,6 +54,7 @@ Changes merged since `v0.1.0-alpha.3`.
 - `inbai mcp serve` renews its client-credential token (#55).
 - IMAP mode selects the mailbox before searching, parses responses strictly, and names the account and step when a login fails (#63, #80).
 - `inbai message reply` usage shows flags before arguments (#57).
+- With several `inbaid` replicas, a webhook delivery is no longer claimed and posted twice when another replica finished it during the claim, and a late result from a sender whose lease ended no longer marks a delivered webhook as failed.
 
 ### Added
 
