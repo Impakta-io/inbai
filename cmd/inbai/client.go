@@ -20,8 +20,10 @@ import (
 type apiClient struct {
 	base  string
 	token string
-	http  *http.Client
-	poll  time.Duration
+	// src renews token when it came from a client ID and secret. It is nil for a static token.
+	src  *tokenSource
+	http *http.Client
+	poll time.Duration
 }
 
 type apiInbox struct {
@@ -366,6 +368,25 @@ func (c apiClient) call(ctx context.Context, method, path string, in, out any) (
 }
 
 func (c apiClient) callRaw(ctx context.Context, method, path string, in any) (int, []byte, error) {
+	token := c.token
+	if c.src != nil {
+		var err error
+		if token, err = c.src.current(ctx); err != nil {
+			return 0, nil, err
+		}
+	}
+	status, raw, err := c.doRequest(ctx, method, path, in, token)
+	if status == http.StatusUnauthorized && c.src != nil {
+		fresh, rerr := c.src.rejected(ctx, token)
+		if rerr != nil {
+			return 0, nil, rerr
+		}
+		return c.doRequest(ctx, method, path, in, fresh)
+	}
+	return status, raw, err
+}
+
+func (c apiClient) doRequest(ctx context.Context, method, path string, in any, token string) (int, []byte, error) {
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)
@@ -378,7 +399,7 @@ func (c apiClient) callRaw(ctx context.Context, method, path string, in any) (in
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
