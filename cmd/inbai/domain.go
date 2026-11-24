@@ -21,22 +21,6 @@ import (
 // lookupDNS is the resolver domain add uses. Tests replace it.
 var lookupDNS stalwart.Resolver = net.DefaultResolver
 
-func domainCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai domain [add|relay]\n")
-		return 2
-	}
-	switch args[0] {
-	case "add":
-		return domainAdd(args, stdout, stderr)
-	case "relay":
-		return domainRelay(args, stdout, stderr, getenv)
-	default:
-		writef(stderr, "usage: inbai domain [add|relay]\n")
-		return 2
-	}
-}
-
 func domainAdd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("domain add", flag.ContinueOnError)
 	fs.SetOutput(stderr)

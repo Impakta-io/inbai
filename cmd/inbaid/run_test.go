@@ -17,9 +17,9 @@ import (
 	"github.com/Impakta-io/inbai/internal/version"
 )
 
-func TestRunPrintsVersionWithoutArguments(t *testing.T) {
+func TestRunPrintsVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run(nil, &stdout, &stderr, func(string) string { return "" }); code != 0 {
+	if code := run([]string{"version"}, &stdout, &stderr, func(string) string { return "" }); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 	if stdout.String() != version.String(version.Server)+"\n" {

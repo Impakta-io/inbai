@@ -11,28 +11,6 @@ import (
 	"time"
 )
 
-func agentCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai agent [create|grant|suspend|resume|revoke]\n")
-		return 2
-	}
-	switch args[0] {
-	case "create":
-		return agentCreate(args[1:], stdout, stderr, getenv)
-	case "grant":
-		return agentGrant(args[1:], stdout, stderr, getenv)
-	case "suspend":
-		return agentSuspend(args[1:], stdout, stderr, getenv)
-	case "resume":
-		return agentResume(args[1:], stdout, stderr, getenv)
-	case "revoke":
-		return agentRevoke(args[1:], stdout, stderr, getenv)
-	default:
-		writef(stderr, "unknown agent command %q\n", args[0])
-		return 2
-	}
-}
-
 func agentCreate(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("agent create", flag.ContinueOnError)
 	fs.SetOutput(stderr)

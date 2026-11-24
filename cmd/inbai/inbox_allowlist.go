@@ -10,24 +10,6 @@ import (
 	"time"
 )
 
-func inboxAllowlist(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox allowlist [get|set|clear]\n")
-		return 2
-	}
-	switch args[0] {
-	case "get":
-		return inboxAllowlistGet(args[1:], stdout, stderr, getenv)
-	case "set":
-		return inboxAllowlistSet(args[1:], stdout, stderr, getenv)
-	case "clear":
-		return inboxAllowlistClear(args[1:], stdout, stderr, getenv)
-	default:
-		writef(stderr, "usage: inbai inbox allowlist [get|set|clear]\n")
-		return 2
-	}
-}
-
 func inboxAllowlistGet(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("inbox allowlist get", flag.ContinueOnError)
 	fs.SetOutput(stderr)

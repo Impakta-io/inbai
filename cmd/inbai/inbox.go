@@ -17,33 +17,13 @@ import (
 	"github.com/Impakta-io/inbai/internal/config"
 )
 
-func inboxCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist|quota]\n")
-		return 2
-	}
-	switch args[0] {
-	case "generate":
-		return inboxGenerate(args[1:], stdout, stderr, getenv)
-	case "list":
-		return inboxList(args[1:], stdout, stderr, getenv)
-	case "delete":
-		return inboxDelete(args[1:], stdout, stderr, getenv)
-	case "allowlist":
-		return inboxAllowlist(args[1:], stdout, stderr, getenv)
-	case "quota":
-		return inboxQuota(args[1:], stdout, stderr, getenv)
-	case "create":
-	default:
-		writef(stderr, "usage: inbai inbox [create|generate|list|delete|allowlist|quota]\n")
-		return 2
-	}
+func inboxCreate(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("inbox create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	quotaBytes := fs.Int64("quota-bytes", 0, "optional per-inbox disk storage cap in bytes")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 1 || *quotaBytes < 0 {
@@ -154,30 +134,6 @@ func inboxDelete(args []string, stdout, stderr io.Writer, getenv func(string) st
 	}
 	writef(stdout, "Deleted %s\n", address)
 	return 0
-}
-
-func messageCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai message [send|list|get|reply|delete|attachment]\n")
-		return 2
-	}
-	switch args[0] {
-	case "list":
-		return messageList(args[1:], stdout, stderr, getenv)
-	case "send":
-		return messageSend(args[1:], stdout, stderr, getenv)
-	case "get":
-		return messageGet(args[1:], stdout, stderr, getenv)
-	case "attachment":
-		return messageAttachment(args[1:], stdout, stderr, getenv)
-	case "reply":
-		return messageReply(args[1:], stdout, stderr, getenv)
-	case "delete":
-		return messageDelete(args[1:], stdout, stderr, getenv)
-	default:
-		writef(stderr, "unknown message command %q\n", args[0])
-		return 2
-	}
 }
 
 func messageList(args []string, stdout, stderr io.Writer, getenv func(string) string) int {

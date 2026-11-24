@@ -18,48 +18,13 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
-	"github.com/Impakta-io/inbai/internal/version"
 )
 
 const recoveryPasswordEnv = "INBAI_RECOVERY_PASSWORD"
 
+// run dispatches args through the command table in commands.go.
 func run(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 || args[0] == "version" {
-		writef(stdout, "%s\n", version.String(version.CLI))
-		return 0
-	}
-	switch args[0] {
-	case "init":
-		return initCmd(args[1:], stdout, stderr, getenv)
-	case "login":
-		return loginCmd(args[1:], stdout, stderr, getenv)
-	case "domain":
-		return domainCmd(args[1:], stdout, stderr, getenv)
-	case "doctor":
-		return doctorCmd(args[1:], stdout, stderr)
-	case "inbox":
-		return inboxCmd(args[1:], stdout, stderr, getenv)
-	case "message":
-		return messageCmd(args[1:], stdout, stderr, getenv)
-	case "agent":
-		return agentCmd(args[1:], stdout, stderr, getenv)
-	case "audit":
-		return auditCmd(args[1:], stdout, stderr, getenv)
-	case "retention":
-		return retentionCmd(args[1:], stdout, stderr, getenv)
-	case "mcp":
-		return mcpCmd(args[1:], os.Stdin, stdout, stderr, getenv)
-	case "backup":
-		return backupCmd(args[1:], stdout, stderr, getenv)
-	case "restore":
-		return restoreCmd(args[1:], stdout, stderr, getenv)
-	case "-h", "--help", "help":
-		writef(stdout, "usage: inbai [version|init|login|domain|doctor|inbox|message|agent|audit|retention|mcp|backup|restore]\n")
-		return 0
-	default:
-		writef(stderr, "unknown command %q\n", args[0])
-		return 2
-	}
+	return program.Main(args, stdout, stderr, getenv)
 }
 
 func writef(w io.Writer, format string, args ...any) {

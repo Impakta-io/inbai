@@ -16,16 +16,15 @@ import (
 	"testing"
 
 	"github.com/Impakta-io/inbai/internal/config"
-	"github.com/Impakta-io/inbai/internal/version"
 )
 
-func TestRunPrintsVersionWithoutArguments(t *testing.T) {
+func TestRunPrintsHelpWithoutArguments(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(nil, &stdout, &stderr, func(string) string { return "" })
 	if code != 0 {
 		t.Fatalf("exit %d stderr %s", code, stderr.String())
 	}
-	if stdout.String() != version.String(version.CLI)+"\n" {
+	if !strings.HasPrefix(stdout.String(), "Operator CLI for inbAI") {
 		t.Fatalf("stdout %q", stdout.String())
 	}
 }
