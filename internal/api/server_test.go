@@ -76,7 +76,7 @@ func TestListDeleteAndDownload(t *testing.T) {
 }
 
 func TestReadSearchReplyAndDelete(t *testing.T) {
-	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body", Text: "body"}}}
+	mail := &fakeMail{messages: []mailbackend.Message{{ID: "m", Subject: "hello", Preview: "body", Text: "body", From: "bob@example.com"}}}
 	srv := httptest.NewServer((&Server{Service: service.New(mail), Token: "operator-token", Domain: "example.com"}).Handler())
 	defer srv.Close()
 	res := call(t, srv.URL, http.MethodGet, "/v1/inboxes/alice-id/messages/m", "operator-token", "", "")
@@ -232,6 +232,16 @@ type fakeMail struct {
 	last     mailbackend.Outbound
 	listed   bool
 	jmap     string
+	senders  map[string][]string
+}
+
+// SenderAddresses returns senders[account], or the account id without "-id" at example.com,
+// so alice-id sends as alice@example.com.
+func (f *fakeMail) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	if list, ok := f.senders[account]; ok {
+		return list, nil
+	}
+	return []string{strings.TrimSuffix(account, "-id") + "@example.com"}, nil
 }
 
 func (f *fakeMail) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {

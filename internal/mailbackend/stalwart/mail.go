@@ -47,6 +47,10 @@ func (m Mail) Deliver(ctx context.Context, msg mailbackend.Outbound) error {
 	})
 }
 
+func (m Mail) SenderAddresses(ctx context.Context, accountID string) ([]string, error) {
+	return SenderAddresses(ctx, m.Client, accountID)
+}
+
 func (m Mail) List(ctx context.Context, accountID string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	raw, next, err := queryMessages(ctx, m.Client, accountID, nil, page, false)
 	if err != nil {
@@ -130,6 +134,7 @@ func toMessage(message Message) mailbackend.Message {
 		References:     message.References,
 		ReceivedAt:     message.ReceivedAt,
 		From:           message.From,
+		ReplyTo:        message.ReplyTo,
 		Attachments:    files,
 		Authentication: message.Authentication,
 	}

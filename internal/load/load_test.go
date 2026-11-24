@@ -19,7 +19,7 @@ import (
 )
 
 func TestRunMeasuresASmallProfile(t *testing.T) {
-	box := &mailbox{boxes: map[string][]mailbackend.Message{}, state: map[string]int{}}
+	box := &mailbox{boxes: map[string][]mailbackend.Message{}, state: map[string]int{}, local: map[string]string{}}
 	svc := service.New(box)
 	svc.SetSyncLimit(1)
 	svc.SetQuota(1000, 1000)
@@ -67,16 +67,25 @@ type mailbox struct {
 	n     int
 	boxes map[string][]mailbackend.Message
 	state map[string]int
+	local map[string]string
 }
 
-func (m *mailbox) CreateInbox(context.Context, mailbackend.InboxSpec) (string, error) {
+func (m *mailbox) CreateInbox(_ context.Context, spec mailbackend.InboxSpec) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.n++
 	id := "id-" + strconv.Itoa(m.n)
 	m.boxes[id] = nil
 	m.state[id] = 0
+	m.local[id] = spec.Local
 	return id, nil
+}
+
+// SenderAddresses returns the address the API reported for the inbox, local@example.com.
+func (m *mailbox) SenderAddresses(_ context.Context, id string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return []string{m.local[id] + "@example.com"}, nil
 }
 
 func (m *mailbox) CreateInboxes(_ context.Context, specs []mailbackend.InboxSpec) ([]string, error) {

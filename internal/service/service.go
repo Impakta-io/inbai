@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"sync"
 	"time"
@@ -361,11 +362,18 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 
 // Deliver submits a message as the account. An operator may always send.
 // An agent needs a send grant for that account.
+// The sender is the account's own address or another address the mail server lets it send as.
+// See sender. That rule applies to an operator too.
 // idemKey is the Idempotency-Key. A repeat of a completed key does not send again and does not consume quota.
 func (s *Service) Deliver(ctx context.Context, caller Caller, msg mailbackend.Outbound, idemKey string) error {
 	if err := s.permit(ctx, caller, msg.AccountID, PermSend); err != nil {
 		return err
 	}
+	from, err := s.sender(ctx, msg.AccountID, msg.From)
+	if err != nil {
+		return err
+	}
+	msg.From = from
 	key := idempotencyKey(caller, msg.AccountID, idemKey)
 	if key != "" {
 		seen, err := s.alreadySent(ctx, key)
@@ -538,6 +546,7 @@ func (s *Service) Attachment(ctx context.Context, caller Caller, accountID, mess
 
 // Reply submits a message that references an existing one.
 // An agent needs a reply grant. The send quota still applies.
+// The reply goes to the original sender. See replyRecipient. The sender follows the same rule as Deliver.
 func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID string, msg mailbackend.Outbound, idemKey string) error {
 	if err := s.permit(ctx, caller, accountID, PermReply); err != nil {
 		return err
@@ -546,6 +555,16 @@ func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID
 	if err != nil {
 		return err
 	}
+	to, err := s.replyRecipient(ctx, caller, accountID, original, msg.To)
+	if err != nil {
+		return err
+	}
+	from, err := s.sender(ctx, accountID, msg.From)
+	if err != nil {
+		return err
+	}
+	msg.From = from
+	msg.To = to
 	msg.AccountID = accountID
 	if msg.Subject == "" {
 		msg.Subject = "Re: " + original.Subject
@@ -563,6 +582,97 @@ func (s *Service) Reply(ctx context.Context, caller Caller, accountID, messageID
 		}
 	}
 	return s.submit(ctx, key, msg)
+}
+
+// sender returns the address a message from the account is sent as.
+// An empty from is the account's own address, the first one the backend lists.
+// Any other from must be an address the backend lets the account send as, compared case-insensitively.
+// Anything else is ErrForbidden for every caller: the mail server would refuse it too.
+// A failed lookup is returned as is, and an empty one is ErrForbidden, so nothing is sent unchecked.
+func (s *Service) sender(ctx context.Context, accountID, from string) (string, error) {
+	addresses, err := s.mail.SenderAddresses(ctx, accountID)
+	if err != nil {
+		return "", err
+	}
+	if len(addresses) == 0 {
+		return "", fmt.Errorf("%w: inbox %s has no address it may send as", ErrForbidden, accountID)
+	}
+	if strings.TrimSpace(from) == "" {
+		return addresses[0], nil
+	}
+	want := firstAddress(from)
+	for _, address := range addresses {
+		if want != "" && strings.EqualFold(address, want) {
+			return address, nil
+		}
+	}
+	return "", fmt.Errorf("%w: from %q is not an address this inbox may send as; omit from to send as the inbox", ErrForbidden, from)
+}
+
+// replyRecipient returns where a reply to original goes: its first Reply-To address, else its From.
+// An empty to, or one equal to that address, needs only the reply grant the caller already passed.
+// A different to also needs send on the inbox.
+func (s *Service) replyRecipient(ctx context.Context, caller Caller, accountID string, original mailbackend.Message, to string) (string, error) {
+	recipient := firstAddress(original.ReplyTo)
+	if recipient == "" {
+		recipient = firstAddress(original.From)
+	}
+	if recipient == "" {
+		return "", fmt.Errorf("%w: the message has no From or Reply-To address to reply to", ErrInvalid)
+	}
+	if strings.TrimSpace(to) == "" || strings.EqualFold(firstAddress(to), recipient) {
+		return recipient, nil
+	}
+	ok, err := s.allowed(ctx, caller, accountID, PermSend)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: a reply goes to the original sender; replying to another address needs send on this inbox", ErrForbidden)
+	}
+	return to, nil
+}
+
+// firstAddress returns the first address in an address header value such as "Ada <ada@example.com>, bob@example.com".
+// It returns "" when the value holds no address.
+func firstAddress(header string) string {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return ""
+	}
+	if list, err := mail.ParseAddressList(header); err == nil && len(list) > 0 {
+		return list[0].Address
+	}
+	address := strings.TrimSpace(firstListItem(header))
+	if one, err := mail.ParseAddress(address); err == nil {
+		return one.Address
+	}
+	if start := strings.LastIndex(address, "<"); start >= 0 && strings.HasSuffix(address, ">") {
+		address = strings.TrimSpace(address[start+1 : len(address)-1])
+	}
+	if !strings.Contains(address, "@") || strings.ContainsAny(address, " \t\r\n<>,\"") {
+		return ""
+	}
+	return address
+}
+
+// firstListItem returns the text before the first comma that is not inside quotes or angle brackets.
+func firstListItem(header string) string {
+	quoted, angle := false, false
+	for i, r := range header {
+		switch {
+		case r == '"':
+			quoted = !quoted
+		case quoted:
+		case r == '<':
+			angle = true
+		case r == '>':
+			angle = false
+		case r == ',' && !angle:
+			return header[:i]
+		}
+	}
+	return header
 }
 
 func idempotencyKey(caller Caller, inbox, key string) string {

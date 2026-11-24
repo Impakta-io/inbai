@@ -151,6 +151,9 @@ func (eventMail) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]stri
 	return nil, nil
 }
 func (eventMail) Deliver(context.Context, mailbackend.Outbound) error { return nil }
+func (eventMail) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	return []string{account + "@example.com"}, nil
+}
 func (eventMail) List(context.Context, string, mailbackend.Page) ([]mailbackend.Message, string, error) {
 	return nil, "", nil
 }

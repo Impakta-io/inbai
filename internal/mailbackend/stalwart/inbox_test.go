@@ -36,7 +36,7 @@ func TestCreateInboxAndReadADeliveredMessage(t *testing.T) {
 			}
 			writeMethods(w, []any{[]any{"x:Account/set", map[string]any{"created": map[string]any{"a": map[string]any{"id": "alice-id"}}}, "a"}})
 		case "Identity/get":
-			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
+			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident", "email": "alice@example.com"}}}, "i"}})
 		case "Mailbox/get":
 			if args[0]["accountId"] != "alice-id" {
 				t.Errorf("mailbox account %v", args[0]["accountId"])
@@ -124,7 +124,7 @@ func TestDeliverFallsBackToInboxWhenSentMailboxIsMissing(t *testing.T) {
 		names, args := allCalls(t, r.Body)
 		switch names[0] {
 		case "Identity/get":
-			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
+			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident", "email": "alice@example.com"}}}, "i"}})
 		case "Mailbox/get":
 			writeMethods(w, []any{[]any{"Mailbox/get", map[string]any{"list": []any{
 				map[string]any{"id": "inbox-box", "role": "inbox"},
@@ -187,7 +187,7 @@ func deliverServer(t *testing.T, send []any, destroy map[string]any, destroyed *
 		names, args := allCalls(t, r.Body)
 		switch names[0] {
 		case "Identity/get":
-			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
+			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident", "email": "alice@example.com"}}}, "i"}})
 		case "Mailbox/get":
 			writeMethods(w, []any{[]any{"Mailbox/get", map[string]any{"list": []any{
 				map[string]any{"id": "sent-box", "role": "sent"},

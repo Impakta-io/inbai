@@ -99,6 +99,9 @@ func (b *box) CreateInboxes(context.Context, []mailbackend.InboxSpec) ([]string,
 	return nil, nil
 }
 func (b *box) Deliver(context.Context, mailbackend.Outbound) error { return nil }
+func (b *box) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	return []string{account + "@example.com"}, nil
+}
 func (b *box) List(_ context.Context, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
 	b.listed = true
 	return mailbackend.Slice(b.messages, func(m mailbackend.Message) string { return m.ID }, page)

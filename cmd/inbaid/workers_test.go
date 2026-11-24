@@ -35,6 +35,9 @@ func (s *stubWorkerMail) CreateInboxes(_ context.Context, specs []mailbackend.In
 	return ids, nil
 }
 func (s *stubWorkerMail) Deliver(context.Context, mailbackend.Outbound) error { return nil }
+func (s *stubWorkerMail) SenderAddresses(_ context.Context, account string) ([]string, error) {
+	return []string{account + "@one.test"}, nil
+}
 func (s *stubWorkerMail) List(context.Context, string, mailbackend.Page) ([]mailbackend.Message, string, error) {
 	return []mailbackend.Message{{ID: "old", ReceivedAt: time.Now().Add(-40 * 24 * time.Hour)}}, "", nil
 }
