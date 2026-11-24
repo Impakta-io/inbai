@@ -126,7 +126,12 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	if ephemeral {
 		writef(stderr, "%s\n", ephemeralKeyNotice)
 	}
-	mail := stalwart.Mail{Client: client, AuthservID: strings.TrimSpace(cfg.Hostname)}
+	mail := stalwart.Mail{
+		Client:     client,
+		AuthservID: strings.TrimSpace(cfg.Hostname),
+		DomainID:   cfg.DomainID,
+		RoleID:     cfg.InboxRoleID,
+	}
 	svc := service.New(mail)
 	reserveAccounts(svc, cfg)
 	if err := applySendLimits(svc, getenv); err != nil {
@@ -161,8 +166,6 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		Token:         token,
 		Issuer:        issuer,
 		Domain:        cfg.Domain,
-		DomainID:      cfg.DomainID,
-		RoleID:        cfg.InboxRoleID,
 		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
 		RetentionDays: cfg.RetentionDays,
 		Log:           stderr,

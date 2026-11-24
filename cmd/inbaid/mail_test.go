@@ -31,7 +31,7 @@ func TestServeReservesTheAccountsInitCreated(t *testing.T) {
 		}
 	}
 	for _, local := range []string{stalwart.OperatorAccountName, stalwart.ServiceAccountName} {
-		spec := mailbackend.InboxSpec{DomainID: "dom", RoleID: "role", Local: local}
+		spec := mailbackend.InboxSpec{Local: local}
 		if _, err := svc.CreateInbox(context.Background(), operator, spec, ""); !errors.Is(err, service.ErrConflict) {
 			t.Errorf("create %s err %v", local, err)
 		}

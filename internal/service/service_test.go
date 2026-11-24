@@ -5,8 +5,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +138,7 @@ func TestProvisionGrantCreatesAnInbox(t *testing.T) {
 		t.Fatalf("provision read err %v", err)
 	}
 	got, err := svc.Generate(context.Background(), Caller{Agent: "ada"}, GenerateRequest{
-		Prefix: "p", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 1, Wait: true,
+		Prefix: "p", Domain: "example.com", Count: 1, Wait: true,
 	}, "")
 	if err != nil || len(got.Inboxes) != 1 || got.Inboxes[0].Address != "p00000@example.com" {
 		t.Fatalf("generate %+v err %v", got, err)
@@ -222,19 +224,19 @@ func TestGenerateRequiresAnOperatorAndBatches(t *testing.T) {
 	mail := &fakeMail{}
 	svc := New(mail)
 	_, err := svc.Generate(context.Background(), Caller{Agent: "ada"}, GenerateRequest{
-		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+		Prefix: "u", Domain: "example.com", Count: 2, Wait: true,
 	}, "")
 	if !errors.Is(err, ErrForbidden) || len(mail.batches) != 0 {
 		t.Fatalf("err %v batches %v", err, mail.batches)
 	}
 	got, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
-		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+		Prefix: "u", Domain: "example.com", Count: 2, Wait: true,
 	}, "gen-1")
 	if err != nil || len(got.Inboxes) != 2 || got.Inboxes[0].Address != "u00000@example.com" {
 		t.Fatalf("generate %+v %v", got, err)
 	}
 	again, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
-		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2, Wait: true,
+		Prefix: "u", Domain: "example.com", Count: 2, Wait: true,
 	}, "gen-1")
 	if err != nil || again.Inboxes[0].ID != got.Inboxes[0].ID || len(mail.batches) != 1 {
 		t.Fatalf("replay %+v batches %v err %v", again, mail.batches, err)
@@ -248,7 +250,7 @@ func TestGenerateAboveTheLimitReturnsAJob(t *testing.T) {
 	svc := New(mail)
 	svc.SetSyncLimit(1)
 	got, err := svc.Generate(context.Background(), Caller{Operator: true}, GenerateRequest{
-		Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "u", Domain: "example.com", Count: 2,
 	}, "")
 	if err != nil || got.JobID == "" {
 		t.Fatalf("job %+v %v", got, err)
@@ -286,7 +288,7 @@ func TestOnlyTheStartingAgentOrAnOperatorReadsAJob(t *testing.T) {
 	svc.Allow("eve", "inbox-a", PermRead)
 
 	started, err := svc.Generate(ctx, Caller{Agent: "ada"}, GenerateRequest{
-		Prefix: "a", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "a", Domain: "example.com", Count: 2,
 	}, "")
 	if err != nil || started.JobID == "" {
 		t.Fatalf("agent job %+v %v", started, err)
@@ -294,7 +296,7 @@ func TestOnlyTheStartingAgentOrAnOperatorReadsAJob(t *testing.T) {
 	waitForJob(t, svc, started.JobID)
 	adaJob := started.JobID
 	started, err = svc.Generate(ctx, operator, GenerateRequest{
-		Prefix: "o", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 2,
+		Prefix: "o", Domain: "example.com", Count: 2,
 	}, "")
 	if err != nil || started.JobID == "" {
 		t.Fatalf("operator job %+v %v", started, err)
@@ -617,7 +619,7 @@ func TestReservedAccountsAreNotInboxes(t *testing.T) {
 func TestGenerateReportsAddressesThatExist(t *testing.T) {
 	mail := &fakeMail{taken: map[string]bool{"u00001": true}}
 	svc := New(mail)
-	req := GenerateRequest{Prefix: "u", Domain: "example.com", DomainID: "dom", RoleID: "role", Count: 3, Wait: true}
+	req := GenerateRequest{Prefix: "u", Domain: "example.com", Count: 3, Wait: true}
 	got, err := svc.Generate(context.Background(), Caller{Operator: true}, req, "")
 	if err != nil {
 		t.Fatal(err)
@@ -652,6 +654,54 @@ func TestGenerateReportsAddressesThatExist(t *testing.T) {
 	}
 	if job.Status != "done" || job.Created != 2 || len(job.Existing) != 1 || job.Existing[0] != "u00001@example.com" {
 		t.Fatalf("job %+v", job)
+	}
+}
+
+// specMail records every InboxSpec the service hands the backend.
+type specMail struct {
+	*fakeMail
+	specs []mailbackend.InboxSpec
+}
+
+func (m *specMail) CreateInbox(ctx context.Context, spec mailbackend.InboxSpec) (string, error) {
+	m.specs = append(m.specs, spec)
+	return m.fakeMail.CreateInbox(ctx, spec)
+}
+
+func (m *specMail) CreateInboxes(ctx context.Context, specs []mailbackend.InboxSpec) ([]string, error) {
+	m.specs = append(m.specs, specs...)
+	return m.fakeMail.CreateInboxes(ctx, specs)
+}
+
+func TestServiceHandsTheBackendOnlyTheLocalPartAndQuota(t *testing.T) {
+	ctx := context.Background()
+	mail := &specMail{fakeMail: &fakeMail{created: "alice-id"}}
+	svc := New(mail)
+	if _, err := svc.CreateInbox(ctx, operator, mailbackend.InboxSpec{Local: "alice"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Generate(ctx, operator, GenerateRequest{Prefix: "u", Domain: "example.com", Count: 2, Wait: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	// A job queued by an older server still names the domain and role ids. They are ignored.
+	var payload BulkPayload
+	if err := json.Unmarshal([]byte(`{"jobId":"j","prefix":"q","domain":"example.com","domainId":"dom","roleId":"role","count":1,"quotaBytes":7}`), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RunBulkJob(ctx, payload); err != nil {
+		t.Fatal(err)
+	}
+	want := []mailbackend.InboxSpec{
+		{Local: "alice", QuotaBytes: DefaultStorageQuotaBytes},
+		{Local: "u00000", QuotaBytes: DefaultStorageQuotaBytes},
+		{Local: "u00001", QuotaBytes: DefaultStorageQuotaBytes},
+		{Local: "q00000", QuotaBytes: 7},
+	}
+	if !reflect.DeepEqual(mail.specs, want) {
+		t.Fatalf("specs %+v, want %+v", mail.specs, want)
+	}
+	if _, err := svc.Generate(ctx, operator, GenerateRequest{Prefix: "v", Count: 1, Wait: true}, ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generate without a domain err = %v, want ErrInvalid", err)
 	}
 }
 

@@ -27,8 +27,6 @@ func TestAgentTokenCannotReadAnotherInbox(t *testing.T) {
 		Token:     "operator-token",
 		Issuer:    "http://127.0.0.1:8787",
 		Domain:    "example.com",
-		DomainID:  "dom",
-		RoleID:    "role",
 	}).Handler()
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
@@ -113,8 +111,6 @@ func TestAgentTokenCannotReadAnotherCallersJob(t *testing.T) {
 		Token:     "operator-token",
 		Issuer:    "http://127.0.0.1:8787",
 		Domain:    "example.com",
-		DomainID:  "dom",
-		RoleID:    "role",
 	}).Handler())
 	defer srv.Close()
 

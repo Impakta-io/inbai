@@ -132,6 +132,59 @@ func TestCreateInboxesFailsOnAnotherRefusal(t *testing.T) {
 	}
 }
 
+func TestMailCreatesInboxesInItsDomainAndRole(t *testing.T) {
+	var accounts []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		names, args := allCalls(t, r.Body)
+		if len(names) != 1 || names[0] != "x:Account/set" {
+			t.Errorf("methods %v", names)
+		}
+		create := args[0]["create"].(map[string]any)
+		made := map[string]any{}
+		for key, account := range create {
+			accounts = append(accounts, account.(map[string]any))
+			made[key] = map[string]any{"id": "id-" + key}
+		}
+		call := "b"
+		if _, single := create["a"]; single {
+			call = "a"
+		}
+		writeMethods(w, []any{[]any{"x:Account/set", map[string]any{"created": made}, call}})
+	}))
+	defer srv.Close()
+	mail := Mail{Client: &Client{BaseURL: srv.URL, APIKey: "key"}, DomainID: "dom", RoleID: "inbox-role"}
+	ctx := context.Background()
+	if _, err := mail.CreateInbox(ctx, mailbackend.InboxSpec{Local: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mail.CreateInboxes(ctx, []mailbackend.InboxSpec{{Local: "u00000"}, {Local: "u00001"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 3 {
+		t.Fatalf("accounts %v", accounts)
+	}
+	for _, account := range accounts {
+		roles := account["roles"].(map[string]any)["roleIds"].(map[string]any)
+		if account["domainId"] != "dom" || len(roles) != 1 || roles["inbox-role"] != true {
+			t.Errorf("account %v", account)
+		}
+	}
+	if domain, role := mail.InboxPlacement(); domain != "dom" || role != "inbox-role" {
+		t.Errorf("placement %s %s", domain, role)
+	}
+
+	unplaced := Mail{Client: &Client{BaseURL: srv.URL, APIKey: "key"}}
+	if _, err := unplaced.CreateInbox(ctx, mailbackend.InboxSpec{Local: "bob"}); err == nil {
+		t.Error("create without a domain and role succeeded")
+	}
+	if _, err := unplaced.CreateInboxes(ctx, []mailbackend.InboxSpec{{Local: "bob"}}); err == nil {
+		t.Error("bulk create without a domain and role succeeded")
+	}
+	if len(accounts) != 3 {
+		t.Errorf("Stalwart called without a domain and role: %v", accounts)
+	}
+}
+
 func ints(values []int) []string {
 	out := make([]string, len(values))
 	for i, value := range values {

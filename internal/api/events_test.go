@@ -21,7 +21,7 @@ func TestIngestHintFeedsTheCursor(t *testing.T) {
 	svc := service.New(mail)
 	svc.SetFeed(events.New(&store.Memory{}))
 	srv := httptest.NewServer((&Server{
-		Service: svc, Token: "operator-token", Domain: "example.com", DomainID: "dom", RoleID: "role", IngestSecret: "hint",
+		Service: svc, Token: "operator-token", Domain: "example.com", IngestSecret: "hint",
 	}).Handler())
 	defer srv.Close()
 

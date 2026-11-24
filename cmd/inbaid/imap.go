@@ -98,8 +98,6 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		Token:         getenv("INBAI_OPERATOR_TOKEN"),
 		Issuer:        "http://" + addr,
 		Domain:        domain,
-		DomainID:      "external",
-		RoleID:        "external",
 		IngestSecret:  getenv("INBAI_INGEST_SECRET"),
 		RetentionDays: retentionDays,
 		Log:           stderr,

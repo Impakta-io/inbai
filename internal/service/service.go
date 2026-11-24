@@ -377,7 +377,7 @@ func (s *Service) CreateInbox(ctx context.Context, caller Caller, spec mailbacke
 	if spec.QuotaBytes < 0 {
 		return "", fmt.Errorf("%w: quotaBytes must be zero or greater", ErrInvalid)
 	}
-	hash := createHash(spec)
+	hash := createHash(s.mail, spec)
 	if spec.QuotaBytes == 0 && s.storageQuota > 0 {
 		spec.QuotaBytes = s.storageQuota
 	}
