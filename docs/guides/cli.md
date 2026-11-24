@@ -36,7 +36,8 @@ In Docker mode, a rerun also checks the saved API key against Stalwart. If Stalw
 With an operator token:
 
 ```sh
-export INBAI_OPERATOR_TOKEN='the-operator-token'
+# At least 32 characters. Use the token `inbaid` runs with, or generate one:
+export INBAI_OPERATOR_TOKEN="$(openssl rand -hex 32)"
 inbai login --url http://127.0.0.1:8787
 ```
 

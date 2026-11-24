@@ -96,7 +96,7 @@ func TestLoginWithOAuthAndSubsequentCommand(t *testing.T) {
 func TestLoginWithOperatorToken(t *testing.T) {
 	var seenAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer op-tok" {
+		if r.Header.Get("Authorization") != "Bearer op-tok-0123456789abcdef0123456789abcdef" {
 			http.Error(w, `{"title":"Unauthorized","status":401}`, http.StatusUnauthorized)
 			return
 		}
@@ -116,7 +116,7 @@ func TestLoginWithOperatorToken(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	env := func(key string) string {
 		if key == "INBAI_OPERATOR_TOKEN" {
-			return "op-tok"
+			return "op-tok-0123456789abcdef0123456789abcdef"
 		}
 		return ""
 	}
@@ -124,7 +124,7 @@ func TestLoginWithOperatorToken(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("login %d: %s", code, stderr.String())
 	}
-	if strings.Contains(stdout.String(), "op-tok") {
+	if strings.Contains(stdout.String(), "op-tok-0123456789abcdef0123456789abcdef") {
 		t.Fatalf("login output leaked token: %s", stdout.String())
 	}
 
@@ -135,8 +135,8 @@ func TestLoginWithOperatorToken(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("inbox list %d: %s", code, stderr.String())
 	}
-	if seenAuth != "Bearer op-tok" {
-		t.Fatalf("auth = %q, want Bearer op-tok", seenAuth)
+	if seenAuth != "Bearer op-tok-0123456789abcdef0123456789abcdef" {
+		t.Fatalf("auth = %q, want Bearer op-tok-0123456789abcdef0123456789abcdef", seenAuth)
 	}
 
 	// Invalid token is rejected and not saved.
@@ -145,7 +145,7 @@ func TestLoginWithOperatorToken(t *testing.T) {
 	stderr.Reset()
 	code = run([]string{"login", "--url", srv.URL, "--config", badCfg}, &stdout, &stderr, func(key string) string {
 		if key == "INBAI_OPERATOR_TOKEN" {
-			return "wrong"
+			return "wrong-0123456789abcdef0123456789abcdef"
 		}
 		return ""
 	})
@@ -237,5 +237,31 @@ func TestLoginKeepsOperatorToken(t *testing.T) {
 	}
 	if seenAuth != "Bearer server-token" {
 		t.Fatalf("auth after clear = %q, want Bearer server-token", seenAuth)
+	}
+}
+
+func TestLoginRefusesAShortOperatorToken(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"days":30,"inbox":"","override":false}`))
+	}))
+	defer srv.Close()
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"login", "--url", srv.URL, "--config", cfgPath}, &stdout, &stderr, func(key string) string {
+		if key == "INBAI_OPERATOR_TOKEN" {
+			return "short"
+		}
+		return ""
+	})
+	if code != 2 || !strings.Contains(stderr.String(), "minimum is 32") {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+	if requests != 0 {
+		t.Fatalf("a refused token reached the server")
+	}
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Fatalf("a refused token was written to the config")
 	}
 }

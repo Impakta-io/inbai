@@ -66,7 +66,7 @@ func TestIMAPRetentionRejectsABadValue(t *testing.T) {
 		code := run([]string{"serve"}, &stdout, &stderr, func(key string) string {
 			switch key {
 			case "INBAI_OPERATOR_TOKEN":
-				return "token"
+				return "0123456789abcdef0123456789abcdef0123"
 			case "INBAI_MAIL":
 				return "imap"
 			case "INBAI_DOMAIN":
@@ -98,7 +98,7 @@ func startIMAPServe(t *testing.T, imapAddr, retention string) string {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	env := map[string]string{
-		"INBAI_OPERATOR_TOKEN": "token",
+		"INBAI_OPERATOR_TOKEN": "0123456789abcdef0123456789abcdef0123",
 		"INBAI_MAIL":           "imap",
 		"INBAI_DOMAIN":         "example.com",
 		"INBAI_IMAP_ADDRESS":   imapAddr,
@@ -128,7 +128,7 @@ func call(t *testing.T, method, url, body string, out any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef0123")
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

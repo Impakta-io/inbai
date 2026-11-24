@@ -54,8 +54,13 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		return 2
 	}
 	if getenv != nil && getenv("INBAI_MAIL") == "imap" {
-		if strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN")) == "" {
+		token := strings.TrimSpace(getenv("INBAI_OPERATOR_TOKEN"))
+		if token == "" {
 			writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
+			return 2
+		}
+		if err := config.CheckOperatorToken(token); err != nil {
+			writef(stderr, "%s\n", err)
 			return 2
 		}
 		return serveIMAP(*addr, stdout, stderr, getenv)
@@ -69,6 +74,14 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	token := resolveToken(cfg, getenv)
 	if token == "" {
 		writef(stderr, "INBAI_OPERATOR_TOKEN is required\n")
+		return 2
+	}
+	if err := config.CheckOperatorToken(token); err != nil {
+		writef(stderr, "%s\n", err)
+		return 2
+	}
+	if err := config.CheckSigningKey([]byte(getenv("INBAI_SIGNING_KEY"))); err != nil {
+		writef(stderr, "%s\n", err)
 		return 2
 	}
 	if cfgErr != nil {
@@ -104,14 +117,14 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	signingKey, showKey, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
+	signingKey, ephemeral, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
 	cancel()
 	if err != nil {
 		writef(stderr, "signing key: %s\n", err)
 		return 1
 	}
-	if showKey {
-		writef(stdout, "Signing key, shown once: %x\n", signingKey)
+	if ephemeral {
+		writef(stderr, "%s\n", ephemeralKeyNotice)
 	}
 	svc := service.New(stalwart.Mail{Client: client})
 	if err := applySendLimits(svc, getenv); err != nil {

@@ -9,7 +9,8 @@ The supported deployment is one Linux host running `inbaid`, PostgreSQL, and Sta
 `inbaid serve` must already be running. The tool provisions addresses, sends one extra probe message, then lists and reads.
 
 ```sh
-export INBAI_OPERATOR_TOKEN='the-operator-token'
+# At least 32 characters. Generate one with openssl, or use the token `inbaid` runs with.
+export INBAI_OPERATOR_TOKEN="$(openssl rand -hex 32)"
 go run ./tools/load -url http://127.0.0.1:8787 -inboxes 10 -messages 1 -concurrency 4
 ```
 

@@ -15,7 +15,8 @@ This backend is for a mail server that already has the mailboxes. It does not cr
 Keep that file mode `0600`.
 
 ```sh
-export INBAI_OPERATOR_TOKEN='the-operator-token'
+# At least 32 characters
+export INBAI_OPERATOR_TOKEN="$(openssl rand -hex 32)"
 export INBAI_MAIL=imap
 export INBAI_DOMAIN=example.com
 export INBAI_IMAP_ADDRESS=mail.example.com:993

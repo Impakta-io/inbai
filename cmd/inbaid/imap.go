@@ -12,6 +12,7 @@ import (
 
 	"github.com/Impakta-io/inbai/internal/api"
 	"github.com/Impakta-io/inbai/internal/auth"
+	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/events"
 	"github.com/Impakta-io/inbai/internal/mailbackend/imap"
 	"github.com/Impakta-io/inbai/internal/service"
@@ -42,6 +43,10 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		}
 		return 1
 	}
+	if err := config.CheckSigningKey([]byte(getenv("INBAI_SIGNING_KEY"))); err != nil {
+		writef(stderr, "%s\n", err)
+		return 2
+	}
 	var log *store.Postgres
 	if dsn := getenv("INBAI_DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -53,14 +58,14 @@ func serveIMAP(addr string, stdout, stderr io.Writer, getenv func(string) string
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	signingKey, showKey, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
+	signingKey, ephemeral, err := resolveSigningKey(ctx, log, []byte(getenv("INBAI_SIGNING_KEY")))
 	cancel()
 	if err != nil {
 		writef(stderr, "signing key: %s\n", err)
 		return 1
 	}
-	if showKey {
-		writef(stdout, "Signing key, shown once: %x\n", signingKey)
+	if ephemeral {
+		writef(stderr, "%s\n", ephemeralKeyNotice)
 	}
 	svc := service.New(backend)
 	if err := applySendLimits(svc, getenv); err != nil {

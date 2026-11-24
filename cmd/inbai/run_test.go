@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Impakta-io/inbai/internal/config"
 	"github.com/Impakta-io/inbai/internal/version"
 )
 
@@ -110,7 +111,7 @@ func TestInitWritesConfigAndPrintsRetention(t *testing.T) {
 		t.Fatalf("config %s", raw)
 	}
 	opToken, _ := cfg["operatorToken"].(string)
-	if !strings.HasPrefix(opToken, "inb_") || len(opToken) < 20 {
+	if !strings.HasPrefix(opToken, "inb_") || config.CheckOperatorToken(opToken) != nil {
 		t.Fatalf("operatorToken %q", opToken)
 	}
 	if runtime.GOOS != "windows" {
@@ -191,4 +192,40 @@ func writeInit(w http.ResponseWriter, name, id string, payload any) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"methodResponses": []any{[]any{name, payload, id}},
 	})
+}
+
+func TestInitRefusesAShortOperatorToken(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"init", "--url", srv.URL, "--domain", "example.com", "--config", path}, &stdout, &stderr, func(key string) string {
+		switch key {
+		case "INBAI_RECOVERY_PASSWORD":
+			return "recovery-secret"
+		case "INBAI_OPERATOR_TOKEN":
+			return "short"
+		}
+		return ""
+	})
+	if code != 2 || !strings.Contains(stderr.String(), "minimum is 32") {
+		t.Fatalf("exit %d stderr %s", code, stderr.String())
+	}
+	if requests != 0 {
+		t.Fatalf("init changed Stalwart before refusing the token")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a refused token was written to the config")
+	}
+}
+
+func TestGeneratedOperatorTokenMeetsTheServerMinimum(t *testing.T) {
+	token, err := generateOperatorToken()
+	if err != nil || config.CheckOperatorToken(token) != nil {
+		t.Fatalf("token %q err %v", token, err)
+	}
 }

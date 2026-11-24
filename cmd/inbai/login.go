@@ -110,6 +110,10 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	}
 
 	if operatorToken != "" {
+		if err := config.CheckOperatorToken(operatorToken); err != nil {
+			writef(stderr, "login: %s\n", err)
+			return 2
+		}
 		if _, err := (apiClient{base: base, token: operatorToken}).retention(ctx, ""); err != nil {
 			writef(stderr, "login: %s\n", err)
 			return 1

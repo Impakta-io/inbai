@@ -130,7 +130,7 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 	if err := db.SaveAllowlist(ctx, "inbox-a", []string{"example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
+	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key-0123456789abcdef0123456789")); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := db.Enqueue(ctx, "cursor.sweep", "singleton", []byte(`{}`), time.Now().UTC().Add(time.Hour)); err != nil {
@@ -208,7 +208,7 @@ func TestPostgresBackupRoundTrip(t *testing.T) {
 		t.Fatalf("allowlist %+v ok %v err %v", senders, ok, err)
 	}
 	key, err := db.AdoptSigningKey(ctx, nil)
-	if err != nil || !bytes.Equal(key, []byte("signing-key")) {
+	if err != nil || !bytes.Equal(key, []byte("signing-key-0123456789abcdef0123456789")) {
 		t.Fatalf("signing key %q err %v", key, err)
 	}
 	claimed, ok, err := db.ClaimJob(ctx, time.Now().UTC().Add(2*time.Hour), time.Minute)

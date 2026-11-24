@@ -101,7 +101,7 @@ func TestExistingRowsGainTheWorkspace(t *testing.T) {
 	if err := db.SaveAllowlist(ctx, "inbox-a", []string{"example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key")); err != nil {
+	if _, err := db.AdoptSigningKey(ctx, []byte("signing-key-0123456789abcdef0123456789")); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Suppress(ctx, "bad@example.com", "bounce"); err != nil {
