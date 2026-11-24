@@ -32,7 +32,7 @@ func inboxGenerate(args []string, stdout, stderr io.Writer, getenv func(string) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	var last int
-	made, err := client.generate(ctx, *prefix, *count, func(done, total int) {
+	res, err := client.generate(ctx, *prefix, *count, func(done, total int) {
 		if *asJSON || done == last {
 			return
 		}
@@ -46,17 +46,28 @@ func inboxGenerate(args []string, stdout, stderr io.Writer, getenv func(string) 
 	if cfg.Inboxes == nil {
 		cfg.Inboxes = map[string]string{}
 	}
-	for _, inbox := range made {
+	for _, inbox := range res.Inboxes {
 		cfg.Inboxes[inbox.Address] = inbox.ID
 	}
 	if err := writeConfig(path, cfg); err != nil {
 		writef(stderr, "write config: %s\n", err)
 		return 1
 	}
+	existing := res.Existing
+	if existing == nil {
+		existing = []string{}
+	}
 	if *asJSON {
-		emit(stdout, true, "", map[string]any{"inboxes": made})
+		emit(stdout, true, "", map[string]any{"inboxes": res.Inboxes, "existing": existing})
 		return 0
 	}
-	writef(stdout, "Created %d addresses with prefix %s.\n", len(made), strings.ToLower(*prefix))
+	writef(stdout, "Created %d addresses with prefix %s.\n", len(res.Inboxes), strings.ToLower(*prefix))
+	if n := len(existing); n > 0 {
+		if n <= 10 {
+			writef(stdout, "Skipped %d that already exist: %s.\n", n, strings.Join(existing, ", "))
+		} else {
+			writef(stdout, "Skipped %d that already exist.\n", n)
+		}
+	}
 	return 0
 }

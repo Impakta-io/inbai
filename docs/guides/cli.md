@@ -85,7 +85,7 @@ That creates `alice@example.com` when the config domain is `example.com`.
 
 `inbai inbox list` prints each address and account id. `--limit` sets the page size and `--cursor` asks for the next page. A line that starts with `next` is the cursor to pass back. `--json` prints the API response. `inbai inbox delete alice@example.com` removes that account and the address from the config file. Both commands use the operator token.
 
-`inbai inbox generate --count 10` asks `inbaid` to create `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. When the server returns a job, the command polls it and prints progress. It records every address in the config file.
+`inbai inbox generate --count 10` asks `inbaid` to create `u00000@example.com` through `u00009@example.com`. `--prefix` changes the local-part prefix. When the server returns a job, the command polls it and prints progress. It records every address it created in the config file, and reports any it skipped because they already exist (`--json` lists them under `existing`). If every address already exists, the command fails.
 
 `inbai inbox allowlist set <inbox-id> ada@example.com example.com` stores a sender allowlist. An entry is one address or one domain. The list holds at most 100 entries. `inbai inbox allowlist get <inbox-id>` prints it. `inbai inbox allowlist clear <inbox-id>` removes it. An operator can do this, and so can an agent with `manage` on that inbox. The list does not stop mail from arriving. A later message read reports whether the sender matched.
 
