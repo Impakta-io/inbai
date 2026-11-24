@@ -16,3 +16,4 @@ Records are accepted, proposed, or replaced. The process is in [proposals.md](..
 - [0008 Stalwart data store on PostgreSQL](0008-stalwart-postgresql-store.md)
 - [0009 One impersonating service account](0009-impersonating-service-account.md)
 - [0010 Event cursors, with webhooks as hints](0010-event-cursors.md)
+- [0011 Static operator token](0011-static-operator-token.md)

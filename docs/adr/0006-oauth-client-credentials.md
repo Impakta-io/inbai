@@ -2,7 +2,7 @@ Status: current
 
 # ADR 0006: OAuth 2.1 client credentials
 
-- Status: accepted
+- Status: accepted, replaced in part by [0011](0011-static-operator-token.md)
 - Date: 2026-11-23
 
 ## Context
