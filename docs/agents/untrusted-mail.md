@@ -6,7 +6,11 @@ Mail from outside the system is untrusted input to a language model. The API ret
 
 ## Authentication results
 
-`authentication` on a message from `GET /v1/inboxes/{id}/messages/{messageId}` has `spf`, `dkim`, and `dmarc` when the message's `Authentication-Results` header carries those methods. Each value is the result word, such as `pass`, `fail`, `softfail`, `neutral`, `none`, `temperror`, or `permerror`. `spam` is `spam` when the message is marked junk. A field that was not recorded is absent. An empty `authentication` object means none of these were recorded.
+`authentication` on a message from `GET /v1/inboxes/{id}/messages/{messageId}` has `spf`, `dkim`, and `dmarc` from one `Authentication-Results` header: the top-most one whose authserv-id, the name before the first `;`, equals our mail server's host name. The comparison ignores case and is otherwise exact, so `mail.example.com.evil` does not match `mail.example.com`. Every other `Authentication-Results` header is ignored, because any server on the path, and the sender, can add one.
+
+In Stalwart mode the host name is `hostname` in `config.json`, which `inbai init --hostname` sets (default `mail.<domain>`). In IMAP mode it is `INBAI_AUTHSERV_ID`. When no header matches, when the host name is not set, or when a header above ours is malformed, `spf`, `dkim`, and `dmarc` are absent.
+
+Each value is the result word, such as `pass`, `fail`, `softfail`, `neutral`, `none`, `temperror`, or `permerror`. Comments in parentheses, `reason=`, and properties such as `header.d=` are not part of it. When the header has more than one result for a method, such as one per DKIM signature, the value is `pass` if any of them passed and the first result otherwise. `spam` is `spam` when the message is marked junk. A field that was not recorded is absent. An empty `authentication` object means none of these were recorded.
 
 MCP tool results that return messages include the same object. The external-content marker is still there.
 

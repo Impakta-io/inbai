@@ -126,7 +126,8 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	if ephemeral {
 		writef(stderr, "%s\n", ephemeralKeyNotice)
 	}
-	svc := service.New(stalwart.Mail{Client: client})
+	mail := stalwart.Mail{Client: client, AuthservID: strings.TrimSpace(cfg.Hostname)}
+	svc := service.New(mail)
 	if err := applySendLimits(svc, getenv); err != nil {
 		writef(stderr, "send limits: %s\n", err)
 		return 2
@@ -144,7 +145,7 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 			return 2
 		}
 		go feed.RunWebhooks(context.Background(), nil)
-		go newWorker(log, svc, feed, stalwart.Mail{Client: client}, cfg.RetentionDays, stderr).Run(context.Background())
+		go newWorker(log, svc, feed, mail, cfg.RetentionDays, stderr).Run(context.Background())
 	} else {
 		go retainLoop(svc, cfg.RetentionDays, stderr)
 	}

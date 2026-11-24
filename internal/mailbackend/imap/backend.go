@@ -35,6 +35,10 @@ type Config struct {
 	SMTP     string
 	TLS      bool
 	Accounts string
+	// AuthservID is the authserv-id the mail server writes in the
+	// Authentication-Results fields it adds, usually its hostname. Only that
+	// server's results are reported. When it is empty, none are.
+	AuthservID string
 }
 
 // Backend reads and submits mail for accounts named in the account file.
@@ -44,6 +48,8 @@ type Backend struct {
 	tls      bool
 	accounts map[string]Login
 	dial     func(context.Context, string, string) (net.Conn, error)
+
+	authservID string
 }
 
 // Open reads the account file and returns a backend. It does not connect yet.
@@ -62,7 +68,7 @@ func Open(cfg Config) (*Backend, error) {
 	if len(accounts) == 0 {
 		return nil, errors.New("imap: account file is empty")
 	}
-	return &Backend{imap: cfg.IMAP, smtp: cfg.SMTP, tls: cfg.TLS, accounts: accounts}, nil
+	return &Backend{imap: cfg.IMAP, smtp: cfg.SMTP, tls: cfg.TLS, accounts: accounts, authservID: strings.TrimSpace(cfg.AuthservID)}, nil
 }
 
 // CreateInbox reports that this backend cannot provision a mailbox.
@@ -212,7 +218,7 @@ func (b *Backend) Get(ctx context.Context, account, messageID string) (mailbacke
 			Text:           text,
 			From:           headerField(header, "From"),
 			ReplyTo:        headerField(header, "Reply-To"),
-			Authentication: mailbackend.AuthenticationOf(header, isJunk(flagsOf(auth.text))),
+			Authentication: mailbackend.AuthenticationOf(headerFields(header, "Authentication-Results"), b.authservID, isJunk(flagsOf(auth.text))),
 		}
 		return nil
 	})
@@ -409,6 +415,29 @@ func headerField(header, name string) string {
 		}
 	}
 	return ""
+}
+
+// headerFields returns the value of every name field in header, in header
+// order, with folded lines joined.
+func headerFields(header, name string) []string {
+	prefix := strings.ToLower(name) + ":"
+	var out []string
+	current := -1
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line != "" && (line[0] == ' ' || line[0] == '\t') {
+			if current >= 0 {
+				out[current] += " " + strings.TrimSpace(line)
+			}
+			continue
+		}
+		current = -1
+		if strings.HasPrefix(strings.ToLower(line), prefix) {
+			out = append(out, strings.TrimSpace(line[len(prefix):]))
+			current = len(out) - 1
+		}
+	}
+	return out
 }
 
 func (b *Backend) login(account string) (Login, error) {

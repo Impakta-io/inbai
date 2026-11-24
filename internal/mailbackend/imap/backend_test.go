@@ -106,7 +106,7 @@ func TestListGetDeleteAndChanges(t *testing.T) {
 			_ = write.Flush()
 		}
 	})
-	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}}
+	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}, authservID: "mail.example.com"}
 	ctx := context.Background()
 	messages, _, err := backend.List(ctx, "ada", mailbackend.Page{})
 	if err != nil || len(messages) != 1 || messages[0].ID != "8" || messages[0].Subject != "Hello" {
@@ -220,6 +220,114 @@ func TestJunkKeywords(t *testing.T) {
 	}
 	if isJunk(flagsOf(`* 1 FETCH (UID 8 FLAGS () BODY[TEXT] {5}`)) {
 		t.Fatal("empty flags were junk")
+	}
+}
+
+// getWithHeader serves one Get whose header fields are header and returns
+// what the backend reports.
+func getWithHeader(t *testing.T, authservID, header string) mailbackend.Authentication {
+	t.Helper()
+	addr := listen(t, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		write := bufio.NewWriter(conn)
+		read := bufio.NewReader(conn)
+		say(write, "* OK ready\r\n")
+		_ = write.Flush()
+		var state connState
+		for {
+			line, err := read.ReadString('\n')
+			if err != nil {
+				return
+			}
+			tag, cmd, _ := strings.Cut(strings.TrimRight(line, "\r\n"), " ")
+			if refusal := state.step(cmd); refusal != "" {
+				say(write, "%s BAD %s\r\n", tag, refusal)
+				_ = write.Flush()
+				continue
+			}
+			switch {
+			case strings.HasPrefix(cmd, "LOGIN"), strings.HasPrefix(cmd, "SELECT"):
+				say(write, "%s OK\r\n", tag)
+			case strings.Contains(cmd, "AUTHENTICATION-RESULTS"):
+				say(write, "* 1 FETCH (UID 8 FLAGS () BODY[HEADER.FIELDS (AUTHENTICATION-RESULTS FROM REPLY-TO)] {%d}\r\n%s)\r\n%s OK\r\n", len(header), header, tag)
+			case strings.HasPrefix(cmd, "UID FETCH"):
+				say(write, "* 1 FETCH (UID 8 BODY[TEXT] {4}\r\nbody)\r\n%s OK\r\n", tag)
+			case strings.HasPrefix(cmd, "LOGOUT"):
+				say(write, "* BYE\r\n%s OK\r\n", tag)
+				_ = write.Flush()
+				return
+			default:
+				say(write, "%s BAD %s\r\n", tag, cmd)
+			}
+			_ = write.Flush()
+		}
+	})
+	backend := &Backend{imap: addr, accounts: map[string]Login{"ada": {User: "ada@example.com", Password: "secret"}}, authservID: authservID}
+	message, err := backend.Get(context.Background(), "ada", "8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message.Authentication
+}
+
+func TestGetReportsOnlyOurServersAuthenticationResults(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		want   mailbackend.Authentication
+	}{
+		{
+			"forged below ours",
+			"Authentication-Results: mail.example.com; spf=fail smtp.mailfrom=bank.example;\r\n" +
+				"\tdkim=fail header.d=bank.example; dmarc=fail header.from=bank.example\r\n" +
+				"From: Bank <help@bank.example>\r\n" +
+				"Authentication-Results: mail.example.com; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
+			mailbackend.Authentication{SPF: "fail", DKIM: "fail", DMARC: "fail"},
+		},
+		{
+			"a method ours did not record",
+			"Authentication-Results: mail.example.com; spf=fail\r\n" +
+				"Authentication-Results: mx.example; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
+			mailbackend.Authentication{SPF: "fail"},
+		},
+		{
+			"forged only",
+			"Authentication-Results: mx.example; spf=pass; dkim=pass; dmarc=pass\r\n" +
+				"authentication-results: mail.example.com.evil; spf=pass; dkim=pass; dmarc=pass\r\n\r\n",
+			mailbackend.Authentication{},
+		},
+		{
+			"comments and reasons",
+			"From: Ada <ada@example.com>\r\n" +
+				"AUTHENTICATION-RESULTS: Mail.Example.Com (stalwart);\r\n" +
+				" spf=none (dkim=pass) reason=\"dmarc=pass\";\r\n" +
+				" dkim=fail header.d=a.example; dkim=pass header.d=b.example\r\n\r\n",
+			mailbackend.Authentication{SPF: "none", DKIM: "pass"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := getWithHeader(t, "mail.example.com", tc.header); got != tc.want {
+				t.Fatalf("authentication %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	if got := getWithHeader(t, "", "Authentication-Results: mail.example.com; spf=pass\r\n\r\n"); got != (mailbackend.Authentication{}) {
+		t.Fatalf("no authserv-id: %+v", got)
+	}
+}
+
+func TestOpenReadsTheAuthservID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	if err := os.WriteFile(path, []byte(`{"ada":{"user":"ada@example.com","password":"secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend, err := Open(Config{IMAP: "127.0.0.1:143", SMTP: "127.0.0.1:587", Accounts: path, AuthservID: " mail.example.com "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backend.authservID != "mail.example.com" {
+		t.Fatalf("authserv-id %q", backend.authservID)
 	}
 }
 
