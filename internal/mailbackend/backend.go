@@ -13,6 +13,23 @@ import (
 // server, such as a line break in a search query.
 var ErrInvalid = errors.New("invalid mail backend input")
 
+// RefusedError means the mail server processed the request and refused one
+// operation in it, such as a send over quota or from a sender it does not
+// allow. Type and Description are the server's own reason, for example a JMAP
+// SetError. A transport may show them to the caller. It does not show the text
+// of other backend errors, which can name hosts and accounts.
+type RefusedError struct {
+	Type        string
+	Description string
+}
+
+func (e *RefusedError) Error() string {
+	if e.Description == "" {
+		return e.Type
+	}
+	return e.Type + ": " + e.Description
+}
+
 // InboxSpec is an address to create in a domain.
 // QuotaBytes sets the account disk storage quota in bytes when greater than zero.
 type InboxSpec struct {

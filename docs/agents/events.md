@@ -45,7 +45,7 @@ A Stalwart `delivery.dsn-perm-fail` event is a hard bounce. `inbaid` stores the 
 
 ## Operations
 
-`GET /healthz` answers when the process is up. `GET /readyz` pings PostgreSQL when the event database is configured. `GET /metrics` exposes `inbai_events_appended_total` and `inbai_webhooks_delivered_total`.
+`GET /healthz` answers when the process is up. `GET /readyz` pings PostgreSQL when the event database is configured. When the ping fails it answers `503` with `event database is not reachable`. The ping error is on the request log line, not in the response. `GET /metrics` exposes `inbai_events_appended_total` and `inbai_webhooks_delivered_total`.
 
 ## Untrusted message bodies
 

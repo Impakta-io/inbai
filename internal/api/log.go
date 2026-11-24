@@ -13,18 +13,31 @@ import (
 )
 
 // logged writes one JSON line for each request. The line has no headers and no body.
+// It has the error text of a failure the caller was not shown, so an operator
+// can find the cause by the request id in the response.
 func (s *Server) logged(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r.Header.Get("X-Request-Id"))
 		w.Header().Set("X-Request-Id", id)
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK, id: id}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
-		s.writeRequest(start, id, r.Method, r.URL.Path, rec.status)
+		s.writeRequest(start, id, r.Method, r.URL.Path, rec.status, rec.err)
 	})
 }
 
-func (s *Server) writeRequest(start time.Time, id, method, path string, status int) {
+// logError keeps err for the request log line and returns the request id.
+// It returns "" when w is not the logged response writer.
+func logError(w http.ResponseWriter, err error) string {
+	rec, ok := w.(*statusRecorder)
+	if !ok {
+		return ""
+	}
+	rec.err = err.Error()
+	return rec.id
+}
+
+func (s *Server) writeRequest(start time.Time, id, method, path string, status int, failure string) {
 	if s == nil || s.Log == nil {
 		return
 	}
@@ -35,6 +48,7 @@ func (s *Server) writeRequest(start time.Time, id, method, path string, status i
 		Path       string `json:"path"`
 		Status     int    `json:"status"`
 		DurationMs int64  `json:"durationMs"`
+		Error      string `json:"error,omitempty"`
 	}{
 		Time:       start.UTC().Format(time.RFC3339Nano),
 		RequestID:  id,
@@ -42,6 +56,7 @@ func (s *Server) writeRequest(start time.Time, id, method, path string, status i
 		Path:       path,
 		Status:     status,
 		DurationMs: time.Since(start).Milliseconds(),
+		Error:      failure,
 	})
 	if err != nil {
 		return
@@ -77,6 +92,8 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+	id     string
+	err    string
 }
 
 func (s *statusRecorder) WriteHeader(code int) {

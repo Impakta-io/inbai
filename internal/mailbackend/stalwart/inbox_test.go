@@ -6,11 +6,14 @@ package stalwart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 func TestCreateInboxAndReadADeliveredMessage(t *testing.T) {
@@ -228,6 +231,9 @@ func TestDeliverFailsWhenStalwartDoesNotStoreTheMessage(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "overQuota: Quota exceeded") {
 		t.Fatalf("deliver error %v", err)
 	}
+	if refused := (*mailbackend.RefusedError)(nil); !errors.As(err, &refused) || refused.Type != "overQuota" {
+		t.Fatalf("deliver error %v is not a refusal of type overQuota", err)
+	}
 	if len(destroyed) != 0 {
 		t.Fatalf("destroyed %v when nothing was stored", destroyed)
 	}
@@ -245,6 +251,9 @@ func TestDeliverFailsAndRemovesTheCopyWhenSubmissionIsRefused(t *testing.T) {
 	err := deliverTo(srv)
 	if err == nil || !strings.Contains(err.Error(), "forbiddenFrom: Sender not allowed") {
 		t.Fatalf("deliver error %v", err)
+	}
+	if refused := (*mailbackend.RefusedError)(nil); !errors.As(err, &refused) || refused.Type != "forbiddenFrom" {
+		t.Fatalf("deliver error %v is not a refusal of type forbiddenFrom", err)
 	}
 	if strings.Contains(err.Error(), "not removed") {
 		t.Fatalf("deliver error %v reports a cleanup failure", err)

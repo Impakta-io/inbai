@@ -5,11 +5,14 @@ package stalwart
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Impakta-io/inbai/internal/mailbackend"
 )
 
 func TestGetSearchAndDelete(t *testing.T) {
@@ -135,12 +138,14 @@ func TestReplySetsThreadingHeaders(t *testing.T) {
 
 func TestDeleteMessageReportsARefusal(t *testing.T) {
 	cases := map[string]struct {
-		result map[string]any
-		want   string
+		result  map[string]any
+		want    string
+		refused string
 	}{
 		"refused": {
-			result: map[string]any{"notDestroyed": map[string]any{"msg": map[string]any{"type": "forbidden", "description": "Read-only mailbox"}}},
-			want:   "stalwart msg: forbidden: Read-only mailbox",
+			result:  map[string]any{"notDestroyed": map[string]any{"msg": map[string]any{"type": "forbidden", "description": "Read-only mailbox"}}},
+			want:    "stalwart msg: forbidden: Read-only mailbox",
+			refused: "forbidden",
 		},
 		"no result": {
 			result: map[string]any{},
@@ -172,6 +177,10 @@ func TestDeleteMessageReportsARefusal(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("delete error %v, want %q", err, tc.want)
+			}
+			var refused *mailbackend.RefusedError
+			if got := errors.As(err, &refused); got != (tc.refused != "") || (got && (refused.Type != tc.refused || refused.Description == "")) {
+				t.Fatalf("delete error %v refusal %+v, want type %q", err, refused, tc.refused)
 			}
 		})
 	}

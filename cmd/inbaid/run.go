@@ -147,12 +147,35 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 		Log:           stderr,
 	}).Handler()
 	writef(stdout, "listening on %s\n", *addr)
-	server := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	if err := server.ListenAndServe(); err != nil {
+	if err := newHTTPServer(*addr, handler).ListenAndServe(); err != nil {
 		writef(stderr, "serve: %s\n", err)
 		return 1
 	}
 	return 0
+}
+
+// newHTTPServer is the listener for both mail modes.
+//
+// ReadTimeout bounds reading a whole request, body included, so a client cannot
+// hold a connection by sending slowly. Go also cancels the request context when
+// it passes while the handler runs, so it must exceed the longest handler: a
+// 25 second long poll on GET /v1/events or an MCP wait. Two minutes also lets
+// a 16 MiB JSON upload arrive at about 1 Mbit/s.
+//
+// WriteTimeout runs from the end of the request headers to the end of the
+// response. It is longer than ReadTimeout so a 25 MB attachment download to a
+// slow client still finishes, and a client that stops reading is let go.
+//
+// IdleTimeout closes a keep-alive connection that sends no next request.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       time.Minute,
+	}
 }
 
 func retainLoop(svc *service.Service, days int, stderr io.Writer) {
