@@ -25,24 +25,11 @@ import (
 	"github.com/Impakta-io/inbai/internal/mailbackend/stalwart"
 	"github.com/Impakta-io/inbai/internal/service"
 	"github.com/Impakta-io/inbai/internal/store"
-	"github.com/Impakta-io/inbai/internal/version"
 )
 
+// run dispatches args through the command table in commands.go.
 func run(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 || args[0] == "version" || args[0] == "-h" || args[0] == "--help" {
-		writef(stdout, "%s\n", version.String(version.Server))
-		if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-			writef(stdout, "usage: inbaid [version|serve]\n")
-		}
-		return 0
-	}
-	switch args[0] {
-	case "serve":
-		return serve(args[1:], stdout, stderr, getenv)
-	default:
-		writef(stderr, "unknown command %q\n", args[0])
-		return 2
-	}
+	return program.Main(args, stdout, stderr, getenv)
 }
 
 func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) int {

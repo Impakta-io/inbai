@@ -12,22 +12,6 @@ import (
 	"time"
 )
 
-func inboxQuota(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	if len(args) == 0 {
-		writef(stderr, "usage: inbai inbox quota [get|set]\n")
-		return 2
-	}
-	switch args[0] {
-	case "get":
-		return inboxQuotaGet(args[1:], stdout, stderr, getenv)
-	case "set":
-		return inboxQuotaSet(args[1:], stdout, stderr, getenv)
-	default:
-		writef(stderr, "usage: inbai inbox quota [get|set]\n")
-		return 2
-	}
-}
-
 func inboxQuotaGet(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("inbox quota get", flag.ContinueOnError)
 	fs.SetOutput(stderr)

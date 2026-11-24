@@ -39,7 +39,7 @@ golangci-lint run ./...
 
 ## What the binaries do
 
-`bin/inbai` prints `inbai 0.0.0-dev`. `inbai init` bootstraps Stalwart, `inbai domain add` prints its DNS records, `inbai doctor` checks the host, and `inbai inbox create` creates an address. `bin/inbaid` prints `inbaid 0.0.0-dev` and `inbaid serve` listens for the HTTP API.
+`bin/inbai version` prints `inbai 0.0.0-dev`, and `bin/inbai help` lists the commands. `inbai init` bootstraps Stalwart, `inbai domain add` prints its DNS records, `inbai doctor` checks the host, and `inbai inbox create` creates an address. `bin/inbaid version` prints `inbaid 0.0.0-dev` and `inbaid serve` listens for the HTTP API.
 
 ## Branches
 

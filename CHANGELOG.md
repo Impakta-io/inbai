@@ -37,6 +37,7 @@ Changes merged since `v0.1.0-alpha.3`.
 - `wait_for_message` takes an `after` cursor and returns one. Without `after` it waits for new changes only. It needs a database (#56).
 - `inbai doctor` only reads. It reports a domain Stalwart does not have instead of creating it, and does not fail on an IPv6 address (#65).
 - `inbai login --client-id` and `inbai login --clear` keep `operatorToken` (#62).
+- `inbai help`, `inbai help <command>` and `--help` on every command print full help; `inbai` and `inbaid` with no arguments print help instead of the version (#97).
 
 ### Fixed
 

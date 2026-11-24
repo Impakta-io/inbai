@@ -2,7 +2,7 @@ Status: current
 
 # CLI
 
-With no arguments, `inbai` prints its version, such as `inbai 0.1.0-alpha.3`, and exits. A build from source prints `inbai 0.0.0-dev`. `inbai version` prints the same line.
+`inbai help`, or `inbai` with no arguments, lists every command. `inbai help <command>`, or `--help` after any command, prints its usage, flags, and examples, which the [CLI reference](../reference/cli.md) also collects. `inbai version` prints the version, such as `inbai 0.1.0-alpha.3`. A build from source prints `inbai 0.0.0-dev`.
 
 Every command except `backup` and `restore` reads `<config-dir>/config.json` unless `--config` names another file. The path for each OS is in [install](install.md#first-boot). Commands that call `inbaid` authenticate with the first of these that is set: `INBAI_OPERATOR_TOKEN`, `INBAI_CLIENT_ID` with `INBAI_CLIENT_SECRET`, the client credentials `inbai login` stored, and `operatorToken` from that file. After `inbai init`, that is the operator token, with nothing to export. Flags go before the arguments, as in `inbai message get --json alice@example.com <message-id>`.
 
