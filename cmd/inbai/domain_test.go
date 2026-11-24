@@ -100,3 +100,54 @@ func (emptyDNS) LookupMX(context.Context, string) ([]*net.MX, error) {
 func (emptyDNS) LookupTXT(context.Context, string) ([]string, error) {
 	return nil, &net.DNSError{Err: "no such host", IsNotFound: true}
 }
+
+func TestDomainAddCreatesAMissingDomainAndSaysSo(t *testing.T) {
+	const zone = "example.com. MX 10 mail.example.com.\n"
+	exists := false
+	sets := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := methodName(t, r.Body)
+		switch name {
+		case "x:Domain/query":
+			ids := []string{}
+			if exists {
+				ids = []string{"dom"}
+			}
+			writeInit(w, name, "q", map[string]any{"ids": ids})
+		case "x:Domain/set":
+			sets++
+			exists = true
+			writeInit(w, name, "d", map[string]any{"created": map[string]any{"d1": map[string]any{"id": "dom"}}})
+		case "x:Domain/get":
+			writeInit(w, name, "g", map[string]any{"list": []any{
+				map[string]any{"id": "dom", "name": "example.com", "dnsZoneFile": zone},
+			}})
+		default:
+			t.Errorf("method %s", name)
+			http.Error(w, "unexpected", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw := []byte(`{"domain":"example.com","hostname":"mail.example.com","stalwartUrl":"` + srv.URL + `","apiKey":"shown-once"}` + "\n")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := lookupDNS
+	lookupDNS = emptyDNS{}
+	t.Cleanup(func() { lookupDNS = previous })
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"domain", "add", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	if code != 0 || sets != 1 {
+		t.Fatalf("exit %d sets %d stderr %s", code, sets, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Created domain example.com in Stalwart.") {
+		t.Fatalf("stdout %s", stdout.String())
+	}
+	stdout.Reset()
+	code = run([]string{"domain", "add", "--config", path}, &stdout, &stderr, func(string) string { return "" })
+	if code != 0 || sets != 1 || strings.Contains(stdout.String(), "Created domain") {
+		t.Fatalf("second run exit %d sets %d stdout %s", code, sets, stdout.String())
+	}
+}

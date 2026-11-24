@@ -6,18 +6,40 @@ package stalwart
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
 
-// ZoneFile returns the BIND zone Stalwart computed for the domain.
-// It creates the domain when the server does not already have it.
-func ZoneFile(ctx context.Context, client *Client, domain string) (string, error) {
+// ErrDomainNotConfigured means Stalwart has no domain with the requested name.
+var ErrDomainNotConfigured = errors.New("domain is not configured in Stalwart")
+
+func checkDomainName(client *Client, domain string) error {
 	if client == nil {
-		return "", fmt.Errorf("missing stalwart client")
+		return fmt.Errorf("missing stalwart client")
 	}
 	if strings.TrimSpace(domain) == "" || !strings.Contains(domain, ".") || strings.ContainsAny(domain, " /\t") {
-		return "", fmt.Errorf("domain %q is not a DNS name", domain)
+		return fmt.Errorf("domain %q is not a DNS name", domain)
+	}
+	return nil
+}
+
+// CreateDomain registers the domain in Stalwart. Only a command whose job is
+// to add the domain may call it. It does not check whether the domain exists.
+func CreateDomain(ctx context.Context, client *Client, domain string) error {
+	if err := checkDomainName(client, domain); err != nil {
+		return err
+	}
+	_, err := ensureDomain(ctx, client, domain)
+	return err
+}
+
+// ZoneFile returns the BIND zone Stalwart computed for the domain.
+// It only reads. It returns ErrDomainNotConfigured when the server has no
+// such domain.
+func ZoneFile(ctx context.Context, client *Client, domain string) (string, error) {
+	if err := checkDomainName(client, domain); err != nil {
+		return "", err
 	}
 	raw, err := client.invoke(ctx, "q", "x:Domain/query", map[string]any{
 		"filter": map[string]any{"name": domain},
@@ -31,17 +53,12 @@ func ZoneFile(ctx context.Context, client *Client, domain string) (string, error
 	if err := json.Unmarshal(raw, &query); err != nil {
 		return "", err
 	}
-	id := ""
 	if len(query.IDs) == 0 {
-		id, err = ensureDomain(ctx, client, domain)
-		if err != nil {
-			return "", err
-		}
-	} else {
-		id, err = domainID(ctx, client, query.IDs, domain)
-		if err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("%w: %s", ErrDomainNotConfigured, domain)
+	}
+	id, err := domainID(ctx, client, query.IDs, domain)
+	if err != nil {
+		return "", err
 	}
 	raw, err = client.invoke(ctx, "g", "x:Domain/get", map[string]any{
 		"ids":        []string{id},

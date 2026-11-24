@@ -184,7 +184,7 @@ func ptrLine(ctx context.Context, host string, ip net.IP, probe Probe) Line {
 func blocklistLines(ctx context.Context, ip net.IP, probe Probe) []Line {
 	reversed, ok := reverseIPv4(ip)
 	if !ok {
-		return []Line{{Text: fmt.Sprintf("Blocklist %s: fix: this address is not an IPv4 address", ip)}}
+		return []Line{{OK: true, Text: fmt.Sprintf("Blocklist %s: not checked (the lists are queried for IPv4 addresses only)", ip)}}
 	}
 	var lines []Line
 	for _, list := range blocklists {

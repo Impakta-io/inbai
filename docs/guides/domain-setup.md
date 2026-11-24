@@ -2,15 +2,15 @@ Status: current — `inbai domain add` prints the zone file and checks MX and TX
 
 # Domain setup
 
-`inbai domain add` reads the zone file Stalwart computed for the domain. Copy those records into the domain's DNS zone, then run the command again. A record that is visible from this machine is marked `published`. A record that is not visible yet is marked `not published`. The command still exits 0 in that case, because the first run happens before the records exist.
+`inbai domain add` reads the zone file Stalwart computed for the domain. Copy those records into the domain's DNS zone, then run the command again. Each record gets one status. `published` means this machine sees the record. `not published` means it does not see it yet. `mismatch` means a record exists at that name but its value differs. `lookup failed` means the DNS query itself failed, so the record is unknown. The command still exits 0 in that case, because the first run happens before the records exist.
 
 ```sh
 inbai domain add
 ```
 
-`--domain` selects a domain other than the one stored by `inbai init`. A domain that does not exist yet is created. `--config` selects the config file. `--tls-insecure` skips certificate verification for a host that is not localhost. Localhost skips verification on its own, because the Compose stack uses the certificate Stalwart generates.
+`--domain` selects a domain other than the one stored by `inbai init`. `inbai domain add` creates that domain in Stalwart when the server does not have it, and prints `Created domain <name> in Stalwart.` (`"created": true` with `--json`). It creates only the domain you named. `--config` selects the config file. `--tls-insecure` skips certificate verification for a host that is not localhost. Localhost skips verification on its own, because the Compose stack uses the certificate Stalwart generates.
 
-The zone file includes MX, SPF, DKIM, and DMARC, plus the client and certificate records Stalwart adds. The check covers MX and TXT records, which is where SPF, DKIM, and DMARC are published. Reverse DNS, port 25, TLS, and blocklists are checked by [`inbai doctor`](troubleshooting.md).
+The zone file includes MX, SPF, DKIM, and DMARC, plus the client and certificate records Stalwart adds. The check covers MX and TXT records, which is where SPF, DKIM, and DMARC are published. Reverse DNS, port 25, TLS, and blocklists are checked by [`inbai doctor`](troubleshooting.md). `inbai doctor` only reads. For a domain Stalwart does not have, it reports `domain is not configured in Stalwart` with the fix `inbai domain add --domain <name>` and exits 1. Blocklists are queried for IPv4 addresses. An IPv6 address is listed as `not checked` and does not fail the run.
 
 ## Outbound mail
 

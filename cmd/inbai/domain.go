@@ -79,7 +79,14 @@ func domainAdd(args []string, stdout, stderr io.Writer) int {
 	if *tlsInsecure || loopback(cfg.StalwartURL) {
 		client.HTTP = insecureHTTP()
 	}
+	created := false
 	zone, err := stalwart.ZoneFile(ctx, client, name)
+	if errors.Is(err, stalwart.ErrDomainNotConfigured) {
+		if err = stalwart.CreateDomain(ctx, client, name); err == nil {
+			created = true
+			zone, err = stalwart.ZoneFile(ctx, client, name)
+		}
+	}
 	if err != nil {
 		writef(stderr, "domain add: %s\n", err)
 		return 1
@@ -98,8 +105,11 @@ func domainAdd(args []string, stdout, stderr io.Writer) int {
 		for i, finding := range findings {
 			checks[i] = map[string]string{"name": finding.Name, "type": finding.Type, "status": finding.Status}
 		}
-		emit(stdout, true, "", map[string]any{"zone": zone, "checks": checks})
+		emit(stdout, true, "", map[string]any{"zone": zone, "created": created, "checks": checks})
 		return 0
+	}
+	if created {
+		writef(stdout, "Created domain %s in Stalwart.\n\n", name)
 	}
 	writef(stdout, "%s\n", zone)
 	for _, finding := range findings {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"time"
 
@@ -63,6 +64,11 @@ func doctorCmd(args []string, stdout, stderr io.Writer) int {
 		client.HTTP = insecureHTTP()
 	}
 	zone, err := stalwart.ZoneFile(ctx, client, name)
+	if errors.Is(err, stalwart.ErrDomainNotConfigured) {
+		lines := []doctor.Line{{Text: fmt.Sprintf("Domain %s: domain is not configured in Stalwart; fix: run inbai domain add --domain %s", name, name)}}
+		printDoctor(stdout, *asJSON, lines)
+		return 1
+	}
 	if err != nil {
 		writef(stderr, "doctor: %s\n", err)
 		return 1
@@ -77,7 +83,15 @@ func doctorCmd(args []string, stdout, stderr io.Writer) int {
 		records[i] = doctor.Record{Name: record.Name, Type: record.Type, Value: record.Value}
 	}
 	lines := doctor.Run(ctx, records, cfg.Hostname, doctorProbe)
-	if *asJSON {
+	printDoctor(stdout, *asJSON, lines)
+	if !doctor.Healthy(lines) {
+		return 1
+	}
+	return 0
+}
+
+func printDoctor(stdout io.Writer, asJSON bool, lines []doctor.Line) {
+	if asJSON {
 		checks := make([]map[string]any, len(lines))
 		for i, line := range lines {
 			checks[i] = map[string]any{"ok": line.OK, "text": line.Text}
@@ -88,8 +102,4 @@ func doctorCmd(args []string, stdout, stderr io.Writer) int {
 			writef(stdout, "%s\n", line.Text)
 		}
 	}
-	if !doctor.Healthy(lines) {
-		return 1
-	}
-	return 0
 }
