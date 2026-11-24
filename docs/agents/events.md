@@ -1,10 +1,10 @@
-Status: current — the event feed, signed webhooks, the ingest hint, and hard-bounce suppression exist when `INBAI_DATABASE_URL` is set.
+Status: current — the event feed, signed webhooks, the ingest hint, and hard-bounce suppression exist when `inbaid` has a database.
 
 # Events
 
 Agents can wait for mail without a public inbound port. The durable record is a JMAP state cursor per inbox in PostgreSQL. A Stalwart `message-ingest` webhook only tells `inbaid` to ask for changes since that cursor. Stalwart drops a hint it cannot deliver, and the cursor is still there after `inbaid` restarts.
 
-Set `INBAI_DATABASE_URL` before `inbaid serve`. The server creates the tables. Without that URL, `GET /v1/events` and `POST /v1/webhooks` answer 503.
+`inbaid serve` opens the database named by `INBAI_DATABASE_URL`, or by `databaseUrl` in the config file when that variable is unset. Docker-mode `inbai init` writes `databaseUrl`, and the repository Compose file sets the variable. IMAP mode reads only the variable. The server creates the tables. Without a database, `GET /v1/events` and `POST /v1/webhooks` answer 503.
 
 ## Feed
 

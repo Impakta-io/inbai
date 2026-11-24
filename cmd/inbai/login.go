@@ -24,7 +24,7 @@ func loginCmd(args []string, stdout, stderr io.Writer, getenv func(string) strin
 	apiURL := fs.String("url", "", "inbaid API URL (default config apiUrl or http://127.0.0.1:8787)")
 	clientIDFlag := fs.String("client-id", "", "OAuth client id (uses INBAI_CLIENT_SECRET)")
 	clear := fs.Bool("clear", false, "remove stored client credentials from config (operatorToken is kept)")
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	asJSON := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

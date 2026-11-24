@@ -48,7 +48,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "config file (default $XDG_CONFIG_HOME/inbai/config.json)")
+	configPath := fs.String("config", "", "config file (default inbai/config.json in the user config directory)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	if err := fs.Parse(args); err != nil {
 		return 2

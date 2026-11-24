@@ -54,7 +54,7 @@ When the SMTP server refuses the sender, a recipient, or the message, the API er
 
 `INBAI_AUTHSERV_ID` is the authserv-id your mail server writes in the `Authentication-Results` headers it adds, usually its host name, for example `mail.example.com`. A message read reports SPF, DKIM, and DMARC only from the top-most header with that authserv-id. When it is unset, a message read reports none of them. See [untrusted mail](../../docs/agents/untrusted-mail.md).
 
-The event cursor is `uidvalidity:uidnext`. A new UID is a created event. A message that is deleted is not reported, because a UIDNEXT cursor cannot see it. If the server changes UIDVALIDITY, the sync stops and the stored cursor stays where it was.
+The event cursor is `uidvalidity:uidnext`. A new UID is a created event. A message that is deleted is not reported, because a UIDNEXT cursor cannot see it. If the server changes UIDVALIDITY, the feed records a `resync` event and moves the cursor to the mailbox's current state. List the inbox to catch up. See [Events](../../docs/agents/events.md#feed).
 
 Message ids are IMAP UIDs. List and search return the subject. Get returns the text body and the `From` and `Reply-To` headers. An attachment on send is a MIME part.
 
