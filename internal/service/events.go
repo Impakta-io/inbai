@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -176,9 +175,8 @@ func (s *Service) SubscribeWebhook(ctx context.Context, caller Caller, inbox, ra
 	if s.feed == nil {
 		return "", "", fmt.Errorf("%w", ErrUnavailable)
 	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
-		return "", "", fmt.Errorf("%w: webhook url must be http or https", ErrInvalid)
+	if err := events.CheckWebhookURL(ctx, rawURL, s.feed.AllowPrivate(), nil); err != nil {
+		return "", "", fmt.Errorf("%w: %s", ErrInvalid, err)
 	}
 	agent := caller.Agent
 	if caller.Operator {

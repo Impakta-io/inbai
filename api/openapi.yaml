@@ -696,6 +696,7 @@ paths:
     post:
       operationId: createWebhook
       summary: Register a signed webhook. The secret is shown once.
+      description: The url must be https and resolve only to public addresses. A loopback, link-local, private or other internal address answers 400. Redirects are not followed. An operator can allow http and private addresses with INBAI_WEBHOOK_ALLOW_PRIVATE.
       requestBody:
         required: true
         content:
@@ -721,6 +722,8 @@ paths:
                     type: string
                   secret:
                     type: string
+        "400":
+          $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
 components:

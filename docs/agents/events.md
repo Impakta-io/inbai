@@ -27,6 +27,10 @@ curl -s -X POST -H "Authorization: Bearer $ACCESS_TOKEN" \
 
 The response includes `secret` once. Each delivery is a POST of one event. The header `X-Inbai-Signature` is `sha256=` plus the hex HMAC-SHA256 of the raw body, using that secret. A non-2xx response is retried with backoff. After five attempts the delivery stops and the event remains on the feed.
 
+The `url` must be `https`, must not carry a user name or password, and must resolve only to public addresses. A loopback, link-local (including `169.254.169.254`), private, carrier-grade NAT, multicast or unspecified address is refused with 400. `inbaid` checks the address again when it connects, so a name that later resolves to an internal address is refused too. A redirect is not followed and counts as a failed delivery. Each delivery times out after 10 seconds.
+
+An operator who sends webhooks to a service on their own network sets `INBAI_WEBHOOK_ALLOW_PRIVATE=true` before `inbaid serve`. That allows `http` and private addresses for every webhook on that server. An agent cannot set it.
+
 ## Ingest hint
 
 Stalwart posts to `POST /v1/hooks/ingest` with `X-Inbai-Ingest` set to `INBAI_INGEST_SECRET`. The body is Stalwart's event list. `message-ingest` events are matched on `data.to`. The numeric `accountId` is not the JMAP account id. A slow sweep also asks for changes when no hint arrives.

@@ -64,6 +64,40 @@ func TestWebhookRequiresAReadGrant(t *testing.T) {
 	}
 }
 
+func TestWebhookRefusesInternalURLs(t *testing.T) {
+	svc := New(&eventMail{})
+	svc.SetFeed(events.New(&store.Memory{}))
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		"http://127.0.0.1/hook",
+		"https://127.0.0.1/hook",
+		"https://169.254.169.254/latest",
+		"https://10.0.0.2:5432/",
+		"https://[::1]/hook",
+		"https://agent.example@127.0.0.1/hook",
+		"http://agent.example/hook",
+	} {
+		if _, _, err := svc.SubscribeWebhook(context.Background(), Caller{Agent: "ada"}, "inbox-a", raw); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: want ErrInvalid, got %v", raw, err)
+		}
+	}
+}
+
+func TestWebhookAllowPrivateIsAnOperatorSetting(t *testing.T) {
+	feed := events.New(&store.Memory{})
+	svc := New(&eventMail{})
+	svc.SetFeed(feed)
+	if err := svc.Grant(Caller{Operator: true}, "ada", "inbox-a", PermRead); err != nil {
+		t.Fatal(err)
+	}
+	feed.SetAllowPrivate(true)
+	if _, _, err := svc.SubscribeWebhook(context.Background(), Caller{Agent: "ada"}, "inbox-a", "http://127.0.0.1:9000/hook"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type countingLog struct {
 	store.Log
 	since int
