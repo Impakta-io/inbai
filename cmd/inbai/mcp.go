@@ -198,9 +198,9 @@ type apiBox struct {
 	client apiClient
 }
 
-func (b apiBox) List(ctx context.Context, inbox, query string) ([]mailbackend.Message, error) {
-	messages, _, err := b.client.listMessages(ctx, inbox, query, "", 0)
-	return toMessages(messages), err
+func (b apiBox) List(ctx context.Context, inbox, query, cursor string) ([]mailbackend.Message, string, error) {
+	messages, next, err := b.client.listMessages(ctx, inbox, query, cursor, 0)
+	return toMessages(messages), next, err
 }
 
 func (b apiBox) Get(ctx context.Context, inbox, messageID string) (mailbackend.Message, error) {

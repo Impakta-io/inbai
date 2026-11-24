@@ -30,13 +30,17 @@ Every tool takes `inbox`, the Stalwart account id. A missing grant returns a too
 
 | Tool | Required arguments | What it does |
 | --- | --- | --- |
-| `list_messages` | `inbox` | Lists messages. |
-| `search_messages` | `inbox`, `query` | Searches message text. |
+| `list_messages` | `inbox` | Lists messages, newest first, one page at a time. `cursor` is optional. See [Paging](#paging). |
+| `search_messages` | `inbox`, `query` | Searches message text, newest first, one page at a time. `cursor` is optional. |
 | `get_message` | `inbox`, `messageId` | Reads one message. |
 | `send_message` | `inbox`, `to`, `subject` | Submits plain text. `text` and `from` are optional. Needs `send`. |
 | `reply_message` | `inbox`, `messageId` | Replies to the original sender. `to`, `from`, and `text` are optional. The server sets `In-Reply-To` and `References`, and the subject when it is empty. Needs `reply`. |
 | `delete_message` | `inbox`, `messageId` | Deletes one message. |
 | `wait_for_message` | `inbox` | Returns changes from the event feed after the cursor `after`, waiting up to `timeoutSeconds` for one. See [wait_for_message](#wait_for_message). |
+
+## Paging
+
+`list_messages` and `search_messages` return the newest messages first, up to one page. The result carries `next`. When `next` is not empty, call the tool again with the same arguments and `cursor` set to that value to get the following, older page. An empty `next` means the last page. A message that arrives between pages is newer than every cursor, so it does not shift or repeat a page. It shows on a fresh first page.
 
 ## Sender and reply recipient
 

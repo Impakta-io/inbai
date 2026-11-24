@@ -29,13 +29,14 @@ func (s ServiceBox) public(err error) error {
 	return s.Public(err)
 }
 
-func (s ServiceBox) List(ctx context.Context, inbox, query string) ([]mailbackend.Message, error) {
+func (s ServiceBox) List(ctx context.Context, inbox, query, cursor string) ([]mailbackend.Message, string, error) {
+	page := mailbackend.Page{After: cursor}
 	if query != "" {
-		messages, _, err := s.Service.Search(ctx, s.Caller, inbox, query, mailbackend.Page{})
-		return messages, s.public(err)
+		messages, next, err := s.Service.Search(ctx, s.Caller, inbox, query, page)
+		return messages, next, s.public(err)
 	}
-	messages, _, err := s.Service.List(ctx, s.Caller, inbox, mailbackend.Page{})
-	return messages, s.public(err)
+	messages, next, err := s.Service.List(ctx, s.Caller, inbox, page)
+	return messages, next, s.public(err)
 }
 
 func (s ServiceBox) Get(ctx context.Context, inbox, messageID string) (mailbackend.Message, error) {

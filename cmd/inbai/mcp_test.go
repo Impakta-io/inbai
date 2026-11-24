@@ -129,3 +129,33 @@ func (s *signalLog) Head(ctx context.Context, inbox string) (int64, error) {
 	s.once.Do(func() { close(s.read) })
 	return id, err
 }
+
+func TestMCPStdioListMessagesPassesTheCursorAndReturnsNext(t *testing.T) {
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cursors = append(cursors, r.URL.Query().Get("cursor"))
+		if r.URL.Query().Get("cursor") == "" {
+			_, _ = w.Write([]byte(`{"messages":[{"id":"m2","subject":"newer"}],"next":"m2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"messages":[{"id":"m1","subject":"older"}]}`))
+	}))
+	defer srv.Close()
+	box := apiBox{client: apiClient{base: srv.URL, token: "t"}}
+	call := func(args string) string {
+		raw := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_messages","arguments":{` + args + `}}}`
+		got, _ := mcp.Dispatch(context.Background(), []byte(raw), box)
+		return string(got)
+	}
+	first := call(`"inbox":"inbox-a"`)
+	if !strings.Contains(first, `newer`) || !strings.Contains(first, `next\":\"m2\"`) {
+		t.Fatalf("first %s", first)
+	}
+	second := call(`"inbox":"inbox-a","cursor":"m2"`)
+	if !strings.Contains(second, `older`) || !strings.Contains(second, `next\":\"\"`) {
+		t.Fatalf("second %s", second)
+	}
+	if strings.Join(cursors, "|") != "|m2" {
+		t.Fatalf("cursors %q", cursors)
+	}
+}

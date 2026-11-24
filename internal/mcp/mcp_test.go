@@ -6,6 +6,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -234,8 +235,8 @@ type recordBox struct {
 	sent, replied mailbackend.Outbound
 }
 
-func (b *recordBox) List(context.Context, string, string) ([]mailbackend.Message, error) {
-	return nil, nil
+func (b *recordBox) List(context.Context, string, string, string) ([]mailbackend.Message, string, error) {
+	return nil, "", nil
 }
 func (b *recordBox) Get(context.Context, string, string) (mailbackend.Message, error) {
 	return mailbackend.Message{}, nil
@@ -251,4 +252,34 @@ func (b *recordBox) Reply(_ context.Context, _, _ string, msg mailbackend.Outbou
 func (b *recordBox) Delete(context.Context, string, string) error { return nil }
 func (b *recordBox) Wait(context.Context, string, *int64, time.Duration) ([]mailbackend.Message, int64, error) {
 	return nil, 0, nil
+}
+
+// pagedMail slices its messages with the shared cursor rules.
+type pagedMail struct{ fakeMail }
+
+func (p *pagedMail) List(_ context.Context, _ string, page mailbackend.Page) ([]mailbackend.Message, string, error) {
+	return mailbackend.Slice(p.messages, func(m mailbackend.Message) string { return m.ID }, page)
+}
+
+func TestListMessagesCursorReturnsTheNextPage(t *testing.T) {
+	mail := &pagedMail{fakeMail{messages: make([]mailbackend.Message, 51)}}
+	for i := range mail.messages {
+		mail.messages[i] = mailbackend.Message{ID: fmt.Sprintf("m%02d", i)}
+	}
+	box := ServiceBox{Service: service.New(mail), Caller: service.Caller{Operator: true}}
+	call := func(args string) string {
+		got, _ := Dispatch(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_messages","arguments":{`+args+`}}}`), box)
+		return string(got)
+	}
+	first := call(`"inbox":"inbox-a"`)
+	if !strings.Contains(first, `m49`) || strings.Contains(first, `m50`) || !strings.Contains(first, `next\":\"m49\"`) {
+		t.Fatalf("first page %s", first)
+	}
+	second := call(`"inbox":"inbox-a","cursor":"m49"`)
+	if !strings.Contains(second, `m50`) || strings.Contains(second, `m49`) || !strings.Contains(second, `next\":\"\"`) {
+		t.Fatalf("second page %s", second)
+	}
+	if bad := call(`"inbox":"inbox-a","cursor":7`); !strings.Contains(bad, "cursor must be a string") {
+		t.Fatalf("bad cursor %s", bad)
+	}
 }
