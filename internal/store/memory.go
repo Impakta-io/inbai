@@ -37,6 +37,7 @@ type memDelivery struct {
 	next    time.Time
 	done    bool
 	failed  bool
+	reason  string
 }
 
 func (m *Memory) init() {
@@ -128,7 +129,7 @@ func (m *Memory) Put(_ context.Context, inbox, address, state string, records []
 		record.Inbox = inbox
 		m.events = append(m.events, record)
 		for _, sub := range m.subs {
-			if sub.Inbox != inbox {
+			if sub.Inbox != inbox || sub.Disabled != "" {
 				continue
 			}
 			m.nextDel++
@@ -169,11 +170,84 @@ func (m *Memory) Head(_ context.Context, inbox string) (int64, error) {
 	return 0, nil
 }
 
-func (m *Memory) Subscribe(_ context.Context, sub Subscription) error {
+func (m *Memory) Subscribe(_ context.Context, sub Subscription, limit int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.init()
+	if limit > 0 && !sub.Operator {
+		held := 0
+		for _, other := range m.subs {
+			if !other.Operator && other.Agent == sub.Agent && other.Inbox == sub.Inbox {
+				held++
+			}
+		}
+		if held >= limit {
+			return ErrSubscriptionLimit
+		}
+	}
 	m.subs[sub.ID] = sub
+	return nil
+}
+
+func (m *Memory) Subscription(_ context.Context, id string) (Subscription, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	sub, ok := m.subs[id]
+	return sub, ok, nil
+}
+
+func (m *Memory) Subscriptions(_ context.Context, inbox string) ([]Subscription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	var out []Subscription
+	for _, sub := range m.subs {
+		if sub.Inbox == inbox {
+			out = append(out, sub)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (m *Memory) Unsubscribe(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	delete(m.subs, id)
+	kept := m.deliveries[:0]
+	for _, item := range m.deliveries {
+		if item.subID != id {
+			kept = append(kept, item)
+		}
+	}
+	m.deliveries = kept
+	return nil
+}
+
+func (m *Memory) Disable(_ context.Context, id, reason string, _ time.Time) error {
+	if reason == "" {
+		reason = "disabled"
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	sub, ok := m.subs[id]
+	if !ok {
+		return nil
+	}
+	if sub.Disabled == "" {
+		sub.Disabled = reason
+		m.subs[id] = sub
+	}
+	for i := range m.deliveries {
+		item := &m.deliveries[i]
+		if item.subID == id && !item.done && !item.failed {
+			item.failed = true
+			item.reason = reason
+		}
+	}
 	return nil
 }
 
@@ -196,7 +270,10 @@ func (m *Memory) Claim(_ context.Context, now time.Time) (Delivery, bool, error)
 				break
 			}
 		}
-		return Delivery{ID: item.id, Attempt: item.attempt, URL: sub.URL, Secret: sub.Secret, Event: event}, true, nil
+		return Delivery{
+			ID: item.id, Attempt: item.attempt, SubscriptionID: sub.ID, Agent: sub.Agent, Operator: sub.Operator,
+			URL: sub.URL, Secret: sub.Secret, Event: event,
+		}, true, nil
 	}
 	return Delivery{}, false, nil
 }

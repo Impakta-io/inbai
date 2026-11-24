@@ -120,6 +120,7 @@ func serve(args []string, stdout, stderr io.Writer, getenv func(string) string) 
 	}
 	issuer := "http://" + *addr
 	directory := auth.NewDirectory(signingKey, issuer)
+	svc.SetSuspensions(directory)
 	if log != nil {
 		svc.SetDB(log)
 		directory.SetDB(log)

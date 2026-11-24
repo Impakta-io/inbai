@@ -88,6 +88,7 @@ type Service struct {
 	keep      map[string]int
 	allow     map[string][]string
 	feed      *events.Feed
+	stopped   Suspensions
 	db        *store.Postgres
 	audit     []store.AuditRow
 	nextAudit int64

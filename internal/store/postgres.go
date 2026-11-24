@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS webhook_subscription (
     inbox text NOT NULL,
     url text NOT NULL,
     secret text NOT NULL,
+    operator boolean NOT NULL DEFAULT false,
+    disabled text NOT NULL DEFAULT '',
     workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE TABLE IF NOT EXISTS webhook_delivery (
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS webhook_delivery (
     next_at timestamptz NOT NULL DEFAULT now(),
     done_at timestamptz,
     failed_at timestamptz,
+    fail_reason text NOT NULL DEFAULT '',
     workspace_id text NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS webhook_delivery_due ON webhook_delivery (next_at)
@@ -204,8 +207,18 @@ func ensureWorkspace(ctx context.Context, pool *pgxpool.Pool) error {
 
 // addedColumns are columns added to a table after it was first created.
 // CREATE TABLE IF NOT EXISTS skips a table that exists, so Open adds them to an older database.
+//
+// webhook_subscription.operator is added empty and filled only where it is empty, so a later
+// Open does not change a row. A subscription stored before then counts as an operator's when
+// its agent is legacyOperatorAgent, the name the server stored for operator subscriptions.
 var addedColumns = []string{
 	`ALTER TABLE bulk_job ADD COLUMN IF NOT EXISTS agent text NOT NULL DEFAULT ''`,
+	`ALTER TABLE webhook_subscription ADD COLUMN IF NOT EXISTS operator boolean`,
+	`UPDATE webhook_subscription SET operator = (agent = '` + legacyOperatorAgent + `') WHERE operator IS NULL`,
+	`ALTER TABLE webhook_subscription ALTER COLUMN operator SET DEFAULT false`,
+	`ALTER TABLE webhook_subscription ALTER COLUMN operator SET NOT NULL`,
+	`ALTER TABLE webhook_subscription ADD COLUMN IF NOT EXISTS disabled text NOT NULL DEFAULT ''`,
+	`ALTER TABLE webhook_delivery ADD COLUMN IF NOT EXISTS fail_reason text NOT NULL DEFAULT ''`,
 }
 
 func ensureColumns(ctx context.Context, pool *pgxpool.Pool) error {
@@ -303,9 +316,11 @@ ON CONFLICT (inbox) DO UPDATE SET
 		if err := tx.QueryRow(ctx, `INSERT INTO mail_event (inbox, message_id, kind) VALUES ($1, $2, $3) RETURNING id`, inbox, record.MessageID, record.Kind).Scan(&id); err != nil {
 			return err
 		}
+		// FOR SHARE waits for an Unsubscribe or Disable of the same row and then skips it,
+		// so no delivery is queued for a subscription that was just removed or stopped.
 		if _, err := tx.Exec(ctx, `
 INSERT INTO webhook_delivery (subscription_id, event_id)
-SELECT id, $2 FROM webhook_subscription WHERE inbox = $1`, inbox, id); err != nil {
+SELECT id, $2 FROM webhook_subscription WHERE inbox = $1 AND disabled = '' FOR SHARE`, inbox, id); err != nil {
 			return err
 		}
 	}
@@ -341,11 +356,105 @@ func (p *Postgres) Head(ctx context.Context, inbox string) (int64, error) {
 	return id, err
 }
 
-func (p *Postgres) Subscribe(ctx context.Context, sub Subscription) error {
-	_, err := p.pool.Exec(ctx, `
-INSERT INTO webhook_subscription (id, agent, inbox, url, secret) VALUES ($1, $2, $3, $4, $5)`,
-		sub.ID, sub.Agent, sub.Inbox, sub.URL, sub.Secret)
-	return err
+func (p *Postgres) Subscribe(ctx context.Context, sub Subscription, limit int) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if limit > 0 && !sub.Operator {
+		// The lock serialises two creates for the same agent and inbox, so both cannot pass the count.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('webhook_subscription'), hashtext($1))`, sub.Agent+"\n"+sub.Inbox); err != nil {
+			return err
+		}
+		var held int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM webhook_subscription WHERE agent = $1 AND inbox = $2 AND NOT operator`, sub.Agent, sub.Inbox).Scan(&held); err != nil {
+			return err
+		}
+		if held >= limit {
+			return ErrSubscriptionLimit
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO webhook_subscription (id, agent, inbox, url, secret, operator, disabled) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		sub.ID, sub.Agent, sub.Inbox, sub.URL, sub.Secret, sub.Operator, sub.Disabled); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+const subscriptionColumns = `id, agent, inbox, url, secret, operator, disabled`
+
+func scanSubscription(row pgx.Row, sub *Subscription) error {
+	return row.Scan(&sub.ID, &sub.Agent, &sub.Inbox, &sub.URL, &sub.Secret, &sub.Operator, &sub.Disabled)
+}
+
+func (p *Postgres) Subscription(ctx context.Context, id string) (Subscription, bool, error) {
+	var sub Subscription
+	err := scanSubscription(p.pool.QueryRow(ctx, `SELECT `+subscriptionColumns+` FROM webhook_subscription WHERE id = $1`, id), &sub)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Subscription{}, false, nil
+	}
+	if err != nil {
+		return Subscription{}, false, err
+	}
+	return sub, true, nil
+}
+
+func (p *Postgres) Subscriptions(ctx context.Context, inbox string) ([]Subscription, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+subscriptionColumns+` FROM webhook_subscription WHERE inbox = $1 ORDER BY id`, inbox)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := scanSubscription(rows, &sub); err != nil {
+			return nil, err
+		}
+		out = append(out, sub)
+	}
+	return out, rows.Err()
+}
+
+// Unsubscribe deletes the subscription row first. That waits for a Put holding it, so the
+// delivery delete that follows also removes what that Put queued.
+func (p *Postgres) Unsubscribe(ctx context.Context, id string) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `DELETE FROM webhook_subscription WHERE id = $1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM webhook_delivery WHERE subscription_id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// Disable marks the subscription first, for the same reason as Unsubscribe, then fails
+// every delivery still pending for it with the reason.
+func (p *Postgres) Disable(ctx context.Context, id, reason string, now time.Time) error {
+	if reason == "" {
+		reason = "disabled"
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `UPDATE webhook_subscription SET disabled = $2 WHERE id = $1 AND disabled = ''`, id, reason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE webhook_delivery SET failed_at = $3, fail_reason = $2
+WHERE subscription_id = $1 AND done_at IS NULL AND failed_at IS NULL`, id, reason, now); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) Claim(ctx context.Context, now time.Time) (Delivery, bool, error) {
@@ -369,12 +478,14 @@ WITH claimed AS (
     WHERE delivery.id = claimed.id
     RETURNING delivery.id, delivery.attempt, delivery.subscription_id, delivery.event_id
 )
-SELECT updated.id, updated.attempt, subscription.url, subscription.secret,
+SELECT updated.id, updated.attempt, subscription.id, subscription.agent, subscription.operator,
+       subscription.url, subscription.secret,
        event.id, event.inbox, event.message_id, event.kind
 FROM updated
 JOIN webhook_subscription AS subscription ON subscription.id = updated.subscription_id
 JOIN mail_event AS event ON event.id = updated.event_id`, now).Scan(
-		&delivery.ID, &delivery.Attempt, &delivery.URL, &delivery.Secret,
+		&delivery.ID, &delivery.Attempt, &delivery.SubscriptionID, &delivery.Agent, &delivery.Operator,
+		&delivery.URL, &delivery.Secret,
 		&delivery.Event.ID, &delivery.Event.Inbox, &delivery.Event.MessageID, &delivery.Event.Kind,
 	)
 	if err != nil {
@@ -484,13 +595,13 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	rows.Close()
-	rows, err = tx.Query(ctx, `SELECT id, agent, inbox, url, secret FROM webhook_subscription ORDER BY id`)
+	rows, err = tx.Query(ctx, `SELECT `+subscriptionColumns+` FROM webhook_subscription ORDER BY id`)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	for rows.Next() {
 		var sub Subscription
-		if err := rows.Scan(&sub.ID, &sub.Agent, &sub.Inbox, &sub.URL, &sub.Secret); err != nil {
+		if err := scanSubscription(rows, &sub); err != nil {
 			rows.Close()
 			return Snapshot{}, err
 		}
@@ -501,13 +612,13 @@ func (p *Postgres) Export(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	rows.Close()
-	rows, err = tx.Query(ctx, `SELECT id, subscription_id, event_id, attempt, next_at, done_at IS NOT NULL, failed_at IS NOT NULL FROM webhook_delivery ORDER BY id`)
+	rows, err = tx.Query(ctx, `SELECT id, subscription_id, event_id, attempt, next_at, done_at IS NOT NULL, failed_at IS NOT NULL, fail_reason FROM webhook_delivery ORDER BY id`)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	for rows.Next() {
 		var item DeliveryRow
-		if err := rows.Scan(&item.ID, &item.SubscriptionID, &item.EventID, &item.Attempt, &item.Next, &item.Done, &item.Failed); err != nil {
+		if err := rows.Scan(&item.ID, &item.SubscriptionID, &item.EventID, &item.Attempt, &item.Next, &item.Done, &item.Failed, &item.Reason); err != nil {
 			rows.Close()
 			return Snapshot{}, err
 		}
@@ -583,7 +694,7 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		}
 	}
 	for _, sub := range snap.Subscriptions {
-		if _, err := tx.Exec(ctx, `INSERT INTO webhook_subscription (id, agent, inbox, url, secret) VALUES ($1, $2, $3, $4, $5)`, sub.ID, sub.Agent, sub.Inbox, sub.URL, sub.Secret); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO webhook_subscription (`+subscriptionColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7)`, sub.ID, sub.Agent, sub.Inbox, sub.URL, sub.Secret, sub.Operator, sub.Disabled); err != nil {
 			return err
 		}
 	}
@@ -595,7 +706,7 @@ func (p *Postgres) Import(ctx context.Context, snap Snapshot) error {
 		if item.Failed {
 			failed = item.Next
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO webhook_delivery (id, subscription_id, event_id, attempt, next_at, done_at, failed_at) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6, $7)`, item.ID, item.SubscriptionID, item.EventID, item.Attempt, item.Next, done, failed); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO webhook_delivery (id, subscription_id, event_id, attempt, next_at, done_at, failed_at, fail_reason) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, item.ID, item.SubscriptionID, item.EventID, item.Attempt, item.Next, done, failed, item.Reason); err != nil {
 			return err
 		}
 	}

@@ -30,7 +30,7 @@ func TestPostgresKeepsEventsAfterReconnect(t *testing.T) {
 	if err := first.Remember(ctx, "inbox-a", "ada@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "http://127.0.0.1/hook", Secret: "s"}); err != nil {
+	if err := first.Subscribe(ctx, Subscription{ID: "sub", Agent: "ada", Inbox: "inbox-a", URL: "http://127.0.0.1/hook", Secret: "s"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Put(ctx, "inbox-a", "", "s1", []Record{{MessageID: "m", Kind: "created"}}); err != nil {
