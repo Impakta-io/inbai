@@ -69,13 +69,22 @@ func queryMessages(ctx context.Context, client *Client, accountID string, filter
 	if err != nil {
 		return nil, "", err
 	}
-	args := map[string]any{"accountId": accountID, "limit": limit + 1}
+	inboxID, err := inboxMailboxID(ctx, client, accountID)
+	if err != nil {
+		return nil, "", err
+	}
+	combined := map[string]any{"inMailbox": inboxID}
+	for k, v := range filter {
+		combined[k] = v
+	}
+	args := map[string]any{
+		"accountId": accountID,
+		"limit":     limit + 1,
+		"filter":    combined,
+	}
 	if page.After != "" {
 		args["anchor"] = page.After
 		args["anchorOffset"] = 1
-	}
-	if filter != nil {
-		args["filter"] = filter
 	}
 	raw, err := client.invoke(ctx, "q", "Email/query", args)
 	if err != nil {

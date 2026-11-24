@@ -56,7 +56,13 @@ func TestGetSearchAndDelete(t *testing.T) {
 				"keywords":                             map[string]bool{"$junk": true},
 				"header:Authentication-Results:asText": "mail.example.com; spf=pass; dkim=pass; dmarc=fail",
 			}}}, "g"}})
+		case "Mailbox/query":
+			writeMethods(w, []any{[]any{"Mailbox/query", map[string]any{"ids": []string{"inbox-box"}}, "q"}})
 		case "Email/query":
+			filter, _ := args[0]["filter"].(map[string]any)
+			if filter["inMailbox"] != "inbox-box" || filter["text"] != "hello" {
+				t.Errorf("search filter %#v", filter)
+			}
 			writeMethods(w, []any{[]any{"Email/query", map[string]any{"ids": []string{"msg"}}, "q"}})
 		case "Email/set":
 			destroy, _ := args[0]["destroy"].([]any)
@@ -82,7 +88,7 @@ func TestGetSearchAndDelete(t *testing.T) {
 	if err := DeleteMessage(context.Background(), client, "alice-id", "msg"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(methods, ",") != "Email/get,Email/query,Email/get,Email/set" {
+	if strings.Join(methods, ",") != "Email/get,Mailbox/query,Email/query,Email/get,Email/set" {
 		t.Fatalf("methods %v", methods)
 	}
 }
@@ -96,8 +102,12 @@ func TestReplySetsThreadingHeaders(t *testing.T) {
 		switch names[0] {
 		case "Identity/get":
 			writeMethods(w, []any{[]any{"Identity/get", map[string]any{"list": []any{map[string]any{"id": "ident"}}}, "i"}})
-		case "Mailbox/query":
-			writeMethods(w, []any{[]any{"Mailbox/query", map[string]any{"ids": []string{"box"}}, "q"}})
+		case "Mailbox/get":
+			writeMethods(w, []any{[]any{"Mailbox/get", map[string]any{"list": []any{
+				map[string]any{"id": "inbox-box", "role": "inbox"},
+				map[string]any{"id": "drafts-box", "role": "drafts"},
+				map[string]any{"id": "sent-box", "role": "sent"},
+			}}, "m"}})
 		case "Email/set":
 			create := args[0]["create"].(map[string]any)["m"].(map[string]any)
 			reply, _ := create["inReplyTo"].([]any)

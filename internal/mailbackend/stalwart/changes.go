@@ -72,12 +72,68 @@ func MailChanges(ctx context.Context, client *Client, accountID, since string) (
 	if parsed.NewState == "" {
 		return mailDelta{}, fmt.Errorf("stalwart returned no new email state")
 	}
+	created := parsed.Created
+	if len(created) > 0 {
+		created, err = filterInboxMessages(ctx, client, accountID, created)
+		if err != nil {
+			return mailDelta{}, err
+		}
+	}
 	return mailDelta{
 		State:     parsed.NewState,
-		Created:   parsed.Created,
+		Created:   created,
 		Destroyed: parsed.Destroyed,
 		More:      parsed.HasMoreChanges,
 	}, nil
+}
+
+func filterInboxMessages(ctx context.Context, client *Client, accountID string, ids []string) ([]string, error) {
+	found, err := client.invokeMany(ctx, []jmapCall{
+		{Name: "Mailbox/query", ID: "b", Args: map[string]any{
+			"accountId": accountID,
+			"filter":    map[string]any{"role": "inbox"},
+		}},
+		{Name: "Email/get", ID: "g", Args: map[string]any{
+			"accountId":  accountID,
+			"ids":        ids,
+			"properties": []string{"mailboxIds"},
+		}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var boxes struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(found["b"], &boxes); err != nil {
+		return nil, err
+	}
+	if len(boxes.IDs) == 0 {
+		return nil, fmt.Errorf("account %s has no inbox", accountID)
+	}
+	inboxID := boxes.IDs[0]
+	var got struct {
+		List []struct {
+			ID         string          `json:"id"`
+			MailboxIDs map[string]bool `json:"mailboxIds"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(found["g"], &got); err != nil {
+		return nil, err
+	}
+	inInbox := make(map[string]bool, len(got.List))
+	for _, msg := range got.List {
+		if msg.MailboxIDs[inboxID] {
+			inInbox[msg.ID] = true
+		}
+	}
+	out := make([]string, 0, len(inInbox))
+	for _, id := range ids {
+		if inInbox[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 type mailDelta struct {

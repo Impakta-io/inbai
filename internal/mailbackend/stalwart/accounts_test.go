@@ -50,8 +50,11 @@ func TestListDeleteAndDownload(t *testing.T) {
 				t.Errorf("destroy %v", destroy)
 			}
 			writeMethods(w, []any{[]any{"x:Account/set", map[string]any{"destroyed": []string{"alice-id"}}, "d"}})
+		case "Mailbox/query":
+			writeMethods(w, []any{[]any{"Mailbox/query", map[string]any{"ids": []string{"inbox-box"}}, "q"}})
 		case "Email/query":
-			if args[0]["anchor"] != "m1" || args[0]["limit"] != float64(2) {
+			filter, _ := args[0]["filter"].(map[string]any)
+			if args[0]["anchor"] != "m1" || args[0]["limit"] != float64(2) || filter["inMailbox"] != "inbox-box" {
 				t.Errorf("email query %v", args[0])
 			}
 			writeMethods(w, []any{[]any{"Email/query", map[string]any{"ids": []string{"m2"}}, "q"}})
